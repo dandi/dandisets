@@ -14,7 +14,6 @@ registered with a GitHub account is needed for the second step.
 
 TODOs:
     - make work with released datalad (so return back special remote setup helpers)
-    - use ssh only for "pushurl" and regular "https" for url for github sibling
 
 Maybes:
     - do not push in here, push will be outside upon success of the entire hierarchy
@@ -23,7 +22,7 @@ Later TODOs
 
 - become aware of superdataset, add new subdatasets if created and ran
   not for a specific subdataset
-- parallelize across datasets or may be better files (would that be possible within 
+- parallelize across datasets or may be better files (would that be possible within
   dataset?) using DataLad's #5022 ConsumerProducer?
 
 """
@@ -62,7 +61,9 @@ log = logging.getLogger(Path(sys.argv[0]).name)
 
 @click.command()
 @click.option("--backup-remote", help="Name of the rclone remote to push to")
-@click.option("--gh-org", help="GitHub organization to create repositories under")
+@click.option(
+    "--gh-org", help="GitHub organization to create repositories under", required=True,
+)
 @click.option("-i", "--ignore-errors", is_flag=True)
 @click.option(
     "-J",
@@ -103,8 +104,8 @@ class DatasetInstantiator:
         self,
         assetstore_path: Path,
         target_path: Path,
+        gh_org,
         ignore_errors=False,
-        gh_org=None,
         re_filter=None,
         backup_remote=None,
         jobs=10,
@@ -164,12 +165,19 @@ class DatasetInstantiator:
                         reponame=ds.pathobj.name,
                         existing="skip",
                         name="github",
-                        access_protocol="ssh",
+                        access_protocol="https",
                         github_organization=self.gh_org,
                         publish_depends=self.backup_remote,
                     )
+                    ds.config.set(
+                        "remote.github.pushurl",
+                        f"git@github.com:{self.gh_org}/{ds.pathobj.name}.git",
+                        where="local",
+                    )
                     ds.config.set("branch.master.remote", "github", where="local")
-                    ds.config.set("branch.master.merge", "refs/heads/master", where="local")
+                    ds.config.set(
+                        "branch.master.merge", "refs/heads/master", where="local"
+                    )
                     log.info("Pushing to sibling")
                     ds.push(to="github", jobs=self.jobs)
 
