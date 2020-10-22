@@ -13,7 +13,6 @@ pushing to the GitHub remotes happens over SSH, so an SSH key that has been
 registered with a GitHub account is needed for the second step.
 
 TODOs:
-    - to set github as "upstream" , we also need git config branch.master.merge refs/heads/master
     - make work with released datalad (so return back special remote setup helpers)
     - use ssh only for "pushurl" and regular "https" for url for github sibling
 
@@ -170,6 +169,7 @@ class DatasetInstantiator:
                         publish_depends=self.backup_remote,
                     )
                     ds.config.set("branch.master.remote", "github", where="local")
+                    ds.config.set("branch.master.merge", "refs/heads/master", where="local")
                     log.info("Pushing to sibling")
                     ds.push(to="github", jobs=self.jobs)
 
