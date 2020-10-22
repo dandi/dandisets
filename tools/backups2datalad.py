@@ -14,6 +14,7 @@ registered with a GitHub account is needed for the second step.
 
 TODOs:
     - move to dandisets repo
+    - to set github as "upstream" , we also need git config branch.master.merge refs/heads/master
     - all logs should go under .git/dandi/logs -- do not "save" them at all
     - make work with released datalad (so return back special remote setup helpers)
     - use ssh only for "pushurl" and regular "https" for url for github sibling
