@@ -14,7 +14,6 @@ registered with a GitHub account is needed for the second step.
 
 TODOs:
     - to set github as "upstream" , we also need git config branch.master.merge refs/heads/master
-    - all logs should go under .git/dandi/logs -- do not "save" them at all
     - make work with released datalad (so return back special remote setup helpers)
     - use ssh only for "pushurl" and regular "https" for url for github sibling
 
@@ -411,7 +410,7 @@ def dataset_files(dspath):
 
 @contextmanager
 def dandi_logging(dandiset_path: Path):
-    logdir = dandiset_path / ".dandi" / "logs"
+    logdir = dandiset_path / ".git" / "dandi" / "logs"
     logdir.mkdir(exist_ok=True, parents=True)
     filename = "sync-{:%Y%m%d%H%M%SZ}-{}.log".format(datetime.utcnow(), os.getpid())
     logfile = logdir / filename
