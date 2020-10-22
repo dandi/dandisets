@@ -138,17 +138,16 @@ class DatasetInstantiator:
                     if self.backup_remote is not None:
                         ds.repo.init_remote(
                             self.backup_remote,
-                            [],
-                            type="rclone",
-                            external=True,
-                            config={
-                                "chunk": "1GB",
-                                "target": self.backup_remote,  # I made them matching
-                                "prefix": "dandi-dandisets/annexstore",
-                                "embedcreds": "no",
-                                "uuid": "727f466f-60c3-4778-90b2-b2332856c2f8"
+                            [
+                                "type=external",
+                                "externaltype=rclone",
+                                "chunk=1GB",
+                                f"target={self.backup_remote}",  # I made them matching
+                                "prefix=dandi-dandisets/annexstore",
+                                "embedcreds=no",
+                                "uuid=727f466f-60c3-4778-90b2-b2332856c2f8",
                                 # shared, initialized in 000003
-                            },
+                            ],
                         )
                         ds.repo._run_annex_command(
                             "untrust", annex_options=[self.backup_remote]
