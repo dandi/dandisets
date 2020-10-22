@@ -13,7 +13,6 @@ pushing to the GitHub remotes happens over SSH, so an SSH key that has been
 registered with a GitHub account is needed for the second step.
 
 TODOs:
-    - move to dandisets repo
     - to set github as "upstream" , we also need git config branch.master.merge refs/heads/master
     - all logs should go under .git/dandi/logs -- do not "save" them at all
     - make work with released datalad (so return back special remote setup helpers)
