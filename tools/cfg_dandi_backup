@@ -1,0 +1,38 @@
+#!/bin/bash
+
+set -eu
+export PS4='> '
+set -x
+
+# no longer used -- part of the ./backup2datalad script, kept for record
+exit 0
+
+# we will reuse the same annexstore across all of the
+git annex initremote dandi-dandisets-dropbox \
+     type=external externaltype=rclone chunk=1GB encryption=none target=dandi-dandisets-dropbox prefix=dandi-dandisets/annexstore embedcreds=no \
+     uuid=727f466f-60c3-4778-90b2-b2332856c2f8
+git annex untrust dandi-dandisets-dropbox
+git annex wanted dandi-dandisets-dropbox "(not metadata=distribution-restrictions=*)"
+git config remote.github.datalad-publish-depends dandi-dandisets-dropbox
+git config branch.master.remote github
+# datalad publish
+
+#dump from bash history
+#
+#  112  git annex initremote dandi-dandisets-dropbox type=external externaltype=rclone chunk=1GB encryption=none target=dandi-dandisets-dropbox prefix=dandi-dandisets/annexstore embedcreds=no
+#  113  git annex untrust dandi-dandisets-dropbox
+#  114  datalad ls -L .
+#  115  datalad copy --to=dandi-dandisets-dropbox -J5 .
+#  116  datalad publish --to=dandi-dandisets-dropbox -J5 .
+#  117  datalad push --to=dandi-dandisets-dropbox -J5 .
+#  118  git annex list
+#  119  git annex fsck --help
+#  120  git annex fsck --help | grep read
+#  121  git remote
+#  122  datalad siblings
+#  123  git config remote.github.datalad-publish-depends dandi-dandisets-dropbox
+#  124  cat .git/config
+#  125  datalad publish
+#  126  git config branch.master.remote github
+#  127  datalad publish
+#
