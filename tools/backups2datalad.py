@@ -12,10 +12,7 @@ token stored in the global Git config under `hub.oauthtoken`.  In addition,
 pushing to the GitHub remotes happens over SSH, so an SSH key that has been
 registered with a GitHub account is needed for the second step.
 
-TODOs:
-    - make work with released datalad (so return back special remote setup helpers)
-
-Maybes:
+Maybe TODO:
     - do not push in here, push will be outside upon success of the entire hierarchy
 
 Later TODOs
