@@ -24,8 +24,6 @@ Later TODOs
 
 """
 
-raise NotImplementedError("see above TODOs")
-
 from collections import deque
 from contextlib import contextmanager
 from copy import deepcopy
@@ -143,6 +141,7 @@ class DatasetInstantiator:
                                 "prefix=dandi-dandisets/annexstore",
                                 "embedcreds=no",
                                 "uuid=727f466f-60c3-4778-90b2-b2332856c2f8",
+                                "encryption=none",
                                 # shared, initialized in 000003
                             ],
                         )
