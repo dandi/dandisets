@@ -14,7 +14,7 @@ source ~/.bashrc-miniconda
 conda activate dandi-cli-dev
 
 cd "$ds"
-eval tools/backups2datalad.py \
+eval chronic tools/backups2datalad.py \
    --backup-remote dandi-dandisets-dropbox  \
    --gh-org dandisets \
    -J 5 \
