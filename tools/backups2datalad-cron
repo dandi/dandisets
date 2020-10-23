@@ -4,7 +4,7 @@ set -eu
 
 export PS1='$ '
 PS4='> '
-set -x
+#set -x
 
 girderdir=/mnt/backup/dandi/dandiarchive-s3-backup/ 
 ds=$(dirname "$0")
