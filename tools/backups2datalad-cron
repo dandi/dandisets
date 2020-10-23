@@ -1,0 +1,28 @@
+#!/bin/bash
+
+set -eu
+
+export PS1='$ '
+PS4='> '
+set -x
+
+girderdir=/mnt/backup/dandi/dandiarchive-s3-backup/ 
+ds=$(dirname "$0")
+ds=$(dirname "$ds")
+
+source ~/.bashrc-miniconda
+conda activate dandi-cli-dev
+
+cd "$ds"
+eval tools/backups2datalad.py \
+   --backup-remote dandi-dandisets-dropbox  \
+   --gh-org dandisets \
+   -J 5 \
+   "$girderdir" \
+   "$ds" \
+   "$*"
+datalad save -m "CRON update" -d .
+datalad push -J 5
+
+# we must be clean
+git diff --exit-code 
