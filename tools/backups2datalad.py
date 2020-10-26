@@ -28,6 +28,7 @@ from collections import deque
 from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime
+import json
 import logging
 import os
 from pathlib import Path
@@ -56,6 +57,7 @@ log = logging.getLogger(Path(sys.argv[0]).name)
 
 @click.command()
 @click.option("--backup-remote", help="Name of the rclone remote to push to")
+@click.option("-f", "--force", type=click.Choice(["check"]))
 @click.option(
     "--gh-org", help="GitHub organization to create repositories under", required=True,
 )
@@ -75,7 +77,15 @@ log = logging.getLogger(Path(sys.argv[0]).name)
 @click.argument("target", type=click.Path(file_okay=False))
 @click.argument("dandisets", nargs=-1)
 def main(
-    assetstore, target, dandisets, ignore_errors, gh_org, re_filter, backup_remote, jobs
+    assetstore,
+    target,
+    dandisets,
+    ignore_errors,
+    gh_org,
+    re_filter,
+    backup_remote,
+    jobs,
+    force,
 ):
     logging.basicConfig(
         format="%(asctime)s [%(levelname)-8s] %(name)s %(message)s",
@@ -91,6 +101,7 @@ def main(
         re_filter=re_filter and re.compile(re_filter),
         backup_remote=backup_remote,
         jobs=jobs,
+        force=force,
     ).run(dandisets)
 
 
@@ -104,6 +115,7 @@ class DatasetInstantiator:
         re_filter=None,
         backup_remote=None,
         jobs=10,
+        force=None,
     ):
         self.assetstore_path = assetstore_path
         self.target_path = target_path
@@ -112,6 +124,7 @@ class DatasetInstantiator:
         self.re_filter = re_filter
         self.backup_remote = backup_remote
         self.jobs = jobs
+        self.force = force
         self.session = None
         self._s3client = None
 
@@ -214,6 +227,13 @@ class DatasetInstantiator:
             local_assets = set(dataset_files(dsdir))
             local_assets.discard(dsdir / dandiset_metadata_file)
             asset_metadata = []
+            saved_metadata = {}
+            try:
+                with (dsdir / ".dandi" / "assets.json").open() as fp:
+                    for md in json.load(fp):
+                        saved_metadata[md["path"]] = md
+            except FileNotFoundError:
+                pass
             for a in assets:
                 dest = dsdir / a["path"].lstrip("/")
                 deststr = str(dest.relative_to(dsdir))
@@ -221,6 +241,14 @@ class DatasetInstantiator:
                 am = deepcopy(a)
                 am["modified"] = str(am["modified"])
                 asset_metadata.append(am)
+                if (
+                    self.force is None or "check" not in self.force
+                ) and am == saved_metadata.get(am["path"]):
+                    log.info(
+                        "Asset %s metadata unchanged; not taking any further action",
+                        a["path"],
+                    )
+                    continue
                 if self.re_filter and not self.re_filter.search(a["path"]):
                     log.info("Skipping asset %s", a["path"])
                     continue
