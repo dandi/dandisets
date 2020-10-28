@@ -244,7 +244,7 @@ class DatasetInstantiator:
                 if (
                     self.force is None or "check" not in self.force
                 ) and am == saved_metadata.get(am["path"]):
-                    log.info(
+                    log.debug(
                         "Asset %s metadata unchanged; not taking any further action",
                         a["path"],
                     )
