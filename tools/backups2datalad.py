@@ -244,13 +244,13 @@ class DatasetInstantiator:
                 if (
                     self.force is None or "check" not in self.force
                 ) and am == saved_metadata.get(am["path"]):
-                    log.info(
+                    log.debug(
                         "Asset %s metadata unchanged; not taking any further action",
                         a["path"],
                     )
                     continue
                 if self.re_filter and not self.re_filter.search(a["path"]):
-                    log.info("Skipping asset %s", a["path"])
+                    log.debug("Skipping asset %s", a["path"])
                     continue
                 log.info("Syncing asset %s", a["path"])
                 gid = a["girder"]["id"]
