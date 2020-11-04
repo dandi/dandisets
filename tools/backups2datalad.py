@@ -168,24 +168,29 @@ class DatasetInstantiator:
                         )
 
                 if self.sync_dataset(did, ds):
-                    log.info("Creating GitHub sibling for %s", ds.pathobj.name)
-                    ds.create_sibling_github(
-                        reponame=ds.pathobj.name,
-                        existing="skip",
-                        name="github",
-                        access_protocol="https",
-                        github_organization=self.gh_org,
-                        publish_depends=self.backup_remote,
-                    )
-                    ds.config.set(
-                        "remote.github.pushurl",
-                        f"git@github.com:{self.gh_org}/{ds.pathobj.name}.git",
-                        where="local",
-                    )
-                    ds.config.set("branch.master.remote", "github", where="local")
-                    ds.config.set(
-                        "branch.master.merge", "refs/heads/master", where="local"
-                    )
+                    if "github" not in ds.repo.get_remotes():
+                        log.info("Creating GitHub sibling for %s", ds.pathobj.name)
+                        ds.create_sibling_github(
+                            reponame=ds.pathobj.name,
+                            existing="skip",
+                            name="github",
+                            access_protocol="https",
+                            github_organization=self.gh_org,
+                            publish_depends=self.backup_remote,
+                        )
+                        ds.config.set(
+                            "remote.github.pushurl",
+                            f"git@github.com:{self.gh_org}/{ds.pathobj.name}.git",
+                            where="local",
+                        )
+                        ds.config.set("branch.master.remote", "github", where="local")
+                        ds.config.set(
+                            "branch.master.merge", "refs/heads/master", where="local"
+                        )
+                    else:
+                        log.debug(
+                            "GitHub remote already exists for %s", ds.pathobj.name
+                        )
                     log.info("Pushing to sibling")
                     ds.push(to="github", jobs=self.jobs)
 
