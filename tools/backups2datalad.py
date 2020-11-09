@@ -1,16 +1,23 @@
 #!/usr/bin/env python
 
-__requires__ = ["boto3", "click", "dandi", "datalad", "requests"]
+__requires__ = [
+    "boto3",
+    "click == 7.*",
+    "dandi >= 0.7.0",
+    "datalad",
+    "humanize",
+    "PyGitHub == 1.*",
+    "requests ~= 2.20",
+]
 
 """
-IMPORTANT NOTE ABOUT GIT CREDENTIALS
+IMPORTANT NOTE ABOUT GITHUB CREDENTIALS
 
-This script uses `datalad create-sibling-github` to create GitHub repositories
-that are then pushed to GitHub.  The first step requires either GitHub user
-credentials stored in the system's credentials store or else a GitHub OAuth
-token stored in the global Git config under `hub.oauthtoken`.  In addition,
-pushing to the GitHub remotes happens over SSH, so an SSH key that has been
-registered with a GitHub account is needed for the second step.
+This script interacts with the GitHub API (in order to create & configure
+repositories), and so it requires a GitHub OAuth token stored in the global Git
+config under `hub.oauthtoken`.  In addition, the script also pushes commits to
+GitHub over SSH, and so an SSH key that has been registered with a GitHub
+account is needed as well.
 
 Maybe TODO:
     - do not push in here, push will be outside upon success of the entire hierarchy
@@ -50,6 +57,8 @@ from dandi.utils import get_instance
 import datalad
 from datalad.api import Dataset
 from datalad.support.json_py import dump
+from github import Github
+from humanize import naturalsize
 import requests
 
 log = logging.getLogger(Path(sys.argv[0]).name)
@@ -73,6 +82,9 @@ log = logging.getLogger(Path(sys.argv[0]).name)
 @click.option("--pdb", is_flag=True, help="Drop into debugger if an error occurs")
 @click.option(
     "--re-filter", help="Only consider assets matching the given regex", metavar="REGEX"
+)
+@click.option(
+    "--update-github-metadata", is_flag=True, help="Only update repositories' metadata",
 )
 @click.argument("assetstore", type=click.Path(exists=True, file_okay=False))
 @click.argument("target", type=click.Path(file_okay=False))
@@ -98,7 +110,7 @@ def main(
         level=logging.INFO,
         force=True,  # Override dandi's settings
     )
-    DatasetInstantiator(
+    di = DatasetInstantiator(
         assetstore_path=Path(assetstore),
         target_path=Path(target),
         ignore_errors=ignore_errors,
@@ -107,7 +119,11 @@ def main(
         backup_remote=backup_remote,
         jobs=jobs,
         force=force,
-    ).run(dandisets)
+    )
+    if update_github_metadata:
+        di.update_github_metadata(dandisets)
+    else:
+        di.run(dandisets)
 
 
 class DatasetInstantiator:
@@ -131,7 +147,9 @@ class DatasetInstantiator:
         self.jobs = jobs
         self.force = force
         self.session = None
+        self._dandi_client = None
         self._s3client = None
+        self._gh = None
 
     def run(self, dandisets=()):
         if not (self.assetstore_path / "girder-assetstore").exists():
@@ -174,9 +192,9 @@ class DatasetInstantiator:
 
                 if self.sync_dataset(did, ds):
                     if "github" not in ds.repo.get_remotes():
-                        log.info("Creating GitHub sibling for %s", ds.pathobj.name)
+                        log.info("Creating GitHub sibling for %s", did)
                         ds.create_sibling_github(
-                            reponame=ds.pathobj.name,
+                            reponame=did,
                             existing="skip",
                             name="github",
                             access_protocol="https",
@@ -185,19 +203,23 @@ class DatasetInstantiator:
                         )
                         ds.config.set(
                             "remote.github.pushurl",
-                            f"git@github.com:{self.gh_org}/{ds.pathobj.name}.git",
+                            f"git@github.com:{self.gh_org}/{did}.git",
                             where="local",
                         )
                         ds.config.set("branch.master.remote", "github", where="local")
                         ds.config.set(
                             "branch.master.merge", "refs/heads/master", where="local"
                         )
-                    else:
-                        log.debug(
-                            "GitHub remote already exists for %s", ds.pathobj.name
+                        self.gh.get_repo(f"{self.gh_org}/{did}").edit(
+                            homepage=f"https://identifiers.org/DANDI:{did}"
                         )
+                    else:
+                        log.debug("GitHub remote already exists for %s", did)
                     log.info("Pushing to sibling")
                     ds.push(to="github", jobs=self.jobs)
+                    self.gh.get_repo(f"{self.gh_org}/{did}").edit(
+                        description=self.describe_dandiset(did)
+                    )
 
     def sync_dataset(self, dandiset_id, ds):
         # Returns true if any changes were committed to the repository
@@ -365,21 +387,42 @@ class DatasetInstantiator:
             logfile.unlink()
             return False
 
-    @staticmethod
-    def get_dandiset_ids():
-        dandi_instance = get_instance("dandi")
-        client = girder.get_client(dandi_instance.girder, authenticate=False)
-        offset = 0
-        per_page = 50
-        while True:
-            dandisets = client.get(
-                "dandi", parameters={"limit": per_page, "offset": offset}
+    def update_github_metadata(self, dandisets=()):
+        for did in dandisets or self.get_dandiset_ids():
+            log.info("Setting metadata for %s/%s ...", self.gh_org, did)
+            self.gh.get_repo(f"{self.gh_org}/{did}").edit(
+                homepage=f"https://identifiers.org/DANDI:{did}",
+                description=self.describe_dandiset(did),
             )
-            if not dandisets:
-                break
-            for d in dandisets:
-                yield d["meta"]["dandiset"]["identifier"]
-            offset += len(dandisets)
+
+    @property
+    def dandi_client(self):
+        if self._dandi_client is None:
+            dandi_instance = get_instance("dandi")
+            self._dandi_client = girder.get_client(
+                dandi_instance.girder, authenticate=False
+            )
+        return self._dandi_client
+
+    def get_dandiset_ids(self):
+        for d in self.dandi_client.listResource("dandi"):
+            yield d["meta"]["dandiset"]["identifier"]
+
+    def describe_dandiset(self, dandiset_id):
+        about = self.dandi_client.getResource("dandi", dandiset_id)["meta"]["dandiset"]
+        desc = about["name"]
+        contact = ", ".join(
+            c["name"]
+            for c in about.get("contributors", [])
+            if "ContactPerson" in c.get("roles", []) and "name" in c
+        )
+        stats = self.dandi_client.getResource("dandi", dandiset_id, "stats")
+        num_files = stats["items"]
+        size = naturalsize(stats["bytes"])
+        if contact:
+            return f"{num_files} files, {size}, {contact}, {desc}"
+        else:
+            return f"{num_files} files, {size}, {desc}"
 
     def get_file_bucket_url(self, girder_id):
         r = (self.session or requests).head(
@@ -399,6 +442,15 @@ class DatasetInstantiator:
                 "s3", config=Config(signature_version=UNSIGNED)
             )
         return self._s3client
+
+    @property
+    def gh(self):
+        if self._gh is None:
+            token = subprocess.check_output(
+                ["git", "config", "hub.oauthtoken"], universal_newlines=True
+            ).strip()
+            self._gh = Github(token)
+        return self._gh
 
     @staticmethod
     def mklink(src, dest):
