@@ -79,6 +79,7 @@ log = logging.getLogger(Path(sys.argv[0]).name)
     help="How many parallel jobs to use when pushing",
     show_default=True,
 )
+@click.option("--pdb", is_flag=True, help="Drop into debugger if an error occurs")
 @click.option(
     "--re-filter", help="Only consider assets matching the given regex", metavar="REGEX"
 )
@@ -99,7 +100,10 @@ def main(
     jobs,
     force,
     update_github_metadata,
+    pdb,
 ):
+    if pdb:
+        sys.excepthook = pdb_excepthook
     logging.basicConfig(
         format="%(asctime)s [%(levelname)-8s] %(name)s %(message)s",
         datefmt="%Y-%m-%dT%H:%M:%S%z",
@@ -259,7 +263,11 @@ class DatasetInstantiator:
             try:
                 with (dsdir / ".dandi" / "assets.json").open() as fp:
                     for md in json.load(fp):
-                        saved_metadata[md["path"]] = md
+                        if isinstance(md, str):
+                            # Old version of assets.json; ignore
+                            pass
+                        else:
+                            saved_metadata[md["path"]] = md
             except FileNotFoundError:
                 pass
             for a in assets:
@@ -518,6 +526,20 @@ def dandi_logging(dandiset_path: Path):
         raise
     finally:
         root.removeHandler(handler)
+
+
+def is_interactive():
+    """Return True if all in/outs are tty"""
+    return sys.stdin.isatty() and sys.stdout.isatty() and sys.stderr.isatty()
+
+
+def pdb_excepthook(exc_type, exc_value, tb):
+    import traceback
+    traceback.print_exception(exc_type, exc_value, tb)
+    print()
+    if is_interactive():
+        import pdb
+        pdb.post_mortem(tb)
 
 
 if __name__ == "__main__":

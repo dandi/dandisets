@@ -11,7 +11,7 @@ ds=$(dirname "$0")
 ds=$(dirname "$ds")
 
 source ~/.bashrc-miniconda
-conda activate dandi-cli-dev
+conda activate dandisets
 
 cd "$ds"
 eval tools/backups2datalad.py \
