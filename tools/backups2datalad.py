@@ -236,7 +236,11 @@ class DatasetInstantiator:
             try:
                 with (dsdir / ".dandi" / "assets.json").open() as fp:
                     for md in json.load(fp):
-                        saved_metadata[md["path"]] = md
+                        if isinstance(md, str):
+                            # Old version of assets.json; ignore
+                            pass
+                        else:
+                            saved_metadata[md["path"]] = md
             except FileNotFoundError:
                 pass
             for a in assets:
