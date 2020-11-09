@@ -1,16 +1,22 @@
 #!/usr/bin/env python
 
-__requires__ = ["boto3", "click", "dandi", "datalad", "requests"]
+__requires__ = [
+    "boto3",
+    "click == 7.*",
+    "dandi >= 0.7.0",
+    "datalad",
+    "PyGitHub == 1.*",
+    "requests ~= 2.20",
+]
 
 """
-IMPORTANT NOTE ABOUT GIT CREDENTIALS
+IMPORTANT NOTE ABOUT GITHUB CREDENTIALS
 
-This script uses `datalad create-sibling-github` to create GitHub repositories
-that are then pushed to GitHub.  The first step requires either GitHub user
-credentials stored in the system's credentials store or else a GitHub OAuth
-token stored in the global Git config under `hub.oauthtoken`.  In addition,
-pushing to the GitHub remotes happens over SSH, so an SSH key that has been
-registered with a GitHub account is needed for the second step.
+This script interacts with the GitHub API (in order to create & configure
+repositories), and so it requires a GitHub OAuth token stored in the global Git
+config under `hub.oauthtoken`.  In addition, the script also pushes commits to
+GitHub over SSH, and so an SSH key that has been registered with a GitHub
+account is needed as well.
 
 Maybe TODO:
     - do not push in here, push will be outside upon success of the entire hierarchy
@@ -50,6 +56,7 @@ from dandi.utils import get_instance
 import datalad
 from datalad.api import Dataset
 from datalad.support.json_py import dump
+from github import Github
 import requests
 
 log = logging.getLogger(Path(sys.argv[0]).name)
@@ -126,7 +133,9 @@ class DatasetInstantiator:
         self.jobs = jobs
         self.force = force
         self.session = None
+        self._dandi_client = False
         self._s3client = None
+        self._gh = None
 
     def run(self, dandisets=()):
         if not (self.assetstore_path / "girder-assetstore").exists():
@@ -169,9 +178,9 @@ class DatasetInstantiator:
 
                 if self.sync_dataset(did, ds):
                     if "github" not in ds.repo.get_remotes():
-                        log.info("Creating GitHub sibling for %s", ds.pathobj.name)
+                        log.info("Creating GitHub sibling for %s", did)
                         ds.create_sibling_github(
-                            reponame=ds.pathobj.name,
+                            reponame=did,
                             existing="skip",
                             name="github",
                             access_protocol="https",
@@ -180,19 +189,23 @@ class DatasetInstantiator:
                         )
                         ds.config.set(
                             "remote.github.pushurl",
-                            f"git@github.com:{self.gh_org}/{ds.pathobj.name}.git",
+                            f"git@github.com:{self.gh_org}/{did}.git",
                             where="local",
                         )
                         ds.config.set("branch.master.remote", "github", where="local")
                         ds.config.set(
                             "branch.master.merge", "refs/heads/master", where="local"
                         )
-                    else:
-                        log.debug(
-                            "GitHub remote already exists for %s", ds.pathobj.name
+                        self.gh.get_repo(f"{self.gh_org}/{did}").edit(
+                            homepage=f"https://identifiers.org/DANDI:{did}"
                         )
+                    else:
+                        log.debug("GitHub remote already exists for %s", did)
                     log.info("Pushing to sibling")
                     ds.push(to="github", jobs=self.jobs)
+                    self.gh.get_repo(f"{self.gh_org}/{did}").edit(
+                        description=self.describe_dandiset(did)
+                    )
 
     def sync_dataset(self, dandiset_id, ds):
         # Returns true if any changes were committed to the repository
@@ -356,12 +369,32 @@ class DatasetInstantiator:
             logfile.unlink()
             return False
 
-    @staticmethod
-    def get_dandiset_ids():
-        dandi_instance = get_instance("dandi")
-        client = girder.get_client(dandi_instance.girder, authenticate=False)
-        for d in client.listResource("dandi"):
+    @property
+    def dandi_client(self):
+        if self._dandi_client is None:
+            dandi_instance = get_instance("dandi")
+            self._dandi_client = girder.get_client(
+                dandi_instance.girder, authenticate=False
+            )
+        return self._dandi_client
+
+    def get_dandiset_ids(self):
+        for d in self.dandi_client.listResource("dandi"):
             yield d["meta"]["dandiset"]["identifier"]
+
+    def describe_dandiset(self, dandiset_id):
+        about = self.dandi_client.getResource("dandi", dandiset_id)["meta"]["dandiset"]
+        desc = about["name"]
+        contact = ", ".join(
+            c["name"] for c in about["contributors"] if "ContactPerson" in c["roles"]
+        )
+        stats = self.dandi_client.getResource("dandi", dandiset_id, "stats")
+        num_files = stats["items"]
+        size = bytes2iso(stats["bytes"])
+        if contact:
+            return f"{num_files} files, {size}, {contact}, {desc}"
+        else:
+            return f"{num_files} files, {size}, {desc}"
 
     def get_file_bucket_url(self, girder_id):
         r = (self.session or requests).head(
@@ -381,6 +414,15 @@ class DatasetInstantiator:
                 "s3", config=Config(signature_version=UNSIGNED)
             )
         return self._s3client
+
+    @property
+    def gh(self):
+        if self._gh is None:
+            token = subprocess.check_output(
+                ["git", "config", "hub.oauthtoken"], universal_newlines=True
+            ).strip()
+            self._gh = Github(token)
+        return self._gh
 
     @staticmethod
     def mklink(src, dest):
@@ -456,6 +498,29 @@ def dandi_logging(dandiset_path: Path):
         raise
     finally:
         root.removeHandler(handler)
+
+
+def bytes2iso(numbytes):
+    """
+    >>> bytes2iso(512)
+    '512 B'
+    >>> bytes2iso(1024)
+    '1.00 kB'
+    >>> bytes2iso(1000000)
+    '976.56 kB'
+    >>> bytes2iso(2334597576389)
+    '2.12 TB'
+    >>> bytes2iso(1152921504606846976000000)
+    '1000000.00 EB'
+    """
+    size = numbytes
+    sizestr = f"{size} B"
+    for prefix in "kMGTPE":
+        if size < 1024:
+            return sizestr
+        size /= 1024
+        sizestr = f"{size:.2f} {prefix}B"
+    return sizestr
 
 
 if __name__ == "__main__":
