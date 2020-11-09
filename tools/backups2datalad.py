@@ -360,17 +360,8 @@ class DatasetInstantiator:
     def get_dandiset_ids():
         dandi_instance = get_instance("dandi")
         client = girder.get_client(dandi_instance.girder, authenticate=False)
-        offset = 0
-        per_page = 50
-        while True:
-            dandisets = client.get(
-                "dandi", parameters={"limit": per_page, "offset": offset}
-            )
-            if not dandisets:
-                break
-            for d in dandisets:
-                yield d["meta"]["dandiset"]["identifier"]
-            offset += len(dandisets)
+        for d in client.listResource("dandi"):
+            yield d["meta"]["dandiset"]["identifier"]
 
     def get_file_bucket_url(self, girder_id):
         r = (self.session or requests).head(
