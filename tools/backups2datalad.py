@@ -83,7 +83,7 @@ log = logging.getLogger(Path(sys.argv[0]).name)
     "--re-filter", help="Only consider assets matching the given regex", metavar="REGEX"
 )
 @click.option(
-    "--update-metadata", is_flag=True, help="Only update repositories' metadata",
+    "--update-github-metadata", is_flag=True, help="Only update repositories' metadata",
 )
 @click.argument("assetstore", type=click.Path(exists=True, file_okay=False))
 @click.argument("target", type=click.Path(file_okay=False))
@@ -98,7 +98,7 @@ def main(
     backup_remote,
     jobs,
     force,
-    update_metadata,
+    update_github_metadata,
 ):
     logging.basicConfig(
         format="%(asctime)s [%(levelname)-8s] %(name)s %(message)s",
@@ -116,8 +116,8 @@ def main(
         jobs=jobs,
         force=force,
     )
-    if update_metadata:
-        di.update_metadata(dandisets)
+    if update_github_metadata:
+        di.update_github_metadata(dandisets)
     else:
         di.run(dandisets)
 
@@ -379,7 +379,7 @@ class DatasetInstantiator:
             logfile.unlink()
             return False
 
-    def update_metadata(self, dandisets=()):
+    def update_github_metadata(self, dandisets=()):
         for did in dandisets or self.get_dandiset_ids():
             log.info("Setting metadata for %s/%s ...", self.gh_org, did)
             self.gh.get_repo(f"{self.gh_org}/{did}").edit(
