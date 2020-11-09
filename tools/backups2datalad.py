@@ -81,9 +81,7 @@ log = logging.getLogger(Path(sys.argv[0]).name)
     "--re-filter", help="Only consider assets matching the given regex", metavar="REGEX"
 )
 @click.option(
-    "--update-metadata",
-    is_flag=True,
-    help="Only update repositories' metadata",
+    "--update-metadata", is_flag=True, help="Only update repositories' metadata",
 )
 @click.argument("assetstore", type=click.Path(exists=True, file_okay=False))
 @click.argument("target", type=click.Path(file_okay=False))
@@ -143,7 +141,7 @@ class DatasetInstantiator:
         self.jobs = jobs
         self.force = force
         self.session = None
-        self._dandi_client = False
+        self._dandi_client = None
         self._s3client = None
         self._gh = None
 
@@ -381,6 +379,7 @@ class DatasetInstantiator:
 
     def update_metadata(self, dandisets=()):
         for did in dandisets or self.get_dandiset_ids():
+            log.info("Setting metadata for %s/%s ...", self.gh_org, did)
             self.gh.get_repo(f"{self.gh_org}/{did}").edit(
                 homepage=f"https://identifiers.org/DANDI:{did}",
                 description=self.describe_dandiset(did),
@@ -403,7 +402,9 @@ class DatasetInstantiator:
         about = self.dandi_client.getResource("dandi", dandiset_id)["meta"]["dandiset"]
         desc = about["name"]
         contact = ", ".join(
-            c["name"] for c in about["contributors"] if "ContactPerson" in c["roles"]
+            c["name"]
+            for c in about.get("contributors", [])
+            if "ContactPerson" in c.get("roles", []) and "name" in c
         )
         stats = self.dandi_client.getResource("dandi", dandiset_id, "stats")
         num_files = stats["items"]
