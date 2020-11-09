@@ -5,6 +5,7 @@ __requires__ = [
     "click == 7.*",
     "dandi >= 0.7.0",
     "datalad",
+    "humanize",
     "PyGitHub == 1.*",
     "requests ~= 2.20",
 ]
@@ -57,6 +58,7 @@ import datalad
 from datalad.api import Dataset
 from datalad.support.json_py import dump
 from github import Github
+from humanize import naturalsize
 import requests
 
 log = logging.getLogger(Path(sys.argv[0]).name)
@@ -408,7 +410,7 @@ class DatasetInstantiator:
         )
         stats = self.dandi_client.getResource("dandi", dandiset_id, "stats")
         num_files = stats["items"]
-        size = bytes2iso(stats["bytes"])
+        size = naturalsize(stats["bytes"])
         if contact:
             return f"{num_files} files, {size}, {contact}, {desc}"
         else:
@@ -516,29 +518,6 @@ def dandi_logging(dandiset_path: Path):
         raise
     finally:
         root.removeHandler(handler)
-
-
-def bytes2iso(numbytes):
-    """
-    >>> bytes2iso(512)
-    '512 B'
-    >>> bytes2iso(1024)
-    '1.00 kB'
-    >>> bytes2iso(1000000)
-    '976.56 kB'
-    >>> bytes2iso(2334597576389)
-    '2.12 TB'
-    >>> bytes2iso(1152921504606846976000000)
-    '1000000.00 EB'
-    """
-    size = numbytes
-    sizestr = f"{size} B"
-    for prefix in "kMGTPE":
-        if size < 1024:
-            return sizestr
-        size /= 1024
-        sizestr = f"{size:.2f} {prefix}B"
-    return sizestr
 
 
 if __name__ == "__main__":
