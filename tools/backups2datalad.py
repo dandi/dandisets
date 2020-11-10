@@ -349,6 +349,10 @@ class DatasetInstantiator:
                             "Asset not found in assetstore; downloading from %s",
                             bucket_url,
                         )
+                        try:
+                            dest.unlink()
+                        except FileNotFoundError:
+                            pass
                         ds.download_url(urls=bucket_url, path=deststr)
                     if latest_mtime is None or mtime > latest_mtime:
                         latest_mtime = mtime
