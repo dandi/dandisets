@@ -66,6 +66,9 @@ log = logging.getLogger(Path(sys.argv[0]).name)
 
 @click.command()
 @click.option("--backup-remote", help="Name of the rclone remote to push to")
+@click.option(
+    "-e", "--exclude", help="Skip dandisets matching the given regex", metavar="REGEX"
+)
 @click.option("-f", "--force", type=click.Choice(["check"]))
 @click.option(
     "--gh-org", help="GitHub organization to create repositories under", required=True,
@@ -101,6 +104,7 @@ def main(
     force,
     update_github_metadata,
     pdb,
+    exclude,
 ):
     if pdb:
         sys.excepthook = pdb_excepthook
@@ -121,9 +125,9 @@ def main(
         force=force,
     )
     if update_github_metadata:
-        di.update_github_metadata(dandisets)
+        di.update_github_metadata(dandisets, exclude)
     else:
-        di.run(dandisets)
+        di.run(dandisets, exclude)
 
 
 class DatasetInstantiator:
@@ -151,7 +155,7 @@ class DatasetInstantiator:
         self._s3client = None
         self._gh = None
 
-    def run(self, dandisets=()):
+    def run(self, dandisets=(), exclude=None):
         if not (self.assetstore_path / "girder-assetstore").exists():
             raise RuntimeError(
                 "Given assetstore path does not contain girder-assetstore folder"
@@ -160,6 +164,9 @@ class DatasetInstantiator:
         datalad.cfg.set("datalad.repo.backend", "SHA256E", where="override")
         with requests.Session() as self.session:
             for did in dandisets or self.get_dandiset_ids():
+                if exclude is not None and re.search(exclude, did):
+                    log.debug("Skipping dandiset %s", did)
+                    continue
                 dsdir = self.target_path / did
                 log.info("Syncing Dandiset %s", did)
                 ds = Dataset(str(dsdir))
@@ -231,7 +238,7 @@ class DatasetInstantiator:
         def get_annex_hash(filepath):
             # Disabled caching since file could change
             # TODO: just use fscacher ;)
-            if True: # filepath not in hash_mem:
+            if True:  # filepath not in hash_mem:
                 relpath = str(filepath.relative_to(dsdir))
                 if ds.repo.is_under_annex(relpath, batch=True):
                     hash_mem[filepath] = (
@@ -393,8 +400,11 @@ class DatasetInstantiator:
             logfile.unlink()
             return False
 
-    def update_github_metadata(self, dandisets=()):
+    def update_github_metadata(self, dandisets=(), exclude=None):
         for did in dandisets or self.get_dandiset_ids():
+            if exclude is not None and re.search(exclude, did):
+                log.debug("Skipping dandiset %s", did)
+                continue
             log.info("Setting metadata for %s/%s ...", self.gh_org, did)
             self.gh.get_repo(f"{self.gh_org}/{did}").edit(
                 homepage=f"https://identifiers.org/DANDI:{did}",
@@ -541,10 +551,12 @@ def is_interactive():
 
 def pdb_excepthook(exc_type, exc_value, tb):
     import traceback
+
     traceback.print_exception(exc_type, exc_value, tb)
     print()
     if is_interactive():
         import pdb
+
         pdb.post_mortem(tb)
 
 
