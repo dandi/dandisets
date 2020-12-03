@@ -5,6 +5,7 @@ __requires__ = [
     "click == 7.*",
     "dandi >= 0.7.0",
     "datalad",
+    "fscacher",
     "humanize",
     "PyGitHub == 1.*",
     "requests ~= 2.20",
@@ -57,6 +58,7 @@ from dandi.utils import get_instance
 import datalad
 from datalad.api import Dataset
 from datalad.support.json_py import dump
+from fscacher import PersistentCache
 from github import Github
 from humanize import naturalsize
 import requests
@@ -233,20 +235,16 @@ class DatasetInstantiator:
         if ds.repo.dirty:
             raise RuntimeError("Dirty repository; clean or save before running")
         digester = Digester(digests=["sha256"])
-        hash_mem = {}
+        cache = PersistentCache("backups2datalad")
+        cache.clear()
 
+        @cache.memoize_path
         def get_annex_hash(filepath):
-            # Disabled caching since file could change
-            # TODO: just use fscacher ;)
-            if True:  # filepath not in hash_mem:
-                relpath = str(filepath.relative_to(dsdir))
-                if ds.repo.is_under_annex(relpath, batch=True):
-                    hash_mem[filepath] = (
-                        ds.repo.get_file_key(relpath).split("-")[-1].partition(".")[0]
-                    )
-                else:
-                    hash_mem[filepath] = digester(filepath)["sha256"]
-            return hash_mem[filepath]
+            relpath = str(Path(filepath).relative_to(dsdir))
+            if ds.repo.is_under_annex(relpath, batch=True):
+                return ds.repo.get_file_key(relpath).split("-")[-1].partition(".")[0]
+            else:
+                return digester(filepath)["sha256"]
 
         dsdir = ds.pathobj
         latest_mtime = None
