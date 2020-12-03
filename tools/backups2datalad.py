@@ -42,6 +42,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+from time import sleep
 from urllib.parse import urlparse, urlunparse
 
 import boto3
@@ -441,10 +442,18 @@ class DatasetInstantiator:
             return f"{num_files} files, {size}, {desc}"
 
     def get_file_bucket_url(self, girder_id):
-        r = (self.session or requests).head(
-            f"https://girder.dandiarchive.org/api/v1/file/{girder_id}/download"
-        )
-        r.raise_for_status()
+        while True:
+            r = (self.session or requests).head(
+                f"https://girder.dandiarchive.org/api/v1/file/{girder_id}/download"
+            )
+            if r.status_code >= 500:
+                log.debug(
+                    "girder.dandiarchive.org returned %d; retrying", r.status_code
+                )
+                sleep(0.5)
+            else:
+                r.raise_for_status()
+                break
         urlbits = urlparse(r.headers["Location"])
         s3meta = self.s3client.get_object(
             Bucket="dandiarchive", Key=urlbits.path.lstrip("/")
