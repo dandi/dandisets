@@ -229,7 +229,9 @@ class DatasetInstantiator:
         hash_mem = {}
 
         def get_annex_hash(filepath):
-            if filepath not in hash_mem:
+            # Disabled caching since file could change
+            # TODO: just use fscacher ;)
+            if True: # filepath not in hash_mem:
                 relpath = str(filepath.relative_to(dsdir))
                 if ds.repo.is_under_annex(relpath, batch=True):
                     hash_mem[filepath] = (
