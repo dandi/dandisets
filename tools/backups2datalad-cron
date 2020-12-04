@@ -18,11 +18,15 @@ eval tools/backups2datalad.py \
    --backup-remote dandi-dandisets-dropbox  \
    --gh-org dandisets \
    -J 5 \
+   -e '000003$' \
    "$girderdir" \
    "$ds" \
    "$*"
-datalad save -m "CRON update" -d .
-datalad push -J 5
+# TODO - save only the ones which were updated
+#  probably should be done by backups2datalad.py itself!
+# TEMP: disable since 00003 needs fixing
+#datalad save -m "CRON update" -d . 00*
+#datalad push -J 5
 
 # we must be clean
 git diff --exit-code 
