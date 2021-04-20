@@ -49,7 +49,6 @@ from botocore.client import Config
 import click
 from dandi.consts import dandiset_metadata_file
 from dandi.dandiapi import DandiAPIClient
-from dandi.dandiarchive import navigate_url
 from dandi.dandiset import APIDandiset
 from dandi.support.digests import Digester
 from dandi.utils import ensure_datetime, get_instance
@@ -251,9 +250,8 @@ class DatasetInstantiator:
         updated = 0
         deleted = 0
 
-        with dandi_logging(dsdir) as logfile, navigate_url(
-            f"https://api.dandiarchive.org/api/dandisets/{dandiset_id}/versions//draft/"
-        ) as (_, dandiset, assets):
+        with dandi_logging(dsdir) as logfile:
+            dandiset = self.dandi_client.get_dandiset(dandiset_id, "draft")
             log.info("Updating metadata file")
             try:
                 (dsdir / dandiset_metadata_file).unlink()
@@ -276,7 +274,9 @@ class DatasetInstantiator:
                             saved_metadata[md["path"].lstrip("/")] = md
             except FileNotFoundError:
                 pass
-            for a in assets:
+            for a in self.dandi_client.get_dandiset_assets(
+                dandiset_id, "draft", include_metadata=True
+            ):
                 dest = dsdir / a["path"]
                 deststr = str(dest.relative_to(dsdir))
                 local_assets.discard(dest)
