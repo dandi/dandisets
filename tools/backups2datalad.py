@@ -303,6 +303,10 @@ class DatasetInstantiator:
                 bucket_url = self.get_file_bucket_url(
                     dandiset_id, "draft", a["asset_id"]
                 )
+                download_url = (
+                    f"https://api.dandiarchive.org/api/dandisets/{dandiset_id}"
+                    f"/versions/draft/assets/{a['asset_id']}/download/"
+                )
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 if not dest.exists():
                     log.info("Asset not in dataset; will copy")
@@ -351,6 +355,8 @@ class DatasetInstantiator:
                         if ds.repo.is_under_annex(deststr, batch=True):
                             log.info("Adding URL %s to asset", bucket_url)
                             ds.repo.add_url_to_file(deststr, bucket_url, batch=True)
+                            log.info("Adding URL %s to asset", download_url)
+                            ds.repo.add_url_to_file(deststr, download_url, batch=True)
                         else:
                             log.info("File is not managed by git annex; not adding URL")
                     else:
@@ -363,6 +369,8 @@ class DatasetInstantiator:
                         except FileNotFoundError:
                             pass
                         ds.download_url(urls=bucket_url, path=deststr)
+                        log.info("Adding URL %s to asset", download_url)
+                        ds.repo.add_url_to_file(deststr, download_url, batch=True)
                     if latest_mtime is None or mtime > latest_mtime:
                         latest_mtime = mtime
                 if dandi_hash is not None:
