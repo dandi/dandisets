@@ -356,7 +356,14 @@ class DatasetInstantiator:
                             log.info("Adding URL %s to asset", bucket_url)
                             ds.repo.add_url_to_file(deststr, bucket_url, batch=True)
                             log.info("Adding URL %s to asset", download_url)
-                            ds.repo.add_url_to_file(deststr, download_url, batch=True)
+                            relpath = str(Path(dest).relative_to(dsdir))
+                            ds.repo.call_annex(
+                                [
+                                    "registerurl",
+                                    ds.repo.get_file_key(relpath),
+                                    download_url,
+                                ]
+                            )
                         else:
                             log.info("File is not managed by git annex; not adding URL")
                     else:
@@ -369,8 +376,18 @@ class DatasetInstantiator:
                         except FileNotFoundError:
                             pass
                         ds.download_url(urls=bucket_url, path=deststr)
-                        log.info("Adding URL %s to asset", download_url)
-                        ds.repo.add_url_to_file(deststr, download_url, batch=True)
+                        if ds.repo.is_under_annex(deststr, batch=True):
+                            log.info("Adding URL %s to asset", download_url)
+                            relpath = str(Path(dest).relative_to(dsdir))
+                            ds.repo.call_annex(
+                                [
+                                    "registerurl",
+                                    ds.repo.get_file_key(relpath),
+                                    download_url,
+                                ]
+                            )
+                        else:
+                            log.info("File is not managed by git annex; not adding URL")
                     if latest_mtime is None or mtime > latest_mtime:
                         latest_mtime = mtime
                 if dandi_hash is not None:
