@@ -460,7 +460,8 @@ class DatasetInstantiator:
             return f"{num_files} files, {size}, {desc}"
 
     def get_file_bucket_url(self, dandiset_id, version_id, asset_id):
-        r = self.dandi_client.head(
+        r = self.dandi_client.send_request(
+            "HEAD",
             f"/dandisets/{dandiset_id}/versions/{version_id}/assets/{asset_id}"
             "/download/",
             json_resp=False,
