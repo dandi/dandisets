@@ -50,7 +50,7 @@ import click
 from dandi.consts import dandiset_metadata_file
 from dandi.dandiapi import DandiAPIClient
 from dandi.dandiset import APIDandiset
-from dandi.support.digests import Digester
+from dandi.support.digests import Digester, get_digest
 from dandi.utils import ensure_datetime, get_instance
 import datalad
 from datalad.api import Dataset
@@ -298,8 +298,8 @@ class DatasetInstantiator:
                     dandi_hash = a["metadata"]["digest"]["dandi:sha2-256"]
                 except KeyError:
                     dandi_hash = None
-                if dandi_hash is None:
                     log.warning("Asset metadata does not include sha256 hash")
+                dandi_etag = a["metadata"]["digest"]["dandi:dandi-etag"]
                 mtime = ensure_datetime(a["metadata"]["dateModified"])
                 bucket_url = self.get_file_bucket_url(
                     dandiset_id, "draft", a["asset_id"]
@@ -327,19 +327,18 @@ class DatasetInstantiator:
                         to_update = True
                         updated += 1
                 else:
-                    sz = dest.stat().st_size
-                    if sz == a["size"]:
+                    if dandi_etag == get_digest(dest, "dandi-etag"):
                         log.info(
-                            "Asset in dataset, hash not available,"
-                            " and size is unchanged; will not update"
+                            "Asset in dataset, and etag shows no modification;"
+                            " will not update"
                         )
                         to_update = False
                     else:
-                        raise RuntimeError(
-                            f"Size mismatch for {dest.relative_to(self.target_path)}!"
-                            f"  Dandiarchive reports {a['size']},"
-                            f" local asset is size {sz}"
+                        log.info(
+                            "Asset in dataset, and etag shows modification; will update"
                         )
+                        to_update = True
+                        updated += 1
                 if to_update:
                     src = self.assetstore_path / urlparse(bucket_url).path.lstrip("/")
                     if src.exists():
@@ -381,6 +380,14 @@ class DatasetInstantiator:
                             f"Hash mismatch for {dest.relative_to(self.target_path)}!"
                             f"  Dandiarchive reports {dandi_hash},"
                             f" datalad reports {annex_key}"
+                        )
+                else:
+                    annex_etag = get_digest(dest, "dandi-etag")
+                    if dandi_etag != annex_etag:
+                        raise RuntimeError(
+                            f"ETag mismatch for {dest.relative_to(self.target_path)}!"
+                            f"  Dandiarchive reports {dandi_hash},"
+                            f" file has {annex_etag}"
                         )
             for a in local_assets:
                 astr = str(a.relative_to(dsdir))
