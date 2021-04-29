@@ -3,6 +3,7 @@
 __requires__ = [
     "boto3",
     "click == 7.*",
+    "click-loglevel ~= 0.2",
     "dandi >= 0.14.0",
     "datalad",
     "fscacher",
@@ -47,6 +48,7 @@ import boto3
 from botocore import UNSIGNED
 from botocore.client import Config
 import click
+from click_loglevel import LogLevel
 from dandi.consts import dandiset_metadata_file
 from dandi.dandiapi import DandiAPIClient
 from dandi.dandiset import APIDandiset
@@ -82,6 +84,14 @@ log = logging.getLogger(Path(sys.argv[0]).name)
     help="How many parallel jobs to use when pushing",
     show_default=True,
 )
+@click.option(
+    "-l",
+    "--log-level",
+    type=LogLevel(),
+    default="INFO",
+    help="Set logging level",
+    show_default=True,
+)
 @click.option("--pdb", is_flag=True, help="Drop into debugger if an error occurs")
 @click.option(
     "--re-filter", help="Only consider assets matching the given regex", metavar="REGEX"
@@ -107,13 +117,14 @@ def main(
     update_github_metadata,
     pdb,
     exclude,
+    log_level,
 ):
     if pdb:
         sys.excepthook = pdb_excepthook
     logging.basicConfig(
         format="%(asctime)s [%(levelname)-8s] %(name)s %(message)s",
         datefmt="%Y-%m-%dT%H:%M:%S%z",
-        level=logging.DEBUG,
+        level=log_level,
         force=True,  # Override dandi's settings
     )
     di = DatasetInstantiator(
