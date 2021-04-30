@@ -321,9 +321,6 @@ class DatasetInstantiator:
                     log.warning("Asset metadata does not include sha256 hash")
                 dandi_etag = a["metadata"]["digest"]["dandi:dandi-etag"]
                 mtime = ensure_datetime(a["metadata"]["dateModified"])
-                bucket_url = self.get_file_bucket_url(
-                    dandiset_id, "draft", a["asset_id"]
-                )
                 download_url = (
                     f"https://api.dandiarchive.org/api/dandisets/{dandiset_id}"
                     f"/versions/draft/assets/{a['asset_id']}/download/"
@@ -362,6 +359,9 @@ class DatasetInstantiator:
                         to_update = True
                         updated += 1
                 if to_update:
+                    bucket_url = self.get_file_bucket_url(
+                        dandiset_id, "draft", a["asset_id"]
+                    )
                     src = self.assetstore_path / urlparse(bucket_url).path.lstrip("/")
                     if src.exists():
                         try:
