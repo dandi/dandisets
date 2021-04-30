@@ -3,6 +3,7 @@
 __requires__ = [
     "boto3",
     "click == 7.*",
+    "click-loglevel ~= 0.2",
     "dandi >= 0.14.0",
     "datalad",
     "fscacher",
@@ -47,6 +48,7 @@ import boto3
 from botocore import UNSIGNED
 from botocore.client import Config
 import click
+from click_loglevel import LogLevel
 from dandi.consts import dandiset_metadata_file
 from dandi.dandiapi import DandiAPIClient
 from dandi.dandiset import APIDandiset
@@ -82,6 +84,14 @@ log = logging.getLogger(Path(sys.argv[0]).name)
     help="How many parallel jobs to use when pushing",
     show_default=True,
 )
+@click.option(
+    "-l",
+    "--log-level",
+    type=LogLevel(),
+    default="INFO",
+    help="Set logging level",
+    show_default=True,
+)
 @click.option("--pdb", is_flag=True, help="Drop into debugger if an error occurs")
 @click.option(
     "--re-filter", help="Only consider assets matching the given regex", metavar="REGEX"
@@ -107,13 +117,14 @@ def main(
     update_github_metadata,
     pdb,
     exclude,
+    log_level,
 ):
     if pdb:
         sys.excepthook = pdb_excepthook
     logging.basicConfig(
         format="%(asctime)s [%(levelname)-8s] %(name)s %(message)s",
         datefmt="%Y-%m-%dT%H:%M:%S%z",
-        level=logging.INFO,
+        level=log_level,
         force=True,  # Override dandi's settings
     )
     di = DatasetInstantiator(
@@ -243,6 +254,7 @@ class DatasetInstantiator:
             if ds.repo.is_under_annex(relpath, batch=True):
                 return ds.repo.get_file_key(relpath).split("-")[-1].partition(".")[0]
             else:
+                log.debug("Asset not under annex; calculating sha256 digest ourselves")
                 return digester(filepath)["sha256"]
 
         dsdir = ds.pathobj
@@ -314,6 +326,7 @@ class DatasetInstantiator:
                     to_update = True
                     added += 1
                 elif dandi_hash is not None:
+                    log.debug("About to fetch hash from annex")
                     if dandi_hash == get_annex_hash(dest):
                         log.info(
                             "Asset in dataset, and hash shows no modification;"
@@ -327,6 +340,7 @@ class DatasetInstantiator:
                         to_update = True
                         updated += 1
                 else:
+                    log.debug("About to calculate dandi-etag")
                     if dandi_etag == get_digest(dest, "dandi-etag"):
                         log.info(
                             "Asset in dataset, and etag shows no modification;"
@@ -477,6 +491,7 @@ class DatasetInstantiator:
             return f"{num_files} files, {size}, {desc}"
 
     def get_file_bucket_url(self, dandiset_id, version_id, asset_id):
+        log.debug("Fetching bucket URL for asset")
         r = self.dandi_client.send_request(
             "HEAD",
             f"/dandisets/{dandiset_id}/versions/{version_id}/assets/{asset_id}"
@@ -484,9 +499,11 @@ class DatasetInstantiator:
             json_resp=False,
         )
         urlbits = urlparse(r.headers["Location"])
+        log.debug("About to query S3")
         s3meta = self.s3client.get_object(
             Bucket="dandiarchive", Key=urlbits.path.lstrip("/")
         )
+        log.debug("Got bucket URL for asset")
         return urlunparse(urlbits._replace(query=f"versionId={s3meta['VersionId']}"))
 
     @property
