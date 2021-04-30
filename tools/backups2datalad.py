@@ -248,7 +248,9 @@ class DatasetInstantiator:
         cache = PersistentCache("backups2datalad")
         cache.clear()
 
-        @cache.memoize_path
+        # do not cache due to fscacher resolving the path so we end
+        # up with a path under .git/annex/objects  https://github.com/con/fscacher/issues/44
+        # @cache.memoize_path
         def get_annex_hash(filepath):
             relpath = str(Path(filepath).relative_to(dsdir))
             if ds.repo.is_under_annex(relpath, batch=True):
@@ -429,6 +431,18 @@ class DatasetInstantiator:
                 )
                 ds.repo.remove([astr])
                 deleted += 1
+            
+            # due to  https://github.com/dandi/dandi-api/issues/231
+            # we need to sanitize temporary URLs. TODO: remove when "fixed"
+            for asset in asset_metadata:
+                urls = asset['metadata']['contentUrl']
+                urls_ = []
+                for url in urls:
+                    if 'x-amz-expires=' in url.lower():
+                        # just strip away everything after ?
+                        url = url[:url.index('?')]
+                    urls_.append(url)
+                asset['metadata']['contentUrl'] = urls_
             dump(asset_metadata, dsdir / ".dandi" / "assets.json")
         if any(r["state"] != "clean" for r in ds.status()):
             log.info("Commiting changes")
