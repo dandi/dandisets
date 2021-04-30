@@ -253,13 +253,12 @@ class DatasetInstantiator:
         # @cache.memoize_path
         def get_annex_hash(filepath):
             relpath = str(Path(filepath).relative_to(dsdir))
-            assert os.path.islink(filepath)
             # OPT: do not bother checking or talking to annex --
             # shaves off about 20% of runtime on 000003, so let's just
             # not bother checking etc but judge from the resolved path to be
             # under (some) annex
             realpath = os.path.realpath(filepath)
-            if '.git/annex/object' in realpath: # ds.repo.is_under_annex(relpath, batch=True):
+            if os.path.islink(filepath) and '.git/annex/object' in realpath: # ds.repo.is_under_annex(relpath, batch=True):
                 return os.path.basename(realpath).split("-")[-1].partition(".")[0]
             else:
                 log.debug("Asset not under annex; calculating sha256 digest ourselves")
