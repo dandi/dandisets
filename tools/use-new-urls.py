@@ -42,7 +42,7 @@ def main(datasets_path, dandisets, log_level):
         level=log_level,
         force=True,  # Override dandi's settings
     )
-    URLUpdater(datasets_path).run(dandisets)
+    URLUpdater(Path(datasets_path)).run(dandisets)
 
 
 class URLUpdater:
