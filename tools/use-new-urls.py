@@ -64,6 +64,7 @@ class URLUpdater:
     def update_dandiset_urls(self, dandiset_id, ds):
         if ds.repo.dirty:
             raise RuntimeError("Dirty repository; clean or save before running")
+        ds.repo.always_commit = False
         dsdir = ds.pathobj
         for a in self.dandi_client.get_dandiset_assets(
             dandiset_id, "draft", include_metadata=False
@@ -71,17 +72,7 @@ class URLUpdater:
             path = a["path"]
             log.info("Processing asset %s", path)
             if ds.repo.is_under_annex(path, batch=True):
-                for url in ds.repo.get_urls(path, batch=True):
-                    log.info("Removing URL %s from asset", url)
-                    ds.repo.call_annex(
-                        [
-                            "rmurl",
-                            "-c",
-                            "annex.alwayscommit=false",
-                            path,
-                            url,
-                        ]
-                    )
+                file_urls = set(ds.repo.get_urls(path, batch=True))
                 bucket_url = self.get_file_bucket_url(
                     dandiset_id, "draft", a["asset_id"]
                 )
@@ -90,8 +81,14 @@ class URLUpdater:
                     f"/versions/draft/assets/{a['asset_id']}/download/"
                 )
                 for url in [bucket_url, download_url]:
-                    log.info("Adding URL %s to asset", url)
-                    ds.repo.add_url_to_file(path, url, batch=True)
+                    if url not in file_urls:
+                        log.info("Adding URL %s to asset", url)
+                        ds.repo.add_url_to_file(path, url, batch=True)
+                for url in file_urls:
+                    if "dandiarchive.s3.amazonaws.com/girder-assetstore/" in url:
+                        log.info("Removing URL %s from asset", url)
+                        ds.repo.rm_url(path, url)
+
             else:
                 log.info("File is not managed by git annex; not updating URLs")
         log.info("Commiting changes")
