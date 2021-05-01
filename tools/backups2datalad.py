@@ -200,8 +200,8 @@ class DatasetInstantiator:
                                 # shared, initialized in 000003
                             ],
                         )
-                        ds.repo._run_annex_command(
-                            "untrust", annex_options=[self.backup_remote]
+                        ds.repo.call_annex(
+                                ["untrust", self.backup_remote]
                         )
                         ds.repo.set_preferred_content(
                             "wanted",
