@@ -451,15 +451,15 @@ class DatasetInstantiator:
             dump(asset_metadata, dsdir / ".dandi" / "assets.json")
         if any(r["state"] != "clean" for r in ds.status()):
             log.info("Commiting changes")
-            msgbody = ""
+            msgparts = []
             if added:
-                msgbody += f"{added} files added\n"
+                msgparts.append(f"{added} files added")
             if updated:
-                msgbody += f"{updated} files updated\n"
+                msgparts.append(f"{updated} files updated")
             if deleted:
-                msgbody += f"{deleted} files deleted\n"
+                msgparts.append(f"{deleted} files deleted")
             with custom_commit_date(latest_mtime):
-                ds.save(message=f"Ran backups2datalad.py\n\n{msgbody}")
+                ds.save(message=f"[backups2datalad] {', '.join(msgparts)}")
             return True
         else:
             log.info("No changes made to repository; deleting logfile")
