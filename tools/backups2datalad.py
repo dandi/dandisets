@@ -200,9 +200,7 @@ class DatasetInstantiator:
                                 # shared, initialized in 000003
                             ],
                         )
-                        ds.repo.call_annex(
-                                ["untrust", self.backup_remote]
-                        )
+                        ds.repo.call_annex(["untrust", self.backup_remote])
                         ds.repo.set_preferred_content(
                             "wanted",
                             "(not metadata=distribution-restrictions=*)",
@@ -258,7 +256,9 @@ class DatasetInstantiator:
             # not bother checking etc but judge from the resolved path to be
             # under (some) annex
             realpath = os.path.realpath(filepath)
-            if os.path.islink(filepath) and '.git/annex/object' in realpath: # ds.repo.is_under_annex(relpath, batch=True):
+            if (
+                os.path.islink(filepath) and ".git/annex/object" in realpath
+            ):  # ds.repo.is_under_annex(relpath, batch=True):
                 return os.path.basename(realpath).split("-")[-1].partition(".")[0]
             else:
                 log.debug("Asset not under annex; calculating sha256 digest ourselves")
@@ -316,7 +316,11 @@ class DatasetInstantiator:
                     dandi_hash = adict["metadata"]["digest"]["dandi:sha2-256"]
                 except KeyError:
                     dandi_hash = None
-                    log.warning("Asset metadata does not include sha256 hash")
+                    log.warning(
+                        "%s: %s: Asset metadata does not include sha256 hash",
+                        dandiset_id,
+                        a.path,
+                    )
                 dandi_etag = adict["metadata"]["digest"]["dandi:dandi-etag"]
                 mtime = ensure_datetime(adict["metadata"]["dateModified"])
                 download_url = (
@@ -366,7 +370,11 @@ class DatasetInstantiator:
                             self.mklink(src, dest)
                         except Exception:
                             if self.ignore_errors:
-                                log.warning("cp command failed; ignoring")
+                                log.warning(
+                                    "%s: %s: cp command failed; ignoring",
+                                    dandset_id,
+                                    a.path,
+                                )
                                 continue
                             else:
                                 raise
@@ -439,14 +447,14 @@ class DatasetInstantiator:
             # due to  https://github.com/dandi/dandi-api/issues/231
             # we need to sanitize temporary URLs. TODO: remove when "fixed"
             for asset in asset_metadata:
-                urls = asset['metadata']['contentUrl']
+                urls = asset["metadata"]["contentUrl"]
                 urls_ = []
                 for url in urls:
-                    if 'x-amz-expires=' in url.lower():
+                    if "x-amz-expires=" in url.lower():
                         # just strip away everything after ?
-                        url = url[:url.index('?')]
+                        url = url[: url.index("?")]
                     urls_.append(url)
-                asset['metadata']['contentUrl'] = urls_
+                asset["metadata"]["contentUrl"] = urls_
             dump(asset_metadata, dsdir / ".dandi" / "assets.json")
         if any(r["state"] != "clean" for r in ds.status()):
             log.info("Commiting changes")
