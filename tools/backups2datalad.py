@@ -2,7 +2,7 @@
 
 __requires__ = [
     "boto3",
-    "click == 7.*",
+    "click >= 7.*",
     "click-loglevel ~= 0.2",
     "dandi >= 0.14.0",
     "datalad",
@@ -174,7 +174,7 @@ class DatasetInstantiator:
             )
         self.target_path.mkdir(parents=True, exist_ok=True)
         datalad.cfg.set("datalad.repo.backend", "SHA256E", where="override")
-        with self.dandi_client.session():
+        with self.dandi_client:
             for did in dandisets or self.get_dandiset_ids():
                 if exclude is not None and re.search(exclude, did):
                     log.debug("Skipping dandiset %s", did)
@@ -277,7 +277,7 @@ class DatasetInstantiator:
                 (dsdir / dandiset_metadata_file).unlink()
             except FileNotFoundError:
                 pass
-            metadata = dandiset.get("metadata", {})
+            metadata = dandiset.get_raw_metadata()
             APIDandiset(dsdir, allow_empty=True).update_metadata(metadata)
             ds.repo.add([dandiset_metadata_file])
             local_assets = set(dataset_files(dsdir))
@@ -294,35 +294,34 @@ class DatasetInstantiator:
                             saved_metadata[md["path"].lstrip("/")] = md
             except FileNotFoundError:
                 pass
-            for a in self.dandi_client.get_dandiset_assets(
-                dandiset_id, "draft", include_metadata=True
-            ):
-                dest = dsdir / a["path"]
+            for a in dandiset.get_assets():
+                dest = dsdir / a.path
                 deststr = str(dest.relative_to(dsdir))
                 local_assets.discard(dest)
-                asset_metadata.append(a)
+                adict = {**a.json_dict(), "metadata": a.get_raw_metadata()}
+                asset_metadata.append(adict)
                 if (
                     self.force is None or "check" not in self.force
-                ) and a == saved_metadata.get(a["path"]):
+                ) and adict == saved_metadata.get(a.path):
                     log.debug(
                         "Asset %s metadata unchanged; not taking any further action",
-                        a["path"],
+                        a.path,
                     )
                     continue
-                if self.re_filter and not self.re_filter.search(a["path"]):
-                    log.debug("Skipping asset %s", a["path"])
+                if self.re_filter and not self.re_filter.search(a.path):
+                    log.debug("Skipping asset %s", a.path)
                     continue
-                log.info("Syncing asset %s", a["path"])
+                log.info("Syncing asset %s", a.path)
                 try:
-                    dandi_hash = a["metadata"]["digest"]["dandi:sha2-256"]
+                    dandi_hash = adict["metadata"]["digest"]["dandi:sha2-256"]
                 except KeyError:
                     dandi_hash = None
                     log.warning("Asset metadata does not include sha256 hash")
-                dandi_etag = a["metadata"]["digest"]["dandi:dandi-etag"]
-                mtime = ensure_datetime(a["metadata"]["dateModified"])
+                dandi_etag = adict["metadata"]["digest"]["dandi:dandi-etag"]
+                mtime = ensure_datetime(adict["metadata"]["dateModified"])
                 download_url = (
                     f"https://api.dandiarchive.org/api/dandisets/{dandiset_id}"
-                    f"/versions/draft/assets/{a['asset_id']}/download/"
+                    f"/versions/draft/assets/{a.identifier}/download/"
                 )
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 if not dest.exists():
@@ -359,7 +358,7 @@ class DatasetInstantiator:
                         updated += 1
                 if to_update:
                     bucket_url = self.get_file_bucket_url(
-                        dandiset_id, "draft", a["asset_id"]
+                        dandiset_id, "draft", a.identifier
                     )
                     src = self.assetstore_path / urlparse(bucket_url).path.lstrip("/")
                     if src.exists():
@@ -436,7 +435,7 @@ class DatasetInstantiator:
                 )
                 ds.repo.remove([astr])
                 deleted += 1
-            
+
             # due to  https://github.com/dandi/dandi-api/issues/231
             # we need to sanitize temporary URLs. TODO: remove when "fixed"
             for asset in asset_metadata:
@@ -480,30 +479,25 @@ class DatasetInstantiator:
     @property
     def dandi_client(self):
         if self._dandi_client is None:
-            dandi_instance = get_instance("dandi-api")
+            dandi_instance = get_instance("dandi")
             self._dandi_client = DandiAPIClient(dandi_instance.api)
         return self._dandi_client
 
     def get_dandiset_ids(self):
-        r = self.dandi_client.get("/dandisets/")
-        while True:
-            for d in r["results"]:
-                yield d["identifier"]
-            if r.get("next"):
-                r = self.dandi_client.get(r.get("next"))
-            else:
-                break
+        for dandiset in self.dandi_client.get_dandisets():
+            yield dandiset.identifier
 
     def describe_dandiset(self, dandiset_id):
-        about = self.dandi_client.get(f"/dandisets/{dandiset_id}/versions/draft/info")
-        desc = about["name"]
+        dandiset = self.dandi_client.get_dandiset(dandiset_id)
+        metadata = dandiset.get_raw_metadata()
+        desc = dandiset.version.name
         contact = ", ".join(
             c["name"]
-            for c in about["metadata"].get("contributor", [])
+            for c in metadata.get("contributor", [])
             if "dandi:ContactPerson" in c.get("roleName", []) and "name" in c
         )
-        num_files = about["asset_count"]
-        size = naturalsize(about["size"])
+        num_files = dandiset.version.asset_count
+        size = naturalsize(dandiset.version.size)
         if contact:
             return f"{num_files} files, {size}, {contact}, {desc}"
         else:
@@ -511,7 +505,7 @@ class DatasetInstantiator:
 
     def get_file_bucket_url(self, dandiset_id, version_id, asset_id):
         log.debug("Fetching bucket URL for asset")
-        r = self.dandi_client.send_request(
+        r = self.dandi_client.request(
             "HEAD",
             f"/dandisets/{dandiset_id}/versions/{version_id}/assets/{asset_id}"
             "/download/",
