@@ -24,7 +24,8 @@ eval tools/backups2datalad.py \
    -J 5 \
    "$girderdir" \
    "$ds" \
-   "$*"
+   "$*" 2>&1 | grep -v 'nothing to save, working tree clean'
+
 # TODO - save only the ones which were updated
 #  probably should be done by backups2datalad.py itself!
 datalad save -m "CRON update" -d . 00*
