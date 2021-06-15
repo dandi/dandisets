@@ -17,6 +17,7 @@ cd "$ds"
 eval tools/backups2datalad.py \
    --backup-remote dandi-dandisets-dropbox  \
    --gh-org dandisets \
+   -l WARNING \
    -J 5 \
    "$girderdir" \
    "$ds" \
