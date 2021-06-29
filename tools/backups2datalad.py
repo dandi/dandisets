@@ -466,6 +466,8 @@ class DatasetInstantiator:
                 msgparts.append(f"{updated} files updated")
             if deleted:
                 msgparts.append(f"{deleted} files deleted")
+            if not msgparts:
+                msgparts.append("only some metadata updates")
             with custom_commit_date(latest_mtime):
                 ds.save(message=f"[backups2datalad] {', '.join(msgparts)}")
             return True
