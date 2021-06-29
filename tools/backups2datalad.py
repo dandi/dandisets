@@ -53,7 +53,7 @@ from dandi.consts import dandiset_metadata_file
 from dandi.dandiapi import DandiAPIClient
 from dandi.dandiset import APIDandiset
 from dandi.support.digests import Digester, get_digest
-from dandi.utils import ensure_datetime, get_instance
+from dandi.utils import ensure_datetime, get_instance, ensure_strtime
 import datalad
 from datalad.api import Dataset
 from datalad.support.json_py import dump
@@ -299,6 +299,12 @@ class DatasetInstantiator:
                 deststr = str(dest.relative_to(dsdir))
                 local_assets.discard(dest)
                 adict = {**a.json_dict(), "metadata": a.get_raw_metadata()}
+                # Let's pop dandiset "linkage" since yoh thinks it should not be there
+                # TODO/discussion: https://github.com/dandi/dandi-cli/issues/690
+                for f in ('dandiset_id', 'version_id'):
+                    adict.pop(f, None)
+                # and ensure that "modified" is a str
+                adict['modified'] = ensure_strtime(adict['modified'])
                 asset_metadata.append(adict)
                 if (
                     self.force is None or "check" not in self.force
