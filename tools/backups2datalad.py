@@ -447,14 +447,9 @@ class DatasetInstantiator:
             # due to  https://github.com/dandi/dandi-api/issues/231
             # we need to sanitize temporary URLs. TODO: remove when "fixed"
             for asset in asset_metadata:
-                urls = asset["metadata"]["contentUrl"]
-                urls_ = []
-                for url in urls:
-                    if "x-amz-expires=" in url.lower():
-                        # just strip away everything after ?
-                        url = url[: url.index("?")]
-                    urls_.append(url)
-                asset["metadata"]["contentUrl"] = urls_
+                if "contentUrl" in asset["metadata"]:
+                    asset["metadata"]["contentUrl"] = \
+                        self._get_sanitized_contentUrls(asset["metadata"]["contentUrl"])
             dump(asset_metadata, dsdir / ".dandi" / "assets.json")
         if any(r["state"] != "clean" for r in ds.status()):
             log.info("Commiting changes")
@@ -472,6 +467,15 @@ class DatasetInstantiator:
             log.info("No changes made to repository; deleting logfile")
             logfile.unlink()
             return False
+
+    def _get_sanitized_contentUrls(self, urls):
+        urls_ = []
+        for url in urls:
+            if "x-amz-expires=" in url.lower():
+                # just strip away everything after ?
+                url = url[: url.index("?")]
+            urls_.append(url)
+        return urls_
 
     def update_github_metadata(self, dandisets=(), exclude=None):
         for did in dandisets or self.get_dandiset_ids():
