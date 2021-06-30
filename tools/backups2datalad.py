@@ -378,7 +378,7 @@ class DatasetInstantiator:
                             if self.ignore_errors:
                                 log.warning(
                                     "%s: %s: cp command failed; ignoring",
-                                    dandset_id,
+                                    dandiset_id,
                                     a.path,
                                 )
                                 continue
