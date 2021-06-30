@@ -56,6 +56,7 @@ from dandi.dandiset import APIDandiset
 from dandi.metadata import get_default_metadata, nwb2asset
 from dandi.support.digests import Digester, get_digest
 from dandi.utils import ensure_datetime, ensure_strtime, get_instance
+from dandischema import models
 from dandischema.consts import DANDI_SCHEMA_VERSION
 import datalad
 from datalad.api import Dataset
@@ -281,6 +282,9 @@ class DatasetInstantiator:
         deleted = 0
 
         with dandi_logging(dsdir) as logfile:
+            if self.update_asset_meta_version:
+                # we might need to update, so need to authenticate
+                self.dandi_client.dandi_authenticate()
             dandiset = self.dandi_client.get_dandiset(dandiset_id, "draft")
             log.info("Updating metadata file")
             try:
@@ -412,10 +416,23 @@ class DatasetInstantiator:
                         )
                     else:
                         log.info("Updating metadata for asset %s", a.path)
-                        a.set_raw_metadata(new_metadata)
-                        # Get the metadata back from the server so that we get
-                        # all fields filled in:
-                        adict["metadata"] = a.get_raw_metadata()
+                        new_metadata.path = a.path
+                        new_metadata_json = new_metadata.json_dict()
+                        # we need to figure out blob_id since that is what API needs
+                        # ATM. TODO: discussion is ongoing to change API
+                        # see e.g. https://github.com/dandi/dandi-api/pull/382
+                        blob_id_ret = a.client.post(
+                                '/blobs/digest/', 
+                                json={'algorithm': 'dandi:dandi-etag', 
+                                      'value': new_metadata.digest[models.DigestType.dandi_etag]})
+                        # no such API interface yet!
+                        # a.set_raw_metadata(new_metadata)
+                        ret = a.client.put(a.api_path, 
+                                json={'metadata': new_metadata_json, 
+                                      'blob_id': blob_id_ret['blob_id']})
+                        assert adict['asset_id'] != ret['asset_id']
+                        assert adict['path'] == ret['path']
+                        adict = ret
 
                 if to_update:
                     bucket_url = self.get_file_bucket_url(
