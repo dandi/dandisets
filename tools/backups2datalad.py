@@ -56,7 +56,7 @@ from dandi.dandiset import APIDandiset
 from dandi.metadata import get_default_metadata, nwb2asset
 from dandi.support.digests import Digester, get_digest
 from dandi.utils import ensure_datetime, ensure_strtime, get_instance
-from dandimeta.consts import DANDI_SCHEMA_VERSION
+from dandischema.consts import DANDI_SCHEMA_VERSION
 import datalad
 from datalad.api import Dataset
 from datalad.support.json_py import dump
