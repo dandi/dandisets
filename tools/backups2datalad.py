@@ -35,6 +35,7 @@ Later TODOs
 from collections import deque
 from contextlib import contextmanager
 from datetime import datetime
+from distutils.version import StrictVersion
 import json
 import logging
 import os
@@ -54,6 +55,7 @@ from dandi.dandiapi import DandiAPIClient
 from dandi.dandiset import APIDandiset
 from dandi.support.digests import Digester, get_digest
 from dandi.utils import ensure_datetime, get_instance, ensure_strtime
+from dandimeta.consts import DANDI_SCHEMA_VERSION
 import datalad
 from datalad.api import Dataset
 from datalad.support.json_py import dump
@@ -63,6 +65,11 @@ from humanize import naturalsize
 
 log = logging.getLogger(Path(sys.argv[0]).name)
 
+# if set to non-False -- must be a version to update to
+UPDATE_ASSET_META_VERSION = '0.4.4'
+if UPDATE_ASSET_META_VERSION:
+    # and that version must match the one of the dandischem
+    assert UPDATE_ASSET_META_VERSION == DANDI_SCHEMA_VERSION
 
 @click.command()
 @click.option("--backup-remote", help="Name of the rclone remote to push to")
@@ -366,6 +373,17 @@ class DatasetInstantiator:
                         )
                         to_update = True
                         updated += 1
+                # ad-hoc custom way to do assets metadata migration via re-extraction
+                # This script should be ran one dandiset at a time
+                asset_schema_version = adict['metadata'].get('schemaVersion')
+                if UPDATE_ASSET_META_VERSION and \
+                        not to_update and \
+                        asset_schema_version and \
+                        StrictVersion(asset_schema_version) < UPDATE_ASSET_META_VERSION:
+                    # TODO : extract/upload new metadata record, make tripple-sure it does
+                    # have proper schemaVersion ;)
+                    import pdb; pdb.set_trace()
+                    pass
                 if to_update:
                     bucket_url = self.get_file_bucket_url(
                         dandiset_id, "draft", a.identifier
