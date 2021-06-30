@@ -404,11 +404,11 @@ class DatasetInstantiator:
                             digest_type="dandi_etag",
                         )
                     if new_metadata.schemaVersion != DANDI_SCHEMA_VERSION:
-                        log.error(
+                        raise RuntimeError(
                             "New metadata does not have expected schemaVersion!"
-                            "  Expected %r, got %r.",
+                            "  Expected %r, got %r." % (
                             DANDI_SCHEMA_VERSION,
-                            new_metadata.get("schemaVersion"),
+                            new_metadata.get("schemaVersion"))
                         )
                     else:
                         log.info("Updating metadata for asset %s", a.path)
