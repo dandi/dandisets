@@ -4,11 +4,12 @@ __requires__ = [
     "boto3",
     "click >= 7.*",
     "click-loglevel ~= 0.2",
-    "dandi >= 0.14.0",
+    "dandi >= 0.21.0",
     "datalad",
     "fscacher",
     "humanize",
-    "PyGitHub == 1.*",
+    "packaging",
+    "PyGitHub ~= 1.53",
 ]
 
 """
@@ -35,7 +36,6 @@ Later TODOs
 from collections import deque
 from contextlib import contextmanager
 from datetime import datetime
-from distutils.version import StrictVersion
 import json
 import logging
 import os
@@ -53,8 +53,9 @@ from click_loglevel import LogLevel
 from dandi.consts import dandiset_metadata_file
 from dandi.dandiapi import DandiAPIClient
 from dandi.dandiset import APIDandiset
+from dandi.metadata import get_default_metadata, nwb2asset
 from dandi.support.digests import Digester, get_digest
-from dandi.utils import ensure_datetime, get_instance, ensure_strtime
+from dandi.utils import ensure_datetime, ensure_strtime, get_instance
 from dandimeta.consts import DANDI_SCHEMA_VERSION
 import datalad
 from datalad.api import Dataset
@@ -62,14 +63,10 @@ from datalad.support.json_py import dump
 from fscacher import PersistentCache
 from github import Github
 from humanize import naturalsize
+from packaging.version import Version
 
 log = logging.getLogger(Path(sys.argv[0]).name)
 
-# if set to non-False -- must be a version to update to
-UPDATE_ASSET_META_VERSION = '0.4.4'
-if UPDATE_ASSET_META_VERSION:
-    # and that version must match the one of the dandischem
-    assert UPDATE_ASSET_META_VERSION == DANDI_SCHEMA_VERSION
 
 @click.command()
 @click.option("--backup-remote", help="Name of the rclone remote to push to")
@@ -108,6 +105,7 @@ if UPDATE_ASSET_META_VERSION:
     is_flag=True,
     help="Only update repositories' metadata",
 )
+@click.option("--update-asset-meta-version", is_flag=True)
 @click.argument("assetstore", type=click.Path(exists=True, file_okay=False))
 @click.argument("target", type=click.Path(file_okay=False))
 @click.argument("dandisets", nargs=-1)
@@ -122,6 +120,7 @@ def main(
     jobs,
     force,
     update_github_metadata,
+    update_asset_meta_version,
     pdb,
     exclude,
     log_level,
@@ -143,6 +142,7 @@ def main(
         backup_remote=backup_remote,
         jobs=jobs,
         force=force,
+        update_asset_meta_version=update_asset_meta_version,
     )
     if update_github_metadata:
         di.update_github_metadata(dandisets, exclude)
@@ -161,6 +161,7 @@ class DatasetInstantiator:
         backup_remote=None,
         jobs=10,
         force=None,
+        update_asset_meta_version=False,
     ):
         self.assetstore_path = assetstore_path
         self.target_path = target_path
@@ -170,6 +171,7 @@ class DatasetInstantiator:
         self.backup_remote = backup_remote
         self.jobs = jobs
         self.force = force
+        self.update_asset_meta_version = update_asset_meta_version
         self._dandi_client = None
         self._s3client = None
         self._gh = None
@@ -254,7 +256,8 @@ class DatasetInstantiator:
         cache.clear()
 
         # do not cache due to fscacher resolving the path so we end
-        # up with a path under .git/annex/objects  https://github.com/con/fscacher/issues/44
+        # up with a path under .git/annex/objects
+        # https://github.com/con/fscacher/issues/44
         # @cache.memoize_path
         def get_annex_hash(filepath):
             relpath = str(Path(filepath).relative_to(dsdir))
@@ -308,14 +311,16 @@ class DatasetInstantiator:
                 adict = {**a.json_dict(), "metadata": a.get_raw_metadata()}
                 # Let's pop dandiset "linkage" since yoh thinks it should not be there
                 # TODO/discussion: https://github.com/dandi/dandi-cli/issues/690
-                for f in ('dandiset_id', 'version_id'):
+                for f in ("dandiset_id", "version_id"):
                     adict.pop(f, None)
                 # and ensure that "modified" is a str
-                adict['modified'] = ensure_strtime(adict['modified'])
+                adict["modified"] = ensure_strtime(adict["modified"])
                 asset_metadata.append(adict)
                 if (
-                    self.force is None or "check" not in self.force
-                ) and adict == saved_metadata.get(a.path):
+                    (self.force is None or "check" not in self.force)
+                    and adict == saved_metadata.get(a.path)
+                    and not self.update_asset_meta_version
+                ):
                     log.debug(
                         "Asset %s metadata unchanged; not taking any further action",
                         a.path,
@@ -373,17 +378,45 @@ class DatasetInstantiator:
                         )
                         to_update = True
                         updated += 1
-                # ad-hoc custom way to do assets metadata migration via re-extraction
-                # This script should be ran one dandiset at a time
-                asset_schema_version = adict['metadata'].get('schemaVersion')
-                if UPDATE_ASSET_META_VERSION and \
-                        not to_update and \
-                        asset_schema_version and \
-                        StrictVersion(asset_schema_version) < UPDATE_ASSET_META_VERSION:
-                    # TODO : extract/upload new metadata record, make tripple-sure it does
-                    # have proper schemaVersion ;)
-                    import pdb; pdb.set_trace()
-                    pass
+
+                # Ad-hoc custom way to do asset metadata migration via
+                # re-extraction.  This script should be run one dandiset at a
+                # time.
+                asset_schema_version = adict["metadata"].get("schemaVersion")
+                if (
+                    self.update_asset_meta_version
+                    and not to_update
+                    and asset_schema_version
+                    and Version(asset_schema_version) < Version(DANDI_SCHEMA_VERSION)
+                ):
+                    log.info("Calculating new metadata for asset %s", a.path)
+                    try:
+                        new_metadata = nwb2asset(
+                            dest,
+                            digest=get_digest(dest, "dandi-etag"),
+                            digest_type="dandi_etag",
+                        )
+                    except Exception:
+                        log.exception("Failed to extract metadata from %s", dest)
+                        new_metadata = get_default_metadata(
+                            dest,
+                            digest=get_digest(dest, "dandi-etag"),
+                            digest_type="dandi_etag",
+                        )
+                    if new_metadata.get("schemaVersion") != DANDI_SCHEMA_VERSION:
+                        log.error(
+                            "New metadata does not have expected schemaVersion!"
+                            "  Expected %r, got %r.",
+                            DANDI_SCHEMA_VERSION,
+                            new_metadata.get("schemaVersion"),
+                        )
+                    else:
+                        log.info("Updating metadata for asset %s", a.path)
+                        a.set_raw_metadata(new_metadata)
+                        # Get the metadata back from the server so that we get
+                        # all fields filled in:
+                        adict["metadata"] = a.get_raw_metadata()
+
                 if to_update:
                     bucket_url = self.get_file_bucket_url(
                         dandiset_id, "draft", a.identifier
@@ -472,8 +505,9 @@ class DatasetInstantiator:
             # we need to sanitize temporary URLs. TODO: remove when "fixed"
             for asset in asset_metadata:
                 if "contentUrl" in asset["metadata"]:
-                    asset["metadata"]["contentUrl"] = \
-                        self._get_sanitized_contentUrls(asset["metadata"]["contentUrl"])
+                    asset["metadata"]["contentUrl"] = self._get_sanitized_contentUrls(
+                        asset["metadata"]["contentUrl"]
+                    )
             dump(asset_metadata, dsdir / ".dandi" / "assets.json")
         if any(r["state"] != "clean" for r in ds.status()):
             log.info("Commiting changes")
