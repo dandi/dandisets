@@ -403,7 +403,7 @@ class DatasetInstantiator:
                             digest=get_digest(dest, "dandi-etag"),
                             digest_type="dandi_etag",
                         )
-                    if new_metadata.get("schemaVersion") != DANDI_SCHEMA_VERSION:
+                    if new_metadata.schemaVersion != DANDI_SCHEMA_VERSION:
                         log.error(
                             "New metadata does not have expected schemaVersion!"
                             "  Expected %r, got %r.",
