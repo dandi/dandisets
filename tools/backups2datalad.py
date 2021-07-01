@@ -410,9 +410,8 @@ class DatasetInstantiator:
                     if new_metadata.schemaVersion != DANDI_SCHEMA_VERSION:
                         raise RuntimeError(
                             "New metadata does not have expected schemaVersion!"
-                            "  Expected %r, got %r." % (
-                            DANDI_SCHEMA_VERSION,
-                            new_metadata.get("schemaVersion"))
+                            "  Expected %r, got %r."
+                            % (DANDI_SCHEMA_VERSION, new_metadata.schemaVersion)
                         )
                     else:
                         log.info("Updating metadata for asset %s", a.path)
@@ -422,17 +421,29 @@ class DatasetInstantiator:
                         # ATM. TODO: discussion is ongoing to change API
                         # see e.g. https://github.com/dandi/dandi-api/pull/382
                         blob_id_ret = a.client.post(
-                                '/blobs/digest/', 
-                                json={'algorithm': 'dandi:dandi-etag', 
-                                      'value': new_metadata.digest[models.DigestType.dandi_etag]})
+                            "/blobs/digest/",
+                            json={
+                                "algorithm": "dandi:dandi-etag",
+                                "value": new_metadata.digest[
+                                    models.DigestType.dandi_etag
+                                ],
+                            },
+                        )
                         # no such API interface yet!
                         # a.set_raw_metadata(new_metadata)
-                        ret = a.client.put(a.api_path, 
-                                json={'metadata': new_metadata_json, 
-                                      'blob_id': blob_id_ret['blob_id']})
-                        assert adict['asset_id'] != ret['asset_id']
-                        assert adict['path'] == ret['path']
-                        adict = ret
+                        ret = a.client.put(
+                            a.api_path,
+                            json={
+                                "metadata": new_metadata_json,
+                                "blob_id": blob_id_ret["blob_id"],
+                            },
+                        )
+                        assert adict["asset_id"] != ret["asset_id"]
+                        assert adict["path"] == ret["path"]
+                        # Update adict in-place so that the instance appended
+                        # to asset_metadata gets updated:
+                        adict.clear()
+                        adict.update(ret)
 
                 if to_update:
                     bucket_url = self.get_file_bucket_url(
