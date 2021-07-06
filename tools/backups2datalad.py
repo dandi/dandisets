@@ -69,7 +69,28 @@ from packaging.version import Version
 log = logging.getLogger(Path(sys.argv[0]).name)
 
 
-@click.command()
+@click.group()
+@click.option(
+    "-l",
+    "--log-level",
+    type=LogLevel(),
+    default="INFO",
+    help="Set logging level",
+    show_default=True,
+)
+@click.option("--pdb", is_flag=True, help="Drop into debugger if an error occurs")
+def main(log_level, pdb):
+    if pdb:
+        sys.excepthook = pdb_excepthook
+    logging.basicConfig(
+        format="%(asctime)s [%(levelname)-8s] %(name)s %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S%z",
+        level=log_level,
+        force=True,  # Override dandi's settings
+    )
+
+
+@main.command()
 @click.option("--backup-remote", help="Name of the rclone remote to push to")
 @click.option(
     "-e", "--exclude", help="Skip dandisets matching the given regex", metavar="REGEX"
@@ -90,15 +111,6 @@ log = logging.getLogger(Path(sys.argv[0]).name)
     show_default=True,
 )
 @click.option(
-    "-l",
-    "--log-level",
-    type=LogLevel(),
-    default="INFO",
-    help="Set logging level",
-    show_default=True,
-)
-@click.option("--pdb", is_flag=True, help="Drop into debugger if an error occurs")
-@click.option(
     "--re-filter", help="Only consider assets matching the given regex", metavar="REGEX"
 )
 @click.option(
@@ -110,7 +122,7 @@ log = logging.getLogger(Path(sys.argv[0]).name)
 @click.argument("assetstore", type=click.Path(exists=True, file_okay=False))
 @click.argument("target", type=click.Path(file_okay=False))
 @click.argument("dandisets", nargs=-1)
-def main(
+def update_from_backup(
     assetstore,
     target,
     dandisets,
@@ -122,18 +134,8 @@ def main(
     force,
     update_github_metadata,
     update_asset_meta_version,
-    pdb,
     exclude,
-    log_level,
 ):
-    if pdb:
-        sys.excepthook = pdb_excepthook
-    logging.basicConfig(
-        format="%(asctime)s [%(levelname)-8s] %(name)s %(message)s",
-        datefmt="%Y-%m-%dT%H:%M:%S%z",
-        level=log_level,
-        force=True,  # Override dandi's settings
-    )
     di = DatasetInstantiator(
         assetstore_path=Path(assetstore),
         target_path=Path(target),
@@ -149,6 +151,22 @@ def main(
         di.update_github_metadata(dandisets, exclude)
     else:
         di.run(dandisets, exclude)
+
+
+@main.command()
+@click.option("--commitish", metavar="COMMITISH")
+@click.option(
+    "-d",
+    "--dandiset-path",
+    type=click.Path(exists=True, file_okay=False),
+    default=os.curdir,
+)
+@click.argument("dandiset")
+@click.argument("version")
+def release(dandiset, version, dandiset_path, commitish):
+    with DandiAPIClient.for_dandi_instance("dandi") as client:
+        ds = client.get_dandiset(dandiset, version)
+        mkrelease(Path(dandiset_path), ds, commitish=commitish)
 
 
 class DatasetInstantiator:
@@ -734,6 +752,60 @@ def pdb_excepthook(exc_type, exc_value, tb):
         import pdb
 
         pdb.post_mortem(tb)
+
+
+def mkrelease(repo: Path, dandiset: RemoteDandiset, commitish: str = None) -> None:
+    # `dandiset` must have its version set to the published version
+    if commitish is None:
+        asset_ids = {a.identifier for a in dandiset.get_assets()}
+        repo_assets = json.loads(
+            (repo / ".dandi" / "assets.json").read_text(encoding="utf-8")
+        )
+        if asset_ids == {a["asset_id"] for a in repo_assets}:
+            commitish = "HEAD"
+        else:
+            for cmt in subprocess.check_output(
+                ["git", "rev-list", "--skip=1", "HEAD", "--", ".dandi/assets.json"],
+                cwd=repo,
+                universal_newlines=True,
+            ).splitlines():
+                repo_assets = json.loads(
+                    subprocess.check_output(
+                        ["git", "show", f"{cmt}:.dandi/assets.json"],
+                        cwd=repo,
+                        universal_newlines=True,
+                    )
+                )
+                if (
+                    repo_assets
+                    and not isinstance(repo_assets[0], dict)
+                    or "asset_id" not in repo_assets[0]
+                ):
+                    # We've reached an older, pre-dandi-api version of
+                    # assets.json; we're not going to find the assets we're
+                    # after here
+                    break
+                if asset_ids == {a["asset_id"] for a in repo_assets}:
+                    commitish = cmt
+                    break
+            if commitish is None:
+                raise RuntimeError(
+                    "Could not find commit matching Dandiset "
+                    f"{dandiset.identifier}, version {dandiset.version_id}"
+                )
+    subprocess.run(
+        [
+            "git",
+            "tag",
+            "-m",
+            f"Version {dandiset.version_id} of Dandiset {dandiset.identifier}",
+            dandiset.version_id,
+            commitish,
+        ],
+        cwd=repo,
+        check=True,
+    )
+    subprocess.run(["git", "push", "--follow-tags"], cwd=repo, check=True)
 
 
 if __name__ == "__main__":

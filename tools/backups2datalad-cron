@@ -18,9 +18,10 @@ export DATALAD_LOG_LEVEL=WARNING  # otherwise too much of noise
 
 set -x
 eval tools/backups2datalad.py \
+   -l WARNING \
+   update-from-backup \
    --backup-remote dandi-dandisets-dropbox  \
    --gh-org dandisets \
-   -l WARNING \
    -J 5 \
    "$girderdir" \
    "$ds" \
