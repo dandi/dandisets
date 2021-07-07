@@ -25,6 +25,7 @@ from collections import deque
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
+from functools import cached_property
 import json
 import logging
 import os
@@ -56,11 +57,6 @@ from morecontext import envset
 from mypy_boto3_s3 import S3Client
 
 # from fscacher import PersistentCache
-
-if sys.version_info[:2] >= (3, 8):
-    from functools import cached_property
-else:
-    from cached_property import cached_property
 
 log = logging.getLogger(Path(sys.argv[0]).name)
 
@@ -738,10 +734,8 @@ def assets_eq(remote_assets: List[RemoteAsset], local_assets: List[dict]) -> boo
 
 
 def readcmd(*args: Union[str, Path], **kwargs: Any) -> str:
-    log.debug("Running: %s", " ".join(shlex.quote(str(a)) for a in args))
-    return cast(
-        str, subprocess.check_output(args, universal_newlines=True, **kwargs)
-    ).strip()
+    log.debug("Running: %s", shlex.join(map(str, args)))
+    return cast(str, subprocess.check_output(args, text=True, **kwargs)).strip()
 
 
 def mklink(src: Union[str, Path], dest: Union[str, Path]) -> None:
