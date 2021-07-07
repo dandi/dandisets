@@ -12,6 +12,7 @@ ds=$(dirname "$ds")
 
 source ~/.bashrc-miniconda
 conda activate dandisets
+pip install -r backups2datalad.req.txt
 
 cd "$ds"
 export DATALAD_LOG_LEVEL=WARNING  # otherwise too much of noise
