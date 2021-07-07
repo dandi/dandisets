@@ -1,17 +1,5 @@
 #!/usr/bin/env python
 
-__requires__ = [
-    "boto3",
-    "click >= 8.0",
-    "click-loglevel ~= 0.2",
-    "dandi >= 0.21.0",
-    "datalad",
-    "fscacher",
-    "humanize",
-    "packaging",
-    "PyGitHub ~= 1.53",
-]
-
 """
 IMPORTANT NOTE ABOUT GITHUB CREDENTIALS
 
