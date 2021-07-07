@@ -43,6 +43,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+from typing import List
 from urllib.parse import urlparse, urlunparse
 
 import boto3
@@ -51,7 +52,7 @@ from botocore.client import Config
 import click
 from click_loglevel import LogLevel
 from dandi.consts import dandiset_metadata_file, known_instances
-from dandi.dandiapi import DandiAPIClient, RemoteDandiset
+from dandi.dandiapi import DandiAPIClient, RemoteAsset, RemoteDandiset
 from dandi.dandiset import APIDandiset
 from dandi.metadata import get_default_metadata, nwb2asset
 from dandi.support.digests import Digester, get_digest
@@ -763,11 +764,11 @@ def pdb_excepthook(exc_type, exc_value, tb):
 def mkrelease(repo: Path, dandiset: RemoteDandiset, commitish: str = None) -> None:
     # `dandiset` must have its version set to the published version
     if commitish is None:
-        asset_ids = {a.identifier for a in dandiset.get_assets()}
+        remote_assets = list(dandiset.get_assets())
         repo_assets = json.loads(
             (repo / ".dandi" / "assets.json").read_text(encoding="utf-8")
         )
-        if asset_ids == {a["asset_id"] for a in repo_assets}:
+        if assets_eq(remote_assets, repo_assets):
             commitish = "HEAD"
         else:
             for cmt in subprocess.check_output(
@@ -791,7 +792,7 @@ def mkrelease(repo: Path, dandiset: RemoteDandiset, commitish: str = None) -> No
                     # assets.json; we're not going to find the assets we're
                     # after here
                     break
-                if asset_ids == {a["asset_id"] for a in repo_assets}:
+                if assets_eq(remote_assets, repo_assets):
                     commitish = cmt
                     break
             if commitish is None:
@@ -812,6 +813,12 @@ def mkrelease(repo: Path, dandiset: RemoteDandiset, commitish: str = None) -> No
         check=True,
     )
     subprocess.run(["git", "push", "--follow-tags"], cwd=repo, check=True)
+
+
+def assets_eq(remote_assets: List[RemoteAsset], local_assets: List[dict]) -> bool:
+    return {a.identifier for a in remote_assets} == {
+        a["asset_id"] for a in local_assets
+    }
 
 
 if __name__ == "__main__":
