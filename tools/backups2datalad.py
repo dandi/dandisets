@@ -43,11 +43,8 @@ from click_loglevel import LogLevel
 from dandi.consts import dandiset_metadata_file, known_instances
 from dandi.dandiapi import DandiAPIClient, RemoteAsset, RemoteDandiset
 from dandi.dandiset import APIDandiset
-from dandi.metadata import get_asset_metadata
 from dandi.support.digests import Digester, get_digest
 from dandi.utils import ensure_datetime, ensure_strtime
-from dandischema import models
-from dandischema.consts import DANDI_SCHEMA_VERSION
 import datalad
 from datalad.api import Dataset
 from datalad.support.json_py import dump
@@ -57,7 +54,6 @@ from github import Github
 from humanize import naturalsize
 from morecontext import envset
 from mypy_boto3_s3 import S3Client
-from packaging.version import Version
 
 if sys.version_info[:2] >= (3, 8):
     from functools import cached_property
@@ -126,7 +122,6 @@ def main(ctx: click.Context, log_level: int, pdb: bool, dandi_instance: str) -> 
     is_flag=True,
     help="Only update repositories' metadata",
 )
-@click.option("--update-asset-meta-version", is_flag=True)
 @click.argument(
     "assetstore", type=click.Path(exists=True, file_okay=False, path_type=Path)
 )
@@ -145,7 +140,6 @@ def update_from_backup(
     jobs: int,
     force: Optional[str],
     update_github_metadata: bool,
-    update_asset_meta_version: bool,
     exclude: Optional[str],
 ) -> None:
     di = DatasetInstantiator(
@@ -158,7 +152,6 @@ def update_from_backup(
         backup_remote=backup_remote,
         jobs=jobs,
         force=force,
-        update_asset_meta_version=update_asset_meta_version,
         exclude=re.compile(exclude) if exclude is not None else None,
     )
     if update_github_metadata:
@@ -201,7 +194,6 @@ class DatasetInstantiator:
         backup_remote: Optional[str] = None,
         jobs: int = 10,
         force: Optional[str] = None,
-        update_asset_meta_version: bool = False,
         exclude: Optional[re.Pattern] = None,
     ):
         self.dandi_client = dandi_client
@@ -213,7 +205,6 @@ class DatasetInstantiator:
         self.backup_remote = backup_remote
         self.jobs = jobs
         self.force = force
-        self.update_asset_meta_version = update_asset_meta_version
         self.exclude = exclude
 
     def run(self, dandiset_ids: Sequence[str]) -> None:
@@ -317,9 +308,6 @@ class DatasetInstantiator:
         deleted = 0
 
         with dandi_logging(dsdir) as logfile:
-            if self.update_asset_meta_version:
-                # we might need to update, so need to authenticate
-                self.dandi_client.dandi_authenticate()
             log.info("Updating metadata file")
             try:
                 (dsdir / dandiset_metadata_file).unlink()
@@ -353,11 +341,7 @@ class DatasetInstantiator:
                 # and ensure that "modified" is a str
                 adict["modified"] = ensure_strtime(adict["modified"])
                 asset_metadata.append(adict)
-                if (
-                    self.force != "check"
-                    and adict == saved_metadata.get(a.path)
-                    and not self.update_asset_meta_version
-                ):
+                if self.force != "check" and adict == saved_metadata.get(a.path):
                     log.debug(
                         "Asset %s metadata unchanged; not taking any further action",
                         a.path,
@@ -412,60 +396,6 @@ class DatasetInstantiator:
                         )
                         to_update = True
                         updated += 1
-
-                # Ad-hoc custom way to do asset metadata migration via
-                # re-extraction.  This script should be run one dandiset at a
-                # time.
-                asset_schema_version = adict["metadata"].get("schemaVersion")
-                if (
-                    self.update_asset_meta_version
-                    and not to_update
-                    and asset_schema_version
-                    and Version(asset_schema_version) < Version(DANDI_SCHEMA_VERSION)
-                ):
-                    log.info("Calculating new metadata for asset %s", a.path)
-                    new_metadata = get_asset_metadata(
-                        dest,
-                        a.path,
-                        digest=get_digest(dest, "dandi-etag"),
-                        digest_type="dandi_etag",
-                    )
-                    if new_metadata.schemaVersion != DANDI_SCHEMA_VERSION:
-                        raise RuntimeError(
-                            "New metadata does not have expected schemaVersion!"
-                            "  Expected %r, got %r."
-                            % (DANDI_SCHEMA_VERSION, new_metadata.schemaVersion)
-                        )
-                    else:
-                        log.info("Updating metadata for asset %s", a.path)
-                        # we need to figure out blob_id since that is what API needs
-                        # ATM. TODO: discussion is ongoing to change API
-                        # see e.g. https://github.com/dandi/dandi-api/pull/382
-                        blob_id_ret = a.client.post(
-                            "/blobs/digest/",
-                            json={
-                                "algorithm": "dandi:dandi-etag",
-                                "value": new_metadata.digest[
-                                    models.DigestType.dandi_etag
-                                ],
-                            },
-                        )
-                        # no such API interface yet!
-                        # a.set_metadata(new_metadata)
-                        ret = a.client.put(
-                            a.api_path,
-                            json={
-                                "metadata": new_metadata.json_dict(),
-                                "blob_id": blob_id_ret["blob_id"],
-                            },
-                        )
-                        assert adict["asset_id"] != ret["asset_id"]
-                        assert adict["path"] == ret["path"]
-                        # Update adict in-place so that the instance appended
-                        # to asset_metadata gets updated:
-                        adict.clear()
-                        adict.update(ret)
-
                 if to_update:
                     bucket_url = self.get_file_bucket_url(a)
                     src = self.assetstore_path / urlparse(bucket_url).path.lstrip("/")
@@ -729,7 +659,9 @@ def sanitize_contentUrls(urls: List[str]) -> List[str]:
     return urls_
 
 
-def mkrelease(repo: Path, dandiset: RemoteDandiset, commitish: Optional[str] = None) -> None:
+def mkrelease(
+    repo: Path, dandiset: RemoteDandiset, commitish: Optional[str] = None
+) -> None:
     # `dandiset` must have its version set to the published version
     if commitish is None:
         remote_assets = list(dandiset.get_assets())

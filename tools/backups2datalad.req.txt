@@ -7,5 +7,4 @@ datalad
 #fscacher
 humanize
 morecontext ~= 0.1
-packaging
 PyGitHub ~= 1.53
