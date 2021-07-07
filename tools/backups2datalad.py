@@ -2,7 +2,7 @@
 
 __requires__ = [
     "boto3",
-    "click >= 7.*",
+    "click >= 8.0",
     "click-loglevel ~= 0.2",
     "dandi >= 0.21.0",
     "datalad",
@@ -50,12 +50,12 @@ from botocore import UNSIGNED
 from botocore.client import Config
 import click
 from click_loglevel import LogLevel
-from dandi.consts import dandiset_metadata_file
-from dandi.dandiapi import DandiAPIClient
+from dandi.consts import dandiset_metadata_file, known_instances
+from dandi.dandiapi import DandiAPIClient, RemoteDandiset
 from dandi.dandiset import APIDandiset
 from dandi.metadata import get_default_metadata, nwb2asset
 from dandi.support.digests import Digester, get_digest
-from dandi.utils import ensure_datetime, ensure_strtime, get_instance
+from dandi.utils import ensure_datetime, ensure_strtime
 from dandischema import models
 from dandischema.consts import DANDI_SCHEMA_VERSION
 import datalad
@@ -71,6 +71,14 @@ log = logging.getLogger(Path(sys.argv[0]).name)
 
 @click.group()
 @click.option(
+    "-i",
+    "--dandi-instance",
+    type=click.Choice(sorted(known_instances)),
+    default="dandi",
+    help="DANDI instance to use",
+    show_default=True,
+)
+@click.option(
     "-l",
     "--log-level",
     type=LogLevel(),
@@ -79,7 +87,9 @@ log = logging.getLogger(Path(sys.argv[0]).name)
     show_default=True,
 )
 @click.option("--pdb", is_flag=True, help="Drop into debugger if an error occurs")
-def main(log_level, pdb):
+@click.pass_context
+def main(ctx, log_level, pdb, dandi_instance):
+    ctx.obj = ctx.with_resource(DandiAPIClient.for_dandi_instance(dandi_instance))
     if pdb:
         sys.excepthook = pdb_excepthook
     logging.basicConfig(
@@ -122,7 +132,9 @@ def main(log_level, pdb):
 @click.argument("assetstore", type=click.Path(exists=True, file_okay=False))
 @click.argument("target", type=click.Path(file_okay=False))
 @click.argument("dandisets", nargs=-1)
+@click.pass_obj
 def update_from_backup(
+    client,
     assetstore,
     target,
     dandisets,
@@ -137,6 +149,7 @@ def update_from_backup(
     exclude,
 ):
     di = DatasetInstantiator(
+        dandi_client=client,
         assetstore_path=Path(assetstore),
         target_path=Path(target),
         ignore_errors=ignore_errors,
@@ -163,15 +176,16 @@ def update_from_backup(
 )
 @click.argument("dandiset")
 @click.argument("version")
-def release(dandiset, version, dandiset_path, commitish):
-    with DandiAPIClient.for_dandi_instance("dandi") as client:
-        ds = client.get_dandiset(dandiset, version)
-        mkrelease(Path(dandiset_path), ds, commitish=commitish)
+@click.pass_obj
+def release(client, dandiset, version, dandiset_path, commitish):
+    ds = client.get_dandiset(dandiset, version)
+    mkrelease(Path(dandiset_path), ds, commitish=commitish)
 
 
 class DatasetInstantiator:
     def __init__(
         self,
+        dandi_client: DandiAPIClient,
         assetstore_path: Path,
         target_path: Path,
         gh_org,
@@ -182,6 +196,7 @@ class DatasetInstantiator:
         force=None,
         update_asset_meta_version=False,
     ):
+        self.dandi_client = dandi_client
         self.assetstore_path = assetstore_path
         self.target_path = target_path
         self.ignore_errors = ignore_errors
@@ -191,7 +206,6 @@ class DatasetInstantiator:
         self.jobs = jobs
         self.force = force
         self.update_asset_meta_version = update_asset_meta_version
-        self._dandi_client = None
         self._s3client = None
         self._gh = None
 
@@ -202,69 +216,68 @@ class DatasetInstantiator:
             )
         self.target_path.mkdir(parents=True, exist_ok=True)
         datalad.cfg.set("datalad.repo.backend", "SHA256E", where="override")
-        with self.dandi_client:
-            for did in dandisets or self.get_dandiset_ids():
-                if exclude is not None and re.search(exclude, did):
-                    log.debug("Skipping dandiset %s", did)
-                    continue
-                dsdir = self.target_path / did
-                log.info("Syncing Dandiset %s", did)
-                ds = Dataset(str(dsdir))
-                if not ds.is_installed():
-                    log.info("Creating Datalad dataset")
-                    ds.create(cfg_proc="text2git")
-                    if self.backup_remote is not None:
-                        ds.repo.init_remote(
-                            self.backup_remote,
-                            [
-                                "type=external",
-                                "externaltype=rclone",
-                                "chunk=1GB",
-                                f"target={self.backup_remote}",  # I made them matching
-                                "prefix=dandi-dandisets/annexstore",
-                                "embedcreds=no",
-                                "uuid=727f466f-60c3-4778-90b2-b2332856c2f8",
-                                "encryption=none",
-                                # shared, initialized in 000003
-                            ],
-                        )
-                        ds.repo.call_annex(["untrust", self.backup_remote])
-                        ds.repo.set_preferred_content(
-                            "wanted",
-                            "(not metadata=distribution-restrictions=*)",
-                            remote=self.backup_remote,
-                        )
-
-                if self.sync_dataset(did, ds):
-                    if "github" not in ds.repo.get_remotes():
-                        log.info("Creating GitHub sibling for %s", did)
-                        ds.create_sibling_github(
-                            reponame=did,
-                            existing="skip",
-                            name="github",
-                            access_protocol="https",
-                            github_organization=self.gh_org,
-                            publish_depends=self.backup_remote,
-                        )
-                        ds.config.set(
-                            "remote.github.pushurl",
-                            f"git@github.com:{self.gh_org}/{did}.git",
-                            where="local",
-                        )
-                        ds.config.set("branch.master.remote", "github", where="local")
-                        ds.config.set(
-                            "branch.master.merge", "refs/heads/master", where="local"
-                        )
-                        self.gh.get_repo(f"{self.gh_org}/{did}").edit(
-                            homepage=f"https://identifiers.org/DANDI:{did}"
-                        )
-                    else:
-                        log.debug("GitHub remote already exists for %s", did)
-                    log.info("Pushing to sibling")
-                    ds.push(to="github", jobs=self.jobs)
-                    self.gh.get_repo(f"{self.gh_org}/{did}").edit(
-                        description=self.describe_dandiset(did)
+        for did in dandisets or self.get_dandiset_ids():
+            if exclude is not None and re.search(exclude, did):
+                log.debug("Skipping dandiset %s", did)
+                continue
+            dsdir = self.target_path / did
+            log.info("Syncing Dandiset %s", did)
+            ds = Dataset(str(dsdir))
+            if not ds.is_installed():
+                log.info("Creating Datalad dataset")
+                ds.create(cfg_proc="text2git")
+                if self.backup_remote is not None:
+                    ds.repo.init_remote(
+                        self.backup_remote,
+                        [
+                            "type=external",
+                            "externaltype=rclone",
+                            "chunk=1GB",
+                            f"target={self.backup_remote}",  # I made them matching
+                            "prefix=dandi-dandisets/annexstore",
+                            "embedcreds=no",
+                            "uuid=727f466f-60c3-4778-90b2-b2332856c2f8",
+                            "encryption=none",
+                            # shared, initialized in 000003
+                        ],
                     )
+                    ds.repo.call_annex(["untrust", self.backup_remote])
+                    ds.repo.set_preferred_content(
+                        "wanted",
+                        "(not metadata=distribution-restrictions=*)",
+                        remote=self.backup_remote,
+                    )
+
+            if self.sync_dataset(did, ds):
+                if "github" not in ds.repo.get_remotes():
+                    log.info("Creating GitHub sibling for %s", did)
+                    ds.create_sibling_github(
+                        reponame=did,
+                        existing="skip",
+                        name="github",
+                        access_protocol="https",
+                        github_organization=self.gh_org,
+                        publish_depends=self.backup_remote,
+                    )
+                    ds.config.set(
+                        "remote.github.pushurl",
+                        f"git@github.com:{self.gh_org}/{did}.git",
+                        where="local",
+                    )
+                    ds.config.set("branch.master.remote", "github", where="local")
+                    ds.config.set(
+                        "branch.master.merge", "refs/heads/master", where="local"
+                    )
+                    self.gh.get_repo(f"{self.gh_org}/{did}").edit(
+                        homepage=f"https://identifiers.org/DANDI:{did}"
+                    )
+                else:
+                    log.debug("GitHub remote already exists for %s", did)
+                log.info("Pushing to sibling")
+                ds.push(to="github", jobs=self.jobs)
+                self.gh.get_repo(f"{self.gh_org}/{did}").edit(
+                    description=self.describe_dandiset(did)
+                )
 
     def sync_dataset(self, dandiset_id, ds):
         # Returns true if any changes were committed to the repository
@@ -601,13 +614,6 @@ class DatasetInstantiator:
                 homepage=f"https://identifiers.org/DANDI:{did}",
                 description=self.describe_dandiset(did),
             )
-
-    @property
-    def dandi_client(self):
-        if self._dandi_client is None:
-            dandi_instance = get_instance("dandi")
-            self._dandi_client = DandiAPIClient(dandi_instance.api)
-        return self._dandi_client
 
     def get_dandiset_ids(self):
         for dandiset in self.dandi_client.get_dandisets():
