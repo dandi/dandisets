@@ -31,18 +31,19 @@ from pathlib import Path
 import re
 import subprocess
 import sys
-from typing import Iterator, List, Sequence
+from types import TracebackType
+from typing import Dict, Iterator, List, Optional, Sequence, Set, Type, Union
 from urllib.parse import urlparse, urlunparse
 
 import boto3
 from botocore import UNSIGNED
-from botocore.client import Config
+from botocore.client import Config, S3
 import click
 from click_loglevel import LogLevel
 from dandi.consts import dandiset_metadata_file, known_instances
 from dandi.dandiapi import DandiAPIClient, RemoteAsset, RemoteDandiset
 from dandi.dandiset import APIDandiset
-from dandi.metadata import get_default_metadata, nwb2asset
+from dandi.metadata import get_asset_metadata
 from dandi.support.digests import Digester, get_digest
 from dandi.utils import ensure_datetime, ensure_strtime
 from dandischema import models
@@ -50,10 +51,17 @@ from dandischema.consts import DANDI_SCHEMA_VERSION
 import datalad
 from datalad.api import Dataset
 from datalad.support.json_py import dump
-from fscacher import PersistentCache
+
+# from fscacher import PersistentCache
 from github import Github
 from humanize import naturalsize
+from morecontext import envset
 from packaging.version import Version
+
+if sys.version_info[:2] >= (3, 8):
+    from functools import cached_property
+else:
+    from cached_property import cached_property
 
 log = logging.getLogger(Path(sys.argv[0]).name)
 
@@ -77,7 +85,7 @@ log = logging.getLogger(Path(sys.argv[0]).name)
 )
 @click.option("--pdb", is_flag=True, help="Drop into debugger if an error occurs")
 @click.pass_context
-def main(ctx, log_level, pdb, dandi_instance):
+def main(ctx: click.Context, log_level: int, pdb: bool, dandi_instance: str):
     ctx.obj = ctx.with_resource(DandiAPIClient.for_dandi_instance(dandi_instance))
     if pdb:
         sys.excepthook = pdb_excepthook
@@ -118,29 +126,31 @@ def main(ctx, log_level, pdb, dandi_instance):
     help="Only update repositories' metadata",
 )
 @click.option("--update-asset-meta-version", is_flag=True)
-@click.argument("assetstore", type=click.Path(exists=True, file_okay=False))
-@click.argument("target", type=click.Path(file_okay=False))
+@click.argument(
+    "assetstore", type=click.Path(exists=True, file_okay=False, path_type=Path)
+)
+@click.argument("target", type=click.Path(file_okay=False, path_type=Path))
 @click.argument("dandisets", nargs=-1)
 @click.pass_obj
 def update_from_backup(
-    client,
-    assetstore,
-    target,
-    dandisets,
-    ignore_errors,
-    gh_org,
-    re_filter,
-    backup_remote,
-    jobs,
-    force,
-    update_github_metadata,
-    update_asset_meta_version,
-    exclude,
+    client: DandiAPIClient,
+    assetstore: Path,
+    target: Path,
+    dandisets: Sequence[str],
+    ignore_errors: bool,
+    gh_org: str,
+    re_filter: str,
+    backup_remote: Optional[str],
+    jobs: int,
+    force: Optional[str],
+    update_github_metadata: bool,
+    update_asset_meta_version: bool,
+    exclude: Optional[str],
 ):
     di = DatasetInstantiator(
         dandi_client=client,
-        assetstore_path=Path(assetstore),
-        target_path=Path(target),
+        assetstore_path=assetstore,
+        target_path=target,
         ignore_errors=ignore_errors,
         gh_org=gh_org,
         re_filter=re_filter and re.compile(re_filter),
@@ -148,7 +158,7 @@ def update_from_backup(
         jobs=jobs,
         force=force,
         update_asset_meta_version=update_asset_meta_version,
-        exclude=exclude,
+        exclude=exclude and re.compile(exclude),
     )
     if update_github_metadata:
         di.update_github_metadata(dandisets)
@@ -161,15 +171,21 @@ def update_from_backup(
 @click.option(
     "-d",
     "--dandiset-path",
-    type=click.Path(exists=True, file_okay=False),
-    default=os.curdir,
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    default=Path(),
 )
 @click.argument("dandiset")
 @click.argument("version")
 @click.pass_obj
-def release(client, dandiset, version, dandiset_path, commitish):
+def release(
+    client: DandiAPIClient,
+    dandiset: str,
+    version: str,
+    dandiset_path: Path,
+    commitish: Optional[str],
+):
     ds = client.get_dandiset(dandiset, version)
-    mkrelease(Path(dandiset_path), ds, commitish=commitish)
+    mkrelease(dandiset_path, ds, commitish=commitish)
 
 
 class DatasetInstantiator:
@@ -178,14 +194,14 @@ class DatasetInstantiator:
         dandi_client: DandiAPIClient,
         assetstore_path: Path,
         target_path: Path,
-        gh_org,
-        ignore_errors=False,
-        re_filter=None,
-        backup_remote=None,
-        jobs=10,
-        force=None,
-        update_asset_meta_version=False,
-        exclude=None,
+        gh_org: str,
+        ignore_errors: bool = False,
+        re_filter: Optional[re.Pattern] = None,
+        backup_remote: Optional[str] = None,
+        jobs: int = 10,
+        force: Optional[str] = None,
+        update_asset_meta_version: bool = False,
+        exclude: Optional[re.Pattern] = None,
     ):
         self.dandi_client = dandi_client
         self.assetstore_path = assetstore_path
@@ -198,17 +214,15 @@ class DatasetInstantiator:
         self.force = force
         self.update_asset_meta_version = update_asset_meta_version
         self.exclude = exclude
-        self._s3client = None
-        self._gh = None
 
-    def run(self, dandisets=()):
+    def run(self, dandiset_ids: Sequence[str]) -> None:
         if not (self.assetstore_path / "girder-assetstore").exists():
             raise RuntimeError(
                 "Given assetstore path does not contain girder-assetstore folder"
             )
         self.target_path.mkdir(parents=True, exist_ok=True)
         datalad.cfg.set("datalad.repo.backend", "SHA256E", where="override")
-        for d in self.get_dandisets(dandisets):
+        for d in self.get_dandisets(dandiset_ids):
             dsdir = self.target_path / d.identifier
             log.info("Syncing Dandiset %s", d.identifier)
             ds = Dataset(str(dsdir))
@@ -268,20 +282,20 @@ class DatasetInstantiator:
                     description=self.describe_dandiset(d)
                 )
 
-    def sync_dataset(self, dandiset, ds):
+    def sync_dataset(self, dandiset: RemoteDandiset, ds: Dataset) -> bool:
         # Returns true if any changes were committed to the repository
         if ds.repo.dirty:
             raise RuntimeError("Dirty repository; clean or save before running")
         digester = Digester(digests=["sha256"])
-        cache = PersistentCache("backups2datalad")
-        cache.clear()
+        # cache = PersistentCache("backups2datalad")
+        # cache.clear()
 
         # do not cache due to fscacher resolving the path so we end
         # up with a path under .git/annex/objects
         # https://github.com/con/fscacher/issues/44
         # @cache.memoize_path
-        def get_annex_hash(filepath):
-            relpath = str(Path(filepath).relative_to(dsdir))
+        def get_annex_hash(filepath: Union[str, Path]) -> str:
+            # relpath = str(Path(filepath).relative_to(dsdir))
             # OPT: do not bother checking or talking to annex --
             # shaves off about 20% of runtime on 000003, so let's just
             # not bother checking etc but judge from the resolved path to be
@@ -295,8 +309,8 @@ class DatasetInstantiator:
                 log.debug("Asset not under annex; calculating sha256 digest ourselves")
                 return digester(filepath)["sha256"]
 
-        dsdir = ds.pathobj
-        latest_mtime = None
+        dsdir: Path = ds.pathobj
+        latest_mtime: Optional[datetime] = None
         added = 0
         updated = 0
         deleted = 0
@@ -313,10 +327,10 @@ class DatasetInstantiator:
             metadata = dandiset.get_raw_metadata()
             APIDandiset(dsdir, allow_empty=True).update_metadata(metadata)
             ds.repo.add([dandiset_metadata_file])
-            local_assets = set(dataset_files(dsdir))
-            local_assets.discard(dsdir / dandiset_metadata_file)
-            asset_metadata = []
-            saved_metadata = {}
+            local_assets: Set[str] = set(dataset_files(dsdir))
+            local_assets.discard(dandiset_metadata_file)
+            asset_metadata: List[dict] = []
+            saved_metadata: Dict[str, dict] = {}
             try:
                 with (dsdir / ".dandi" / "assets.json").open() as fp:
                     for md in json.load(fp):
@@ -329,8 +343,7 @@ class DatasetInstantiator:
                 pass
             for a in dandiset.get_assets():
                 dest = dsdir / a.path
-                deststr = str(dest.relative_to(dsdir))
-                local_assets.discard(dest)
+                local_assets.discard(a.path)
                 adict = {**a.json_dict(), "metadata": a.get_raw_metadata()}
                 # Let's pop dandiset "linkage" since yoh thinks it should not be there
                 # TODO/discussion: https://github.com/dandi/dandi-cli/issues/690
@@ -340,7 +353,7 @@ class DatasetInstantiator:
                 adict["modified"] = ensure_strtime(adict["modified"])
                 asset_metadata.append(adict)
                 if (
-                    (self.force is None or "check" not in self.force)
+                    self.force != "check"
                     and adict == saved_metadata.get(a.path)
                     and not self.update_asset_meta_version
                 ):
@@ -364,10 +377,7 @@ class DatasetInstantiator:
                     )
                 dandi_etag = adict["metadata"]["digest"]["dandi:dandi-etag"]
                 mtime = ensure_datetime(adict["metadata"]["dateModified"])
-                download_url = (
-                    f"https://api.dandiarchive.org/api/dandisets/{dandiset.identifier}"
-                    f"/versions/draft/assets/{a.identifier}/download/"
-                )
+                download_url = a.download_url
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 if not dest.exists():
                     log.info("Asset not in dataset; will copy")
@@ -413,19 +423,12 @@ class DatasetInstantiator:
                     and Version(asset_schema_version) < Version(DANDI_SCHEMA_VERSION)
                 ):
                     log.info("Calculating new metadata for asset %s", a.path)
-                    try:
-                        new_metadata = nwb2asset(
-                            dest,
-                            digest=get_digest(dest, "dandi-etag"),
-                            digest_type="dandi_etag",
-                        )
-                    except Exception:
-                        log.exception("Failed to extract metadata from %s", dest)
-                        new_metadata = get_default_metadata(
-                            dest,
-                            digest=get_digest(dest, "dandi-etag"),
-                            digest_type="dandi_etag",
-                        )
+                    new_metadata = get_asset_metadata(
+                        dest,
+                        a.path,
+                        digest=get_digest(dest, "dandi-etag"),
+                        digest_type="dandi_etag",
+                    )
                     if new_metadata.schemaVersion != DANDI_SCHEMA_VERSION:
                         raise RuntimeError(
                             "New metadata does not have expected schemaVersion!"
@@ -434,8 +437,6 @@ class DatasetInstantiator:
                         )
                     else:
                         log.info("Updating metadata for asset %s", a.path)
-                        new_metadata.path = a.path
-                        new_metadata_json = new_metadata.json_dict()
                         # we need to figure out blob_id since that is what API needs
                         # ATM. TODO: discussion is ongoing to change API
                         # see e.g. https://github.com/dandi/dandi-api/pull/382
@@ -449,11 +450,11 @@ class DatasetInstantiator:
                             },
                         )
                         # no such API interface yet!
-                        # a.set_raw_metadata(new_metadata)
+                        # a.set_metadata(new_metadata)
                         ret = a.client.put(
                             a.api_path,
                             json={
-                                "metadata": new_metadata_json,
+                                "metadata": new_metadata.json_dict(),
                                 "blob_id": blob_id_ret["blob_id"],
                             },
                         )
@@ -481,16 +482,15 @@ class DatasetInstantiator:
                             else:
                                 raise
                         log.info("Adding asset to dataset")
-                        ds.repo.add([deststr])
-                        if ds.repo.is_under_annex(deststr, batch=True):
+                        ds.repo.add([a.path])
+                        if ds.repo.is_under_annex(a.path, batch=True):
                             log.info("Adding URL %s to asset", bucket_url)
-                            ds.repo.add_url_to_file(deststr, bucket_url, batch=True)
+                            ds.repo.add_url_to_file(a.path, bucket_url, batch=True)
                             log.info("Adding URL %s to asset", download_url)
-                            relpath = str(Path(dest).relative_to(dsdir))
                             ds.repo.call_annex(
                                 [
                                     "registerurl",
-                                    ds.repo.get_file_key(relpath),
+                                    ds.repo.get_file_key(a.path),
                                     download_url,
                                 ]
                             )
@@ -505,14 +505,13 @@ class DatasetInstantiator:
                             dest.unlink()
                         except FileNotFoundError:
                             pass
-                        ds.download_url(urls=bucket_url, path=deststr)
-                        if ds.repo.is_under_annex(deststr, batch=True):
+                        ds.download_url(urls=bucket_url, path=a.path)
+                        if ds.repo.is_under_annex(a.path, batch=True):
                             log.info("Adding URL %s to asset", download_url)
-                            relpath = str(Path(dest).relative_to(dsdir))
                             ds.repo.call_annex(
                                 [
                                     "registerurl",
-                                    ds.repo.get_file_key(relpath),
+                                    ds.repo.get_file_key(a.path),
                                     download_url,
                                 ]
                             )
@@ -536,21 +535,20 @@ class DatasetInstantiator:
                             f"  Dandiarchive reports {dandi_hash},"
                             f" file has {annex_etag}"
                         )
-            for a in local_assets:
-                astr = str(a.relative_to(dsdir))
-                if self.re_filter and not self.re_filter.search(astr):
+            for apath in local_assets:
+                if self.re_filter and not self.re_filter.search(apath):
                     continue
                 log.info(
-                    "Asset %s is in dataset but not in Dandiarchive; deleting", astr
+                    "Asset %s is in dataset but not in Dandiarchive; deleting", apath
                 )
-                ds.repo.remove([astr])
+                ds.repo.remove([apath])
                 deleted += 1
 
             # due to  https://github.com/dandi/dandi-api/issues/231
             # we need to sanitize temporary URLs. TODO: remove when "fixed"
             for asset in asset_metadata:
                 if "contentUrl" in asset["metadata"]:
-                    asset["metadata"]["contentUrl"] = self._get_sanitized_contentUrls(
+                    asset["metadata"]["contentUrl"] = sanitize_contentUrls(
                         asset["metadata"]["contentUrl"]
                     )
             dump(asset_metadata, dsdir / ".dandi" / "assets.json")
@@ -581,17 +579,8 @@ class DatasetInstantiator:
             logfile.unlink()
             return False
 
-    def _get_sanitized_contentUrls(self, urls):
-        urls_ = []
-        for url in urls:
-            if "x-amz-expires=" in url.lower():
-                # just strip away everything after ?
-                url = url[: url.index("?")]
-            urls_.append(url)
-        return urls_
-
-    def update_github_metadata(self, dandisets=()):
-        for d in self.get_dandisets(dandisets):
+    def update_github_metadata(self, dandiset_ids: Sequence[str]) -> None:
+        for d in self.get_dandisets(dandiset_ids):
             log.info("Setting metadata for %s/%s ...", self.gh_org, d.identifier)
             self.gh.get_repo(f"{self.gh_org}/{d.identifier}").edit(
                 homepage=f"https://identifiers.org/DANDI:{d.identifier}",
@@ -606,7 +595,7 @@ class DatasetInstantiator:
         else:
             diter = self.dandi_client.get_dandisets()
         for d in diter:
-            if self.exclude is not None and re.search(self.exclude, d.identifier):
+            if self.exclude is not None and self.exclude.search(d.identifier):
                 log.debug("Skipping dandiset %s", d.identifier)
             else:
                 yield d
@@ -637,25 +626,19 @@ class DatasetInstantiator:
         log.debug("Got bucket URL for asset")
         return urlunparse(urlbits._replace(query=f"versionId={s3meta['VersionId']}"))
 
-    @property
-    def s3client(self):
-        if self._s3client is None:
-            self._s3client = boto3.client(
-                "s3", config=Config(signature_version=UNSIGNED)
-            )
-        return self._s3client
+    @cached_property
+    def s3client(self) -> S3:
+        return boto3.client("s3", config=Config(signature_version=UNSIGNED))
 
-    @property
-    def gh(self):
-        if self._gh is None:
-            token = subprocess.check_output(
-                ["git", "config", "hub.oauthtoken"], universal_newlines=True
-            ).strip()
-            self._gh = Github(token)
-        return self._gh
+    @cached_property
+    def gh(self) -> Github:
+        token = subprocess.check_output(
+            ["git", "config", "hub.oauthtoken"], universal_newlines=True
+        ).strip()
+        return Github(token)
 
     @staticmethod
-    def mklink(src, dest):
+    def mklink(src: Union[str, Path], dest: Union[str, Path]) -> None:
         log.info("cp %s -> %s", src, dest)
         subprocess.run(
             [
@@ -671,29 +654,16 @@ class DatasetInstantiator:
 
 
 @contextmanager
-def custom_commit_date(dt):
+def custom_commit_date(dt: datetime) -> Iterator[None]:
     if dt is not None:
-        with envvar_set("GIT_AUTHOR_DATE", str(dt)):
-            with envvar_set("GIT_COMMITTER_DATE", str(dt)):
+        with envset("GIT_AUTHOR_DATE", str(dt)):
+            with envset("GIT_COMMITTER_DATE", str(dt)):
                 yield
     else:
         yield
 
 
-@contextmanager
-def envvar_set(name, value):
-    oldvalue = os.environ.get(name)
-    os.environ[name] = value
-    try:
-        yield
-    finally:
-        if oldvalue is not None:
-            os.environ[name] = oldvalue
-        else:
-            del os.environ[name]
-
-
-def dataset_files(dspath):
+def dataset_files(dspath: Path) -> Iterator[str]:
     files = deque(
         p
         for p in dspath.iterdir()
@@ -702,13 +672,13 @@ def dataset_files(dspath):
     while files:
         p = files.popleft()
         if p.is_file():
-            yield p
+            yield str(p.relative_to(dspath))
         elif p.is_dir():
             files.extend(p.iterdir())
 
 
 @contextmanager
-def dandi_logging(dandiset_path: Path):
+def dandi_logging(dandiset_path: Path) -> Iterator[Path]:
     logdir = dandiset_path / ".git" / "dandi" / "logs"
     logdir.mkdir(exist_ok=True, parents=True)
     filename = "sync-{:%Y%m%d%H%M%SZ}-{}.log".format(datetime.utcnow(), os.getpid())
@@ -730,12 +700,14 @@ def dandi_logging(dandiset_path: Path):
         root.removeHandler(handler)
 
 
-def is_interactive():
+def is_interactive() -> bool:
     """Return True if all in/outs are tty"""
     return sys.stdin.isatty() and sys.stdout.isatty() and sys.stderr.isatty()
 
 
-def pdb_excepthook(exc_type, exc_value, tb):
+def pdb_excepthook(
+    exc_type: Type[BaseException], exc_value: BaseException, tb: TracebackType
+) -> None:
     import traceback
 
     traceback.print_exception(exc_type, exc_value, tb)
@@ -744,6 +716,16 @@ def pdb_excepthook(exc_type, exc_value, tb):
         import pdb
 
         pdb.post_mortem(tb)
+
+
+def sanitize_contentUrls(urls: List[str]) -> List[str]:
+    urls_ = []
+    for url in urls:
+        if "x-amz-expires=" in url.lower():
+            # just strip away everything after ?
+            url = url[: url.index("?")]
+        urls_.append(url)
+    return urls_
 
 
 def mkrelease(repo: Path, dandiset: RemoteDandiset, commitish: str = None) -> None:
