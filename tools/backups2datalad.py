@@ -45,7 +45,7 @@ from dandi.consts import dandiset_metadata_file, known_instances
 from dandi.dandiapi import DandiAPIClient, RemoteAsset, RemoteDandiset
 from dandi.dandiset import APIDandiset
 from dandi.support.digests import Digester, get_digest
-from dandi.utils import ensure_datetime, ensure_strtime
+from dandi.utils import ensure_datetime
 import datalad
 from datalad.api import Dataset
 from datalad.support.json_py import dump
@@ -143,7 +143,7 @@ def update_from_backup(
     update_github_metadata: bool,
     exclude: Optional[str],
 ) -> None:
-    di = DatasetInstantiator(
+    dd = DandiDatasetter(
         dandi_client=client,
         assetstore_path=assetstore,
         target_path=target,
@@ -156,9 +156,9 @@ def update_from_backup(
         exclude=re.compile(exclude) if exclude is not None else None,
     )
     if update_github_metadata:
-        di.update_github_metadata(dandisets)
+        dd.update_github_metadata(dandisets)
     else:
-        di.run(dandisets)
+        dd.update_from_backup(dandisets)
 
 
 @main.command()
@@ -191,7 +191,7 @@ def release(
     force: Optional[str],
     exclude: Optional[str],
 ) -> None:
-    di = DatasetInstantiator(
+    dd = DandiDatasetter(
         dandi_client=client,
         assetstore_path=assetstore,
         target_path=target,
@@ -205,10 +205,10 @@ def release(
     )
     dandiset_obj = client.get_dandiset(dandiset, version)
     dataset = Dataset(str(target / dandiset))
-    di.mkrelease(dandiset_obj, dataset, commitish=commitish)
+    dd.mkrelease(dandiset_obj, dataset, commitish=commitish)
 
 
-class DatasetInstantiator:
+class DandiDatasetter:
     def __init__(
         self,
         dandi_client: DandiAPIClient,
@@ -233,7 +233,7 @@ class DatasetInstantiator:
         self.force = force
         self.exclude = exclude
 
-    def run(self, dandiset_ids: Sequence[str]) -> None:
+    def update_from_backup(self, dandiset_ids: Sequence[str]) -> None:
         if not (self.assetstore_path / "girder-assetstore").exists():
             raise RuntimeError(
                 "Given assetstore path does not contain girder-assetstore folder"
@@ -242,58 +242,9 @@ class DatasetInstantiator:
         datalad.cfg.set("datalad.repo.backend", "SHA256E", where="override")
         for d in self.get_dandisets(dandiset_ids):
             dsdir = self.target_path / d.identifier
-            log.info("Syncing Dandiset %s", d.identifier)
-            ds = Dataset(str(dsdir))
-            if not ds.is_installed():
-                log.info("Creating Datalad dataset")
-                ds.create(cfg_proc="text2git")
-                if self.backup_remote is not None:
-                    ds.repo.init_remote(
-                        self.backup_remote,
-                        [
-                            "type=external",
-                            "externaltype=rclone",
-                            "chunk=1GB",
-                            f"target={self.backup_remote}",  # I made them matching
-                            "prefix=dandi-dandisets/annexstore",
-                            "embedcreds=no",
-                            "uuid=727f466f-60c3-4778-90b2-b2332856c2f8",
-                            "encryption=none",
-                            # shared, initialized in 000003
-                        ],
-                    )
-                    ds.repo.call_annex(["untrust", self.backup_remote])
-                    ds.repo.set_preferred_content(
-                        "wanted",
-                        "(not metadata=distribution-restrictions=*)",
-                        remote=self.backup_remote,
-                    )
-
+            ds = self.init_dataset(dsdir)
             if self.sync_dataset(d, ds):
-                if "github" not in ds.repo.get_remotes():
-                    log.info("Creating GitHub sibling for %s", d.identifier)
-                    ds.create_sibling_github(
-                        reponame=d.identifier,
-                        existing="skip",
-                        name="github",
-                        access_protocol="https",
-                        github_organization=self.gh_org,
-                        publish_depends=self.backup_remote,
-                    )
-                    ds.config.set(
-                        "remote.github.pushurl",
-                        f"git@github.com:{self.gh_org}/{d.identifier}.git",
-                        where="local",
-                    )
-                    ds.config.set("branch.master.remote", "github", where="local")
-                    ds.config.set(
-                        "branch.master.merge", "refs/heads/master", where="local"
-                    )
-                    self.gh.get_repo(f"{self.gh_org}/{d.identifier}").edit(
-                        homepage=f"https://identifiers.org/DANDI:{d.identifier}"
-                    )
-                else:
-                    log.debug("GitHub remote already exists for %s", d.identifier)
+                self.ensure_github_remote(ds, d.identifier)
                 self.tag_releases(d, ds)
                 log.info("Pushing to sibling")
                 ds.push(to="github", jobs=self.jobs)
@@ -301,8 +252,61 @@ class DatasetInstantiator:
                     description=self.describe_dandiset(d)
                 )
 
+    def init_dataset(self, dsdir: Path) -> Dataset:
+        ds = Dataset(str(dsdir))
+        if not ds.is_installed():
+            log.info("Creating Datalad dataset")
+            ds.create(cfg_proc="text2git")
+            if self.backup_remote is not None:
+                ds.repo.init_remote(
+                    self.backup_remote,
+                    [
+                        "type=external",
+                        "externaltype=rclone",
+                        "chunk=1GB",
+                        f"target={self.backup_remote}",  # I made them matching
+                        "prefix=dandi-dandisets/annexstore",
+                        "embedcreds=no",
+                        "uuid=727f466f-60c3-4778-90b2-b2332856c2f8",
+                        "encryption=none",
+                        # shared, initialized in 000003
+                    ],
+                )
+                ds.repo.call_annex(["untrust", self.backup_remote])
+                ds.repo.set_preferred_content(
+                    "wanted",
+                    "(not metadata=distribution-restrictions=*)",
+                    remote=self.backup_remote,
+                )
+        return ds
+
+    def ensure_github_remote(self, ds: Dataset, dandiset_id: str) -> None:
+        if "github" not in ds.repo.get_remotes():
+            log.info("Creating GitHub sibling for %s", dandiset_id)
+            ds.create_sibling_github(
+                reponame=dandiset_id,
+                existing="skip",
+                name="github",
+                access_protocol="https",
+                github_organization=self.gh_org,
+                publish_depends=self.backup_remote,
+            )
+            ds.config.set(
+                "remote.github.pushurl",
+                f"git@github.com:{self.gh_org}/{dandiset_id}.git",
+                where="local",
+            )
+            ds.config.set("branch.master.remote", "github", where="local")
+            ds.config.set("branch.master.merge", "refs/heads/master", where="local")
+            self.gh.get_repo(f"{self.gh_org}/{dandiset_id}").edit(
+                homepage=f"https://identifiers.org/DANDI:{dandiset_id}"
+            )
+        else:
+            log.debug("GitHub remote already exists for %s", dandiset_id)
+
     def sync_dataset(self, dandiset: RemoteDandiset, ds: Dataset) -> bool:
         # Returns true if any changes were committed to the repository
+        log.info("Syncing Dandiset %s", dandiset.identifier)
         if ds.repo.dirty:
             raise RuntimeError("Dirty repository; clean or save before running")
         digester = Digester(digests=["sha256"])
@@ -365,8 +369,6 @@ class DatasetInstantiator:
                 # TODO/discussion: https://github.com/dandi/dandi-cli/issues/690
                 for f in ("dandiset_id", "version_id"):
                     adict.pop(f, None)
-                # and ensure that "modified" is a str
-                adict["modified"] = ensure_strtime(adict["modified"])
                 asset_metadata.append(adict)
                 if self.force != "check" and adict == saved_metadata.get(a.path):
                     log.debug(
