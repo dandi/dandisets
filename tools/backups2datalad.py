@@ -23,6 +23,7 @@ Later TODOs
 
 from collections import deque
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime
 import json
 import logging
@@ -49,12 +50,12 @@ from dandi.utils import ensure_datetime
 import datalad
 from datalad.api import Dataset
 from datalad.support.json_py import dump
-
-# from fscacher import PersistentCache
 from github import Github
 from humanize import naturalsize
 from morecontext import envset
 from mypy_boto3_s3 import S3Client
+
+# from fscacher import PersistentCache
 
 if sys.version_info[:2] >= (3, 8):
     from functools import cached_property
@@ -64,207 +65,56 @@ else:
 log = logging.getLogger(Path(sys.argv[0]).name)
 
 
-@click.group()
-@click.option(
-    "-i",
-    "--dandi-instance",
-    type=click.Choice(sorted(known_instances)),
-    default="dandi",
-    help="DANDI instance to use",
-    show_default=True,
-)
-@click.option(
-    "-l",
-    "--log-level",
-    type=LogLevel(),
-    default="INFO",
-    help="Set logging level",
-    show_default=True,
-)
-@click.option("--pdb", is_flag=True, help="Drop into debugger if an error occurs")
-@click.pass_context
-def main(ctx: click.Context, log_level: int, pdb: bool, dandi_instance: str) -> None:
-    ctx.obj = ctx.with_resource(DandiAPIClient.for_dandi_instance(dandi_instance))
-    if pdb:
-        sys.excepthook = pdb_excepthook
-    logging.basicConfig(
-        format="%(asctime)s [%(levelname)-8s] %(name)s %(message)s",
-        datefmt="%Y-%m-%dT%H:%M:%S%z",
-        level=log_level,
-        force=True,  # Override dandi's settings
-    )
-
-
-@main.command()
-@click.option("--backup-remote", help="Name of the rclone remote to push to")
-@click.option(
-    "-e", "--exclude", help="Skip dandisets matching the given regex", metavar="REGEX"
-)
-@click.option("-f", "--force", type=click.Choice(["check"]))
-@click.option(
-    "--gh-org",
-    help="GitHub organization to create repositories under",
-    required=True,
-)
-@click.option("-i", "--ignore-errors", is_flag=True)
-@click.option(
-    "-J",
-    "--jobs",
-    type=int,
-    default=10,
-    help="How many parallel jobs to use when pushing",
-    show_default=True,
-)
-@click.option(
-    "--re-filter", help="Only consider assets matching the given regex", metavar="REGEX"
-)
-@click.option(
-    "--update-github-metadata",
-    is_flag=True,
-    help="Only update repositories' metadata",
-)
-@click.argument(
-    "assetstore", type=click.Path(exists=True, file_okay=False, path_type=Path)
-)
-@click.argument("target", type=click.Path(file_okay=False, path_type=Path))
-@click.argument("dandisets", nargs=-1)
-@click.pass_obj
-def update_from_backup(
-    client: DandiAPIClient,
-    assetstore: Path,
-    target: Path,
-    dandisets: Sequence[str],
-    ignore_errors: bool,
-    gh_org: str,
-    re_filter: str,
-    backup_remote: Optional[str],
-    jobs: int,
-    force: Optional[str],
-    update_github_metadata: bool,
-    exclude: Optional[str],
-) -> None:
-    dd = DandiDatasetter(
-        dandi_client=client,
-        assetstore_path=assetstore,
-        target_path=target,
-        ignore_errors=ignore_errors,
-        gh_org=gh_org,
-        re_filter=re.compile(re_filter) if exclude is not None else None,
-        backup_remote=backup_remote,
-        jobs=jobs,
-        force=force,
-        exclude=re.compile(exclude) if exclude is not None else None,
-    )
-    if update_github_metadata:
-        dd.update_github_metadata(dandisets)
-    else:
-        dd.update_from_backup(dandisets)
-
-
-@main.command()
-@click.option("--commitish", metavar="COMMITISH")
-@click.option("-f", "--force", type=click.Choice(["check"]))
-@click.option("-i", "--ignore-errors", is_flag=True)
-@click.option(
-    "--re-filter", help="Only consider assets matching the given regex", metavar="REGEX"
-)
-@click.option(
-    "--assetstore",
-    type=click.Path(exists=True, file_okay=False, path_type=Path),
-    required=True,
-)
-@click.option(
-    "--target", type=click.Path(file_okay=False, path_type=Path), required=True
-)
-@click.argument("dandiset")
-@click.argument("version")
-@click.pass_obj
-def release(
-    client: DandiAPIClient,
-    dandiset: str,
-    version: str,
-    commitish: Optional[str],
-    assetstore: Path,
-    target: Path,
-    ignore_errors: bool,
-    re_filter: str,
-    force: Optional[str],
-    exclude: Optional[str],
-) -> None:
-    dd = DandiDatasetter(
-        dandi_client=client,
-        assetstore_path=assetstore,
-        target_path=target,
-        ignore_errors=ignore_errors,
-        gh_org="UNUSED",
-        re_filter=re.compile(re_filter) if exclude is not None else None,
-        backup_remote=None,
-        jobs=10,
-        force=force,
-        exclude=None,
-    )
-    dandiset_obj = client.get_dandiset(dandiset, version)
-    dataset = Dataset(str(target / dandiset))
-    dd.mkrelease(dandiset_obj, dataset, commitish=commitish)
-
-
+@dataclass
 class DandiDatasetter:
-    def __init__(
-        self,
-        dandi_client: DandiAPIClient,
-        assetstore_path: Path,
-        target_path: Path,
-        gh_org: str,
-        ignore_errors: bool = False,
-        re_filter: Optional[re.Pattern] = None,
-        backup_remote: Optional[str] = None,
-        jobs: int = 10,
-        force: Optional[str] = None,
-        exclude: Optional[re.Pattern] = None,
-    ):
-        self.dandi_client = dandi_client
-        self.assetstore_path = assetstore_path
-        self.target_path = target_path
-        self.ignore_errors = ignore_errors
-        self.gh_org = gh_org
-        self.re_filter = re_filter
-        self.backup_remote = backup_remote
-        self.jobs = jobs
-        self.force = force
-        self.exclude = exclude
+    dandi_client: DandiAPIClient
+    assetstore_path: Path
+    target_path: Path
+    ignore_errors: bool = False
+    asset_filter: Optional[re.Pattern] = None
+    jobs: int = 10
+    force: Optional[str] = None
 
-    def update_from_backup(self, dandiset_ids: Sequence[str]) -> None:
+    def update_from_backup(
+        self,
+        dandiset_ids: Sequence[str],
+        exclude: Optional[re.Pattern],
+        gh_org: str,
+        backup_remote: Optional[str],
+    ) -> None:
         if not (self.assetstore_path / "girder-assetstore").exists():
             raise RuntimeError(
                 "Given assetstore path does not contain girder-assetstore folder"
             )
         self.target_path.mkdir(parents=True, exist_ok=True)
         datalad.cfg.set("datalad.repo.backend", "SHA256E", where="override")
-        for d in self.get_dandisets(dandiset_ids):
+        for d in self.get_dandisets(dandiset_ids, exclude=exclude):
             dsdir = self.target_path / d.identifier
-            ds = self.init_dataset(dsdir)
+            ds = self.init_dataset(dsdir, backup_remote=backup_remote)
             if self.sync_dataset(d, ds):
-                self.ensure_github_remote(ds, d.identifier)
+                self.ensure_github_remote(
+                    ds, d.identifier, gh_org=gh_org, backup_remote=backup_remote
+                )
                 self.tag_releases(d, ds)
                 log.info("Pushing to sibling")
                 ds.push(to="github", jobs=self.jobs)
-                self.gh.get_repo(f"{self.gh_org}/{d.identifier}").edit(
+                self.gh.get_repo(f"{gh_org}/{d.identifier}").edit(
                     description=self.describe_dandiset(d)
                 )
 
-    def init_dataset(self, dsdir: Path) -> Dataset:
+    def init_dataset(self, dsdir: Path, backup_remote: Optional[str]) -> Dataset:
         ds = Dataset(str(dsdir))
         if not ds.is_installed():
             log.info("Creating Datalad dataset")
             ds.create(cfg_proc="text2git")
-            if self.backup_remote is not None:
+            if backup_remote is not None:
                 ds.repo.init_remote(
-                    self.backup_remote,
+                    backup_remote,
                     [
                         "type=external",
                         "externaltype=rclone",
                         "chunk=1GB",
-                        f"target={self.backup_remote}",  # I made them matching
+                        f"target={backup_remote}",  # I made them matching
                         "prefix=dandi-dandisets/annexstore",
                         "embedcreds=no",
                         "uuid=727f466f-60c3-4778-90b2-b2332856c2f8",
@@ -272,15 +122,17 @@ class DandiDatasetter:
                         # shared, initialized in 000003
                     ],
                 )
-                ds.repo.call_annex(["untrust", self.backup_remote])
+                ds.repo.call_annex(["untrust", backup_remote])
                 ds.repo.set_preferred_content(
                     "wanted",
                     "(not metadata=distribution-restrictions=*)",
-                    remote=self.backup_remote,
+                    remote=backup_remote,
                 )
         return ds
 
-    def ensure_github_remote(self, ds: Dataset, dandiset_id: str) -> None:
+    def ensure_github_remote(
+        self, ds: Dataset, dandiset_id: str, gh_org: str, backup_remote: Optional[str]
+    ) -> None:
         if "github" not in ds.repo.get_remotes():
             log.info("Creating GitHub sibling for %s", dandiset_id)
             ds.create_sibling_github(
@@ -288,17 +140,17 @@ class DandiDatasetter:
                 existing="skip",
                 name="github",
                 access_protocol="https",
-                github_organization=self.gh_org,
-                publish_depends=self.backup_remote,
+                github_organization=gh_org,
+                publish_depends=backup_remote,
             )
             ds.config.set(
                 "remote.github.pushurl",
-                f"git@github.com:{self.gh_org}/{dandiset_id}.git",
+                f"git@github.com:{gh_org}/{dandiset_id}.git",
                 where="local",
             )
             ds.config.set("branch.master.remote", "github", where="local")
             ds.config.set("branch.master.merge", "refs/heads/master", where="local")
-            self.gh.get_repo(f"{self.gh_org}/{dandiset_id}").edit(
+            self.gh.get_repo(f"{gh_org}/{dandiset_id}").edit(
                 homepage=f"https://identifiers.org/DANDI:{dandiset_id}"
             )
         else:
@@ -376,7 +228,7 @@ class DandiDatasetter:
                         a.path,
                     )
                     continue
-                if self.re_filter and not self.re_filter.search(a.path):
+                if self.asset_filter and not self.asset_filter.search(a.path):
                     log.debug("Skipping asset %s", a.path)
                     continue
                 log.info("Syncing asset %s", a.path)
@@ -430,7 +282,7 @@ class DandiDatasetter:
                     src = self.assetstore_path / urlparse(bucket_url).path.lstrip("/")
                     if src.exists():
                         try:
-                            self.mklink(src, dest)
+                            mklink(src, dest)
                         except Exception:
                             if self.ignore_errors:
                                 log.warning(
@@ -496,7 +348,7 @@ class DandiDatasetter:
                             f" file has {annex_etag}"
                         )
             for apath in local_assets:
-                if self.re_filter and not self.re_filter.search(apath):
+                if self.asset_filter and not self.asset_filter.search(apath):
                     continue
                 log.info(
                     "Asset %s is in dataset but not in Dandiarchive; deleting", apath
@@ -544,15 +396,19 @@ class DandiDatasetter:
             logfile.unlink()
             return False
 
-    def update_github_metadata(self, dandiset_ids: Sequence[str]) -> None:
-        for d in self.get_dandisets(dandiset_ids):
-            log.info("Setting metadata for %s/%s ...", self.gh_org, d.identifier)
-            self.gh.get_repo(f"{self.gh_org}/{d.identifier}").edit(
+    def update_github_metadata(
+        self, dandiset_ids: Sequence[str], gh_org: str, exclude: Optional[re.Pattern]
+    ) -> None:
+        for d in self.get_dandisets(dandiset_ids, exclude=exclude):
+            log.info("Setting metadata for %s/%s ...", gh_org, d.identifier)
+            self.gh.get_repo(f"{gh_org}/{d.identifier}").edit(
                 homepage=f"https://identifiers.org/DANDI:{d.identifier}",
                 description=self.describe_dandiset(d),
             )
 
-    def get_dandisets(self, dandiset_ids: Sequence[str]) -> Iterator[RemoteDandiset]:
+    def get_dandisets(
+        self, dandiset_ids: Sequence[str], exclude: Optional[re.Pattern]
+    ) -> Iterator[RemoteDandiset]:
         if dandiset_ids:
             diter = (
                 self.dandi_client.get_dandiset(did, "draft") for did in dandiset_ids
@@ -560,7 +416,7 @@ class DandiDatasetter:
         else:
             diter = self.dandi_client.get_dandisets()
         for d in diter:
-            if self.exclude is not None and self.exclude.search(d.identifier):
+            if exclude is not None and exclude.search(d.identifier):
                 log.debug("Skipping dandiset %s", d.identifier)
             else:
                 yield d
@@ -646,9 +502,10 @@ class DandiDatasetter:
             dandiset.version_id,
             commitish,
         )
-        if branching:
-            git("push", "-u", "github", "release-{dandiset.version_id}")
-        git("push", "--follow-tags", "github")
+        # if branching:
+        #     git("push", "-u", "github", "release-{dandiset.version_id}")
+        # git("push", "--follow-tags", "github")
+        ds.push(to="github", jobs=self.jobs)
         if branching:
             git("checkout", "master")
 
@@ -661,20 +518,142 @@ class DandiDatasetter:
         token = readcmd("git", "config", "hub.oauthtoken")
         return Github(token)
 
-    @staticmethod
-    def mklink(src: Union[str, Path], dest: Union[str, Path]) -> None:
-        log.info("cp %s -> %s", src, dest)
-        subprocess.run(
-            [
-                "cp",
-                "-L",
-                "--reflink=always",
-                "--remove-destination",
-                str(src),
-                str(dest),
-            ],
-            check=True,
-        )
+
+@click.group()
+@click.option(
+    "--asset-filter",
+    help="Only consider assets matching the given regex",
+    metavar="REGEX",
+)
+@click.option(
+    "-A",
+    "--assetstore",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    required=True,
+)
+@click.option(
+    "-i",
+    "--dandi-instance",
+    type=click.Choice(sorted(known_instances)),
+    default="dandi",
+    help="DANDI instance to use",
+    show_default=True,
+)
+@click.option(
+    "-J",
+    "--jobs",
+    type=int,
+    default=10,
+    help="How many parallel jobs to use when pushing",
+    show_default=True,
+)
+@click.option("-f", "--force", type=click.Choice(["check"]))
+@click.option("--ignore-errors", is_flag=True)
+@click.option(
+    "-l",
+    "--log-level",
+    type=LogLevel(),
+    default="INFO",
+    help="Set logging level  [default: INFO]",
+)
+@click.option("--pdb", is_flag=True, help="Drop into debugger if an error occurs")
+@click.option(
+    "-T", "--target", type=click.Path(file_okay=False, path_type=Path), required=True
+)
+@click.pass_context
+def main(
+    ctx: click.Context,
+    asset_filter: str,
+    assetstore: Path,
+    dandi_instance: str,
+    force: Optional[str],
+    ignore_errors: bool,
+    jobs: int,
+    log_level: int,
+    pdb: bool,
+    target: Path,
+) -> None:
+    ctx.obj = DandiDatasetter(
+        dandi_client=ctx.with_resource(
+            DandiAPIClient.for_dandi_instance(dandi_instance)
+        ),
+        assetstore_path=assetstore,
+        target_path=target,
+        ignore_errors=ignore_errors,
+        asset_filter=re.compile(asset_filter) if asset_filter is not None else None,
+        jobs=jobs,
+        force=force,
+    )
+    if pdb:
+        sys.excepthook = pdb_excepthook
+    logging.basicConfig(
+        format="%(asctime)s [%(levelname)-8s] %(name)s %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S%z",
+        level=log_level,
+        force=True,  # Override dandi's settings
+    )
+
+
+@main.command()
+@click.option("--backup-remote", help="Name of the rclone remote to push to")
+@click.option(
+    "-e", "--exclude", help="Skip dandisets matching the given regex", metavar="REGEX"
+)
+@click.option(
+    "--gh-org",
+    help="GitHub organization to create repositories under",
+    required=True,
+)
+@click.argument("dandisets", nargs=-1)
+@click.pass_obj
+def update_from_backup(
+    datasetter: DandiDatasetter,
+    dandisets: Sequence[str],
+    backup_remote: Optional[str],
+    gh_org: str,
+    exclude: Optional[str],
+) -> None:
+    exclude_rgx = re.compile(exclude) if exclude is not None else None
+    datasetter.update_from_backup(
+        dandisets, exclude=exclude_rgx, gh_org=gh_org, backup_remote=backup_remote
+    )
+
+
+@main.command()
+@click.option(
+    "-e", "--exclude", help="Skip dandisets matching the given regex", metavar="REGEX"
+)
+@click.option(
+    "--gh-org",
+    help="GitHub organization to create repositories under",
+    required=True,
+)
+@click.argument("dandisets", nargs=-1)
+@click.pass_obj
+def update_github_metadata(
+    datasetter: DandiDatasetter,
+    dandisets: Sequence[str],
+    exclude: Optional[str],
+    gh_org: str,
+) -> None:
+    exclude_rgx = re.compile(exclude) if exclude is not None else None
+    datasetter.update_github_metadata(dandisets, exclude=exclude_rgx, gh_org=gh_org)
+
+
+@main.command()
+@click.option("--commitish", metavar="COMMITISH")
+@click.argument("dandiset")
+@click.argument("version")
+@click.pass_obj
+def release(
+    datasetter: DandiDatasetter,
+    dandiset: str,
+    version: str,
+    commitish: Optional[str],
+) -> None:
+    dandiset_obj = datasetter.dandi_client.get_dandiset(dandiset, version)
+    dataset = Dataset(str(datasetter.target_path / dandiset))
+    datasetter.mkrelease(dandiset_obj, dataset, commitish=commitish)
 
 
 @contextmanager
@@ -763,6 +742,21 @@ def readcmd(*args: Union[str, Path], **kwargs: Any) -> str:
     return cast(
         str, subprocess.check_output(args, universal_newlines=True, **kwargs)
     ).strip()
+
+
+def mklink(src: Union[str, Path], dest: Union[str, Path]) -> None:
+    log.info("cp %s -> %s", src, dest)
+    subprocess.run(
+        [
+            "cp",
+            "-L",
+            "--reflink=always",
+            "--remove-destination",
+            str(src),
+            str(dest),
+        ],
+        check=True,
+    )
 
 
 if __name__ == "__main__":

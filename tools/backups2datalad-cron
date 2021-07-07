@@ -20,12 +20,12 @@ export DATALAD_LOG_LEVEL=WARNING  # otherwise too much of noise
 set -x
 eval tools/backups2datalad.py \
    -l WARNING \
+   -J 5 \
+   --assetstore "$girderdir" \
+   --target "$ds" \
    update-from-backup \
    --backup-remote dandi-dandisets-dropbox  \
    --gh-org dandisets \
-   -J 5 \
-   "$girderdir" \
-   "$ds" \
    "$*" 2>&1 | grep -v 'nothing to save, working tree clean'
 
 # TODO - save only the ones which were updated
