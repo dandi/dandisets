@@ -43,7 +43,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
-from typing import List
+from typing import Iterator, List, Sequence
 from urllib.parse import urlparse, urlunparse
 
 import boto3
@@ -160,11 +160,12 @@ def update_from_backup(
         jobs=jobs,
         force=force,
         update_asset_meta_version=update_asset_meta_version,
+        exclude=exclude,
     )
     if update_github_metadata:
-        di.update_github_metadata(dandisets, exclude)
+        di.update_github_metadata(dandisets)
     else:
-        di.run(dandisets, exclude)
+        di.run(dandisets)
 
 
 @main.command()
@@ -196,6 +197,7 @@ class DatasetInstantiator:
         jobs=10,
         force=None,
         update_asset_meta_version=False,
+        exclude=None,
     ):
         self.dandi_client = dandi_client
         self.assetstore_path = assetstore_path
@@ -207,22 +209,20 @@ class DatasetInstantiator:
         self.jobs = jobs
         self.force = force
         self.update_asset_meta_version = update_asset_meta_version
+        self.exclude = exclude
         self._s3client = None
         self._gh = None
 
-    def run(self, dandisets=(), exclude=None):
+    def run(self, dandisets=()):
         if not (self.assetstore_path / "girder-assetstore").exists():
             raise RuntimeError(
                 "Given assetstore path does not contain girder-assetstore folder"
             )
         self.target_path.mkdir(parents=True, exist_ok=True)
         datalad.cfg.set("datalad.repo.backend", "SHA256E", where="override")
-        for did in dandisets or self.get_dandiset_ids():
-            if exclude is not None and re.search(exclude, did):
-                log.debug("Skipping dandiset %s", did)
-                continue
-            dsdir = self.target_path / did
-            log.info("Syncing Dandiset %s", did)
+        for d in self.get_dandisets(dandisets):
+            dsdir = self.target_path / d.identifier
+            log.info("Syncing Dandiset %s", d.identifier)
             ds = Dataset(str(dsdir))
             if not ds.is_installed():
                 log.info("Creating Datalad dataset")
@@ -249,11 +249,11 @@ class DatasetInstantiator:
                         remote=self.backup_remote,
                     )
 
-            if self.sync_dataset(did, ds):
+            if self.sync_dataset(d, ds):
                 if "github" not in ds.repo.get_remotes():
-                    log.info("Creating GitHub sibling for %s", did)
+                    log.info("Creating GitHub sibling for %s", d.identifier)
                     ds.create_sibling_github(
-                        reponame=did,
+                        reponame=d.identifier,
                         existing="skip",
                         name="github",
                         access_protocol="https",
@@ -262,25 +262,25 @@ class DatasetInstantiator:
                     )
                     ds.config.set(
                         "remote.github.pushurl",
-                        f"git@github.com:{self.gh_org}/{did}.git",
+                        f"git@github.com:{self.gh_org}/{d.identifier}.git",
                         where="local",
                     )
                     ds.config.set("branch.master.remote", "github", where="local")
                     ds.config.set(
                         "branch.master.merge", "refs/heads/master", where="local"
                     )
-                    self.gh.get_repo(f"{self.gh_org}/{did}").edit(
-                        homepage=f"https://identifiers.org/DANDI:{did}"
+                    self.gh.get_repo(f"{self.gh_org}/{d.identifier}").edit(
+                        homepage=f"https://identifiers.org/DANDI:{d.identifier}"
                     )
                 else:
-                    log.debug("GitHub remote already exists for %s", did)
+                    log.debug("GitHub remote already exists for %s", d.identifier)
                 log.info("Pushing to sibling")
                 ds.push(to="github", jobs=self.jobs)
-                self.gh.get_repo(f"{self.gh_org}/{did}").edit(
-                    description=self.describe_dandiset(did)
+                self.gh.get_repo(f"{self.gh_org}/{d.identifier}").edit(
+                    description=self.describe_dandiset(d)
                 )
 
-    def sync_dataset(self, dandiset_id, ds):
+    def sync_dataset(self, dandiset, ds):
         # Returns true if any changes were committed to the repository
         if ds.repo.dirty:
             raise RuntimeError("Dirty repository; clean or save before running")
@@ -317,7 +317,6 @@ class DatasetInstantiator:
             if self.update_asset_meta_version:
                 # we might need to update, so need to authenticate
                 self.dandi_client.dandi_authenticate()
-            dandiset = self.dandi_client.get_dandiset(dandiset_id, "draft")
             log.info("Updating metadata file")
             try:
                 (dsdir / dandiset_metadata_file).unlink()
@@ -372,13 +371,13 @@ class DatasetInstantiator:
                     dandi_hash = None
                     log.info(
                         "%s: %s: Asset metadata does not include sha256 hash",
-                        dandiset_id,
+                        dandiset.identifier,
                         a.path,
                     )
                 dandi_etag = adict["metadata"]["digest"]["dandi:dandi-etag"]
                 mtime = ensure_datetime(adict["metadata"]["dateModified"])
                 download_url = (
-                    f"https://api.dandiarchive.org/api/dandisets/{dandiset_id}"
+                    f"https://api.dandiarchive.org/api/dandisets/{dandiset.identifier}"
                     f"/versions/draft/assets/{a.identifier}/download/"
                 )
                 dest.parent.mkdir(parents=True, exist_ok=True)
@@ -478,9 +477,7 @@ class DatasetInstantiator:
                         adict.update(ret)
 
                 if to_update:
-                    bucket_url = self.get_file_bucket_url(
-                        dandiset_id, "draft", a.identifier
-                    )
+                    bucket_url = self.get_file_bucket_url(a)
                     src = self.assetstore_path / urlparse(bucket_url).path.lstrip("/")
                     if src.exists():
                         try:
@@ -489,7 +486,7 @@ class DatasetInstantiator:
                             if self.ignore_errors:
                                 log.warning(
                                     "%s: %s: cp command failed; ignoring",
-                                    dandiset_id,
+                                    dandiset.identifier,
                                     a.path,
                                 )
                                 continue
@@ -605,23 +602,28 @@ class DatasetInstantiator:
             urls_.append(url)
         return urls_
 
-    def update_github_metadata(self, dandisets=(), exclude=None):
-        for did in dandisets or self.get_dandiset_ids():
-            if exclude is not None and re.search(exclude, did):
-                log.debug("Skipping dandiset %s", did)
-                continue
-            log.info("Setting metadata for %s/%s ...", self.gh_org, did)
-            self.gh.get_repo(f"{self.gh_org}/{did}").edit(
-                homepage=f"https://identifiers.org/DANDI:{did}",
-                description=self.describe_dandiset(did),
+    def update_github_metadata(self, dandisets=()):
+        for d in self.get_dandisets(dandisets):
+            log.info("Setting metadata for %s/%s ...", self.gh_org, d.identifier)
+            self.gh.get_repo(f"{self.gh_org}/{d.identifier}").edit(
+                homepage=f"https://identifiers.org/DANDI:{d.identifier}",
+                description=self.describe_dandiset(d),
             )
 
-    def get_dandiset_ids(self):
-        for dandiset in self.dandi_client.get_dandisets():
-            yield dandiset.identifier
+    def get_dandisets(self, dandiset_ids: Sequence[str]) -> Iterator[RemoteDandiset]:
+        if dandiset_ids:
+            diter = (
+                self.dandi_client.get_dandiset(did, "draft") for did in dandiset_ids
+            )
+        else:
+            diter = self.dandi_client.get_dandisets()
+        for d in diter:
+            if self.exclude is not None and re.search(self.exclude, d.identifier):
+                log.debug("Skipping dandiset %s", d.identifier)
+            else:
+                yield d
 
-    def describe_dandiset(self, dandiset_id):
-        dandiset = self.dandi_client.get_dandiset(dandiset_id)
+    def describe_dandiset(self, dandiset: RemoteDandiset) -> str:
         metadata = dandiset.get_raw_metadata()
         desc = dandiset.version.name
         contact = ", ".join(
@@ -636,15 +638,10 @@ class DatasetInstantiator:
         else:
             return f"{num_files} files, {size}, {desc}"
 
-    def get_file_bucket_url(self, dandiset_id, version_id, asset_id):
+    def get_file_bucket_url(self, asset: RemoteAsset) -> str:
         log.debug("Fetching bucket URL for asset")
-        r = self.dandi_client.request(
-            "HEAD",
-            f"/dandisets/{dandiset_id}/versions/{version_id}/assets/{asset_id}"
-            "/download/",
-            json_resp=False,
-        )
-        urlbits = urlparse(r.headers["Location"])
+        aws_url = asset.get_content_url(r"amazonaws.com/.*blobs/")
+        urlbits = urlparse(aws_url)
         log.debug("About to query S3")
         s3meta = self.s3client.get_object(
             Bucket="dandiarchive", Key=urlbits.path.lstrip("/")
