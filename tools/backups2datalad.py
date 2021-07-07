@@ -29,10 +29,11 @@ import logging
 import os
 from pathlib import Path
 import re
+import shlex
 import subprocess
 import sys
 from types import TracebackType
-from typing import Dict, Iterator, List, Optional, Sequence, Set, Type, Union, cast
+from typing import Any, Dict, Iterator, List, Optional, Sequence, Set, Type, Union, cast
 from urllib.parse import urlparse, urlunparse
 
 import boto3
@@ -162,11 +163,18 @@ def update_from_backup(
 
 @main.command()
 @click.option("--commitish", metavar="COMMITISH")
+@click.option("-f", "--force", type=click.Choice(["check"]))
+@click.option("-i", "--ignore-errors", is_flag=True)
 @click.option(
-    "-d",
-    "--dandiset-path",
+    "--re-filter", help="Only consider assets matching the given regex", metavar="REGEX"
+)
+@click.option(
+    "--assetstore",
     type=click.Path(exists=True, file_okay=False, path_type=Path),
-    default=Path(),
+    required=True,
+)
+@click.option(
+    "--target", type=click.Path(file_okay=False, path_type=Path), required=True
 )
 @click.argument("dandiset")
 @click.argument("version")
@@ -175,11 +183,29 @@ def release(
     client: DandiAPIClient,
     dandiset: str,
     version: str,
-    dandiset_path: Path,
     commitish: Optional[str],
+    assetstore: Path,
+    target: Path,
+    ignore_errors: bool,
+    re_filter: str,
+    force: Optional[str],
+    exclude: Optional[str],
 ) -> None:
-    ds = client.get_dandiset(dandiset, version)
-    mkrelease(dandiset_path, ds, commitish=commitish)
+    di = DatasetInstantiator(
+        dandi_client=client,
+        assetstore_path=assetstore,
+        target_path=target,
+        ignore_errors=ignore_errors,
+        gh_org="UNUSED",
+        re_filter=re.compile(re_filter) if exclude is not None else None,
+        backup_remote=None,
+        jobs=10,
+        force=force,
+        exclude=None,
+    )
+    dandiset_obj = client.get_dandiset(dandiset, version)
+    dataset = Dataset(str(target / dandiset))
+    di.mkrelease(dandiset_obj, dataset, commitish=commitish)
 
 
 class DatasetInstantiator:
@@ -268,6 +294,7 @@ class DatasetInstantiator:
                     )
                 else:
                     log.debug("GitHub remote already exists for %s", d.identifier)
+                self.tag_releases(d, ds)
                 log.info("Pushing to sibling")
                 ds.push(to="github", jobs=self.jobs)
                 self.gh.get_repo(f"{self.gh_org}/{d.identifier}").edit(
@@ -495,10 +522,15 @@ class DatasetInstantiator:
             if not msgparts:
                 msgparts.append("only some metadata updates")
             last_commit_time = ensure_datetime(
-                subprocess.check_output(
-                    ["git", "--no-pager", "show", "-s", "--format=%aI", "HEAD"],
-                    universal_newlines=True,
-                ).strip()
+                readcmd(
+                    "git",
+                    "--no-pager",
+                    "show",
+                    "-s",
+                    "--format=%aI",
+                    "HEAD",
+                    cwd=dsdir,
+                )
             )
             if latest_mtime is not None and last_commit_time > latest_mtime:
                 latest_mtime = last_commit_time
@@ -557,15 +589,74 @@ class DatasetInstantiator:
         log.debug("Got bucket URL for asset")
         return urlunparse(urlbits._replace(query=f"versionId={s3meta['VersionId']}"))
 
+    def tag_releases(self, dandiset: RemoteDandiset, ds: Dataset) -> None:
+        log.info("Tagging releases for Dandiset %s", dandiset.identifier)
+        for v in dandiset.get_versions():
+            if readcmd("git", "tag", "-l", v.identifier):
+                log.debug("Version %s already tagged", v.identifier)
+            else:
+                log.info("Tagging version %s", v.identifier)
+                self.mkrelease(dandiset.for_version(v), ds)
+
+    def mkrelease(
+        self, dandiset: RemoteDandiset, ds: Dataset, commitish: Optional[str] = None
+    ) -> None:
+        # `dandiset` must have its version set to the published version
+        def git(*args: str, **kwargs: Any) -> None:
+            log.debug("Running: git %s", " ".join(shlex.quote(str(a)) for a in args))
+            subprocess.run(["git", *args], cwd=repo, check=True, **kwargs)
+
+        repo: Path = ds.pathobj
+        if commitish is None:
+            commitish = readcmd(
+                "git",
+                "rev-list",
+                f"--before={dandiset.version.created}",
+                "-n1",
+                "HEAD",
+                cwd=repo,
+            )
+        remote_assets = list(dandiset.get_assets())
+        repo_assets = json.loads(
+            readcmd("git", "show", f"{commitish}:.dandi/assets.json", cwd=repo)
+        )
+        if (
+            repo_assets
+            and (
+                not isinstance(repo_assets[0], dict) or "asset_id" not in repo_assets[0]
+            )
+        ) or not assets_eq(remote_assets, repo_assets):
+            log.info(
+                "Assets in commit %s do not match assets in version %s;"
+                " creating branch for version",
+                commitish,
+                dandiset.version_id,
+            )
+            branching = True
+            git("checkout", "-b", f"release-{dandiset.version_id}")
+            self.sync_dataset(dandiset, ds)
+        else:
+            branching = False
+        git(
+            "tag",
+            "-m",
+            f"Version {dandiset.version_id} of Dandiset {dandiset.identifier}",
+            dandiset.version_id,
+            commitish,
+        )
+        if branching:
+            git("push", "-u", "github", "release-{dandiset.version_id}")
+        git("push", "--follow-tags", "github")
+        if branching:
+            git("checkout", "master")
+
     @cached_property
     def s3client(self) -> S3Client:
         return boto3.client("s3", config=Config(signature_version=UNSIGNED))
 
     @cached_property
     def gh(self) -> Github:
-        token = subprocess.check_output(
-            ["git", "config", "hub.oauthtoken"], universal_newlines=True
-        ).strip()
+        token = readcmd("git", "config", "hub.oauthtoken")
         return Github(token)
 
     @staticmethod
@@ -659,66 +750,17 @@ def sanitize_contentUrls(urls: List[str]) -> List[str]:
     return urls_
 
 
-def mkrelease(
-    repo: Path, dandiset: RemoteDandiset, commitish: Optional[str] = None
-) -> None:
-    # `dandiset` must have its version set to the published version
-    if commitish is None:
-        remote_assets = list(dandiset.get_assets())
-        repo_assets = json.loads(
-            (repo / ".dandi" / "assets.json").read_text(encoding="utf-8")
-        )
-        if assets_eq(remote_assets, repo_assets):
-            commitish = "HEAD"
-        else:
-            for cmt in subprocess.check_output(
-                ["git", "rev-list", "--skip=1", "HEAD", "--", ".dandi/assets.json"],
-                cwd=repo,
-                universal_newlines=True,
-            ).splitlines():
-                repo_assets = json.loads(
-                    subprocess.check_output(
-                        ["git", "show", f"{cmt}:.dandi/assets.json"],
-                        cwd=repo,
-                        universal_newlines=True,
-                    )
-                )
-                if (
-                    repo_assets
-                    and not isinstance(repo_assets[0], dict)
-                    or "asset_id" not in repo_assets[0]
-                ):
-                    # We've reached an older, pre-dandi-api version of
-                    # assets.json; we're not going to find the assets we're
-                    # after here
-                    break
-                if assets_eq(remote_assets, repo_assets):
-                    commitish = cmt
-                    break
-            if commitish is None:
-                raise RuntimeError(
-                    "Could not find commit matching Dandiset "
-                    f"{dandiset.identifier}, version {dandiset.version_id}"
-                )
-    subprocess.run(
-        [
-            "git",
-            "tag",
-            "-m",
-            f"Version {dandiset.version_id} of Dandiset {dandiset.identifier}",
-            dandiset.version_id,
-            commitish,
-        ],
-        cwd=repo,
-        check=True,
-    )
-    subprocess.run(["git", "push", "--follow-tags"], cwd=repo, check=True)
-
-
 def assets_eq(remote_assets: List[RemoteAsset], local_assets: List[dict]) -> bool:
     return {a.identifier for a in remote_assets} == {
         a["asset_id"] for a in local_assets
     }
+
+
+def readcmd(*args: Union[str, Path], **kwargs: Any) -> str:
+    log.debug("Running: %s", " ".join(shlex.quote(str(a)) for a in args))
+    return cast(
+        str, subprocess.check_output(args, universal_newlines=True, **kwargs)
+    ).strip()
 
 
 if __name__ == "__main__":
