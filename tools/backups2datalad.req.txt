@@ -1,6 +1,6 @@
 boto3
 cached-property ~= 1.5; python_version < "3.8"
-click >= 8.0
+click >= 8.0.1
 click-loglevel ~= 0.2
 dandi >= 0.21.0
 datalad

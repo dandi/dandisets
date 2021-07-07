@@ -32,12 +32,12 @@ import re
 import subprocess
 import sys
 from types import TracebackType
-from typing import Dict, Iterator, List, Optional, Sequence, Set, Type, Union
+from typing import Dict, Iterator, List, Optional, Sequence, Set, Type, Union, cast
 from urllib.parse import urlparse, urlunparse
 
 import boto3
 from botocore import UNSIGNED
-from botocore.client import Config, S3
+from botocore.client import Config
 import click
 from click_loglevel import LogLevel
 from dandi.consts import dandiset_metadata_file, known_instances
@@ -56,6 +56,7 @@ from datalad.support.json_py import dump
 from github import Github
 from humanize import naturalsize
 from morecontext import envset
+from mypy_boto3_s3 import S3Client
 from packaging.version import Version
 
 if sys.version_info[:2] >= (3, 8):
@@ -85,7 +86,7 @@ log = logging.getLogger(Path(sys.argv[0]).name)
 )
 @click.option("--pdb", is_flag=True, help="Drop into debugger if an error occurs")
 @click.pass_context
-def main(ctx: click.Context, log_level: int, pdb: bool, dandi_instance: str):
+def main(ctx: click.Context, log_level: int, pdb: bool, dandi_instance: str) -> None:
     ctx.obj = ctx.with_resource(DandiAPIClient.for_dandi_instance(dandi_instance))
     if pdb:
         sys.excepthook = pdb_excepthook
@@ -146,19 +147,19 @@ def update_from_backup(
     update_github_metadata: bool,
     update_asset_meta_version: bool,
     exclude: Optional[str],
-):
+) -> None:
     di = DatasetInstantiator(
         dandi_client=client,
         assetstore_path=assetstore,
         target_path=target,
         ignore_errors=ignore_errors,
         gh_org=gh_org,
-        re_filter=re_filter and re.compile(re_filter),
+        re_filter=re.compile(re_filter) if exclude is not None else None,
         backup_remote=backup_remote,
         jobs=jobs,
         force=force,
         update_asset_meta_version=update_asset_meta_version,
-        exclude=exclude and re.compile(exclude),
+        exclude=re.compile(exclude) if exclude is not None else None,
     )
     if update_github_metadata:
         di.update_github_metadata(dandisets)
@@ -183,7 +184,7 @@ def release(
     version: str,
     dandiset_path: Path,
     commitish: Optional[str],
-):
+) -> None:
     ds = client.get_dandiset(dandiset, version)
     mkrelease(dandiset_path, ds, commitish=commitish)
 
@@ -307,7 +308,7 @@ class DatasetInstantiator:
                 return os.path.basename(realpath).split("-")[-1].partition(".")[0]
             else:
                 log.debug("Asset not under annex; calculating sha256 digest ourselves")
-                return digester(filepath)["sha256"]
+                return cast(str, digester(filepath)["sha256"])
 
         dsdir: Path = ds.pathobj
         latest_mtime: Optional[datetime] = None
@@ -627,7 +628,7 @@ class DatasetInstantiator:
         return urlunparse(urlbits._replace(query=f"versionId={s3meta['VersionId']}"))
 
     @cached_property
-    def s3client(self) -> S3:
+    def s3client(self) -> S3Client:
         return boto3.client("s3", config=Config(signature_version=UNSIGNED))
 
     @cached_property
@@ -654,7 +655,7 @@ class DatasetInstantiator:
 
 
 @contextmanager
-def custom_commit_date(dt: datetime) -> Iterator[None]:
+def custom_commit_date(dt: Optional[datetime]) -> Iterator[None]:
     if dt is not None:
         with envset("GIT_AUTHOR_DATE", str(dt)):
             with envset("GIT_COMMITTER_DATE", str(dt)):
@@ -728,7 +729,7 @@ def sanitize_contentUrls(urls: List[str]) -> List[str]:
     return urls_
 
 
-def mkrelease(repo: Path, dandiset: RemoteDandiset, commitish: str = None) -> None:
+def mkrelease(repo: Path, dandiset: RemoteDandiset, commitish: Optional[str] = None) -> None:
     # `dandiset` must have its version set to the published version
     if commitish is None:
         remote_assets = list(dandiset.get_assets())
