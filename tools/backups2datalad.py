@@ -87,16 +87,18 @@ class DandiDatasetter:
         for d in self.get_dandisets(dandiset_ids, exclude=exclude):
             dsdir = self.target_path / d.identifier
             ds = self.init_dataset(dsdir, backup_remote=backup_remote)
-            if self.sync_dataset(d, ds) and gh_org is not None:
-                self.ensure_github_remote(
-                    ds, d.identifier, gh_org=gh_org, backup_remote=backup_remote
-                )
-                self.tag_releases(d, ds)
-                log.info("Pushing to sibling")
-                ds.push(to="github", jobs=self.jobs)
-                self.gh.get_repo(f"{gh_org}/{d.identifier}").edit(
-                    description=self.describe_dandiset(d)
-                )
+            if self.sync_dataset(d, ds):
+                if gh_org is not None:
+                    self.ensure_github_remote(
+                        ds, d.identifier, gh_org=gh_org, backup_remote=backup_remote
+                    )
+                self.tag_releases(d, ds, push=gh_org is not None)
+                if gh_org is not None:
+                    log.info("Pushing to sibling")
+                    ds.push(to="github", jobs=self.jobs)
+                    self.gh.get_repo(f"{gh_org}/{d.identifier}").edit(
+                        description=self.describe_dandiset(d)
+                    )
 
     def init_dataset(self, dsdir: Path, backup_remote: Optional[str]) -> Dataset:
         ds = Dataset(str(dsdir))
@@ -443,17 +445,21 @@ class DandiDatasetter:
         log.debug("Got bucket URL for asset")
         return urlunparse(urlbits._replace(query=f"versionId={s3meta['VersionId']}"))
 
-    def tag_releases(self, dandiset: RemoteDandiset, ds: Dataset) -> None:
+    def tag_releases(self, dandiset: RemoteDandiset, ds: Dataset, push: bool) -> None:
         log.info("Tagging releases for Dandiset %s", dandiset.identifier)
         for v in dandiset.get_versions():
             if readcmd("git", "tag", "-l", v.identifier):
                 log.debug("Version %s already tagged", v.identifier)
             else:
                 log.info("Tagging version %s", v.identifier)
-                self.mkrelease(dandiset.for_version(v), ds)
+                self.mkrelease(dandiset.for_version(v), ds, push=push)
 
     def mkrelease(
-        self, dandiset: RemoteDandiset, ds: Dataset, commitish: Optional[str] = None
+        self,
+        dandiset: RemoteDandiset,
+        ds: Dataset,
+        push: bool,
+        commitish: Optional[str] = None,
     ) -> None:
         # `dandiset` must have its version set to the published version
         def git(*args: str, **kwargs: Any) -> None:
@@ -498,10 +504,11 @@ class DandiDatasetter:
             dandiset.version_id,
             commitish,
         )
-        # if branching:
-        #     git("push", "-u", "github", "release-{dandiset.version_id}")
-        # git("push", "--follow-tags", "github")
-        ds.push(to="github", jobs=self.jobs)
+        if push:
+            # if branching:
+            #     git("push", "-u", "github", "release-{dandiset.version_id}")
+            # git("push", "--follow-tags", "github")
+            ds.push(to="github", jobs=self.jobs)
         if branching:
             git("checkout", "master")
 
@@ -634,6 +641,7 @@ def update_github_metadata(
 
 @main.command()
 @click.option("--commitish", metavar="COMMITISH")
+@click.option("--push/--no-push", default=True)
 @click.argument("dandiset")
 @click.argument("version")
 @click.pass_obj
@@ -642,10 +650,11 @@ def release(
     dandiset: str,
     version: str,
     commitish: Optional[str],
+    push: bool,
 ) -> None:
     dandiset_obj = datasetter.dandi_client.get_dandiset(dandiset, version)
     dataset = Dataset(str(datasetter.target_path / dandiset))
-    datasetter.mkrelease(dandiset_obj, dataset, commitish=commitish)
+    datasetter.mkrelease(dandiset_obj, dataset, commitish=commitish, push=push)
 
 
 @contextmanager
