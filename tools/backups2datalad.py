@@ -75,7 +75,7 @@ class DandiDatasetter:
         self,
         dandiset_ids: Sequence[str],
         exclude: Optional[re.Pattern],
-        gh_org: str,
+        gh_org: Optional[str],
         backup_remote: Optional[str],
     ) -> None:
         if not (self.assetstore_path / "girder-assetstore").exists():
@@ -87,7 +87,7 @@ class DandiDatasetter:
         for d in self.get_dandisets(dandiset_ids, exclude=exclude):
             dsdir = self.target_path / d.identifier
             ds = self.init_dataset(dsdir, backup_remote=backup_remote)
-            if self.sync_dataset(d, ds):
+            if self.sync_dataset(d, ds) and gh_org is not None:
                 self.ensure_github_remote(
                     ds, d.identifier, gh_org=gh_org, backup_remote=backup_remote
                 )
@@ -595,18 +595,14 @@ def main(
 @click.option(
     "-e", "--exclude", help="Skip dandisets matching the given regex", metavar="REGEX"
 )
-@click.option(
-    "--gh-org",
-    help="GitHub organization to create repositories under",
-    required=True,
-)
+@click.option("--gh-org", help="GitHub organization to create repositories under")
 @click.argument("dandisets", nargs=-1)
 @click.pass_obj
 def update_from_backup(
     datasetter: DandiDatasetter,
     dandisets: Sequence[str],
     backup_remote: Optional[str],
-    gh_org: str,
+    gh_org: Optional[str],
     exclude: Optional[str],
 ) -> None:
     exclude_rgx = re.compile(exclude) if exclude is not None else None
@@ -621,7 +617,7 @@ def update_from_backup(
 )
 @click.option(
     "--gh-org",
-    help="GitHub organization to create repositories under",
+    help="GitHub organization under which repositories reside",
     required=True,
 )
 @click.argument("dandisets", nargs=-1)
