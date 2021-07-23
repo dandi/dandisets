@@ -16,6 +16,7 @@ conda activate dandisets
 cd "$ds"
 export DATALAD_LOG_LEVEL=WARNING  # otherwise too much of noise
 
+set -o pipefail
 set -x
 eval tools/backups2datalad.py \
    --backup-remote dandi-dandisets-dropbox  \
