@@ -70,13 +70,14 @@ class DandiDatasetter:
     asset_filter: Optional[re.Pattern] = None
     jobs: int = 10
     force: Optional[str] = None
+    content_url_regex: Optional[str] = r"amazonaws.com/.*blobs/"
 
     def update_from_backup(
         self,
-        dandiset_ids: Sequence[str],
-        exclude: Optional[re.Pattern],
-        gh_org: Optional[str],
-        backup_remote: Optional[str],
+        dandiset_ids: Optional[Sequence[str]]=None,
+        exclude: Optional[re.Pattern]=None,
+        gh_org: Optional[str]=None,
+        backup_remote: Optional[str]=None,
     ) -> None:
         if not (self.assetstore_path / "girder-assetstore").exists():
             raise RuntimeError(
@@ -436,7 +437,7 @@ class DandiDatasetter:
 
     def get_file_bucket_url(self, asset: RemoteAsset) -> str:
         log.debug("Fetching bucket URL for asset")
-        aws_url = asset.get_content_url(r"amazonaws.com/.*blobs/")
+        aws_url = asset.get_content_url(self.content_url_regex)
         urlbits = urlparse(aws_url)
         log.debug("About to query S3")
         s3meta = self.s3client.get_object(
