@@ -2,8 +2,7 @@
 boto3
 click >= 8.0.1
 click-loglevel ~= 0.2
-#dandi >= 0.21.0
-dandi @ git+https://github.com/dandi/dandi-cli@api-02
+dandi >= 0.24.0
 datalad
 #fscacher
 humanize

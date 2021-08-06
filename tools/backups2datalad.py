@@ -70,14 +70,14 @@ class DandiDatasetter:
     asset_filter: Optional[re.Pattern] = None
     jobs: int = 10
     force: Optional[str] = None
-    content_url_regex: Optional[str] = r"amazonaws.com/.*blobs/"
+    content_url_regex: str = r"amazonaws.com/.*blobs/"
 
     def update_from_backup(
         self,
-        dandiset_ids: Optional[Sequence[str]]=None,
-        exclude: Optional[re.Pattern]=None,
-        gh_org: Optional[str]=None,
-        backup_remote: Optional[str]=None,
+        dandiset_ids: Sequence[str] = (),
+        exclude: Optional[re.Pattern] = None,
+        gh_org: Optional[str] = None,
+        backup_remote: Optional[str] = None,
     ) -> None:
         if not (self.assetstore_path / "girder-assetstore").exists():
             raise RuntimeError(
