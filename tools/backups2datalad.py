@@ -410,7 +410,8 @@ class DandiDatasetter:
     ) -> Iterator[RemoteDandiset]:
         if dandiset_ids:
             diter = (
-                self.dandi_client.get_dandiset(did, "draft") for did in dandiset_ids
+                self.dandi_client.get_dandiset(did, "draft", lazy=False)
+                for did in dandiset_ids
             )
         else:
             diter = self.dandi_client.get_dandisets()

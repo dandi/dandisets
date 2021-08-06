@@ -35,12 +35,10 @@ def test_1(text_dandiset, tmp_path):
         # update_asset_meta_version=update_asset_meta_version,
         content_url_regex=r".*/blobs/",
     )
-    # some exception is raised whenever we try to update non-existing dandiset
+
     with pytest.raises(Exception):
         di.update_from_backup(["000999"])
-
-    # TODO: fix -- should not initiate dataset unless "valid"
-    # assert not (target_path / "000999").exists()
+    assert not (target_path / "000999").exists()
 
     # Since we are using text_dandiset, that immediately creates us a dandiset
     # TODO: may be separate it out, so we could start "clean" and still work ok
