@@ -32,7 +32,6 @@ def test_1(text_dandiset, tmp_path):
         # backup_remote=None,
         # jobs=jobs,
         # force=force,
-        # update_asset_meta_version=update_asset_meta_version,
         content_url_regex=r".*/blobs/",
     )
 

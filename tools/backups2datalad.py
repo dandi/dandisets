@@ -35,7 +35,7 @@ import shlex
 import subprocess
 import sys
 from types import TracebackType
-from typing import Any, Dict, Iterator, List, Optional, Sequence, Set, Type, Union, cast
+from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Optional, Sequence, Set, Type, Union, cast
 from urllib.parse import urlparse, urlunparse
 
 import boto3
@@ -54,7 +54,9 @@ from datalad.support.json_py import dump
 from github import Github
 from humanize import naturalsize
 from morecontext import envset
-from mypy_boto3_s3 import S3Client
+
+if TYPE_CHECKING:
+    from mypy_boto3_s3 import S3Client
 
 # from fscacher import PersistentCache
 
@@ -515,7 +517,7 @@ class DandiDatasetter:
             git("checkout", "master")
 
     @cached_property
-    def s3client(self) -> S3Client:
+    def s3client(self) -> "S3Client":
         return boto3.client("s3", config=Config(signature_version=UNSIGNED))
 
     @cached_property
