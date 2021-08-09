@@ -91,18 +91,18 @@ class DandiDatasetter:
         for d in self.get_dandisets(dandiset_ids, exclude=exclude):
             dsdir = self.target_path / d.identifier
             ds = self.init_dataset(dsdir, backup_remote=backup_remote)
-            if self.sync_dataset(d, ds):
-                if gh_org is not None:
-                    self.ensure_github_remote(
-                        ds, d.identifier, gh_org=gh_org, backup_remote=backup_remote
-                    )
-                self.tag_releases(d, ds, push=gh_org is not None)
-                if gh_org is not None:
-                    log.info("Pushing to sibling")
-                    ds.push(to="github", jobs=self.jobs)
-                    self.gh.get_repo(f"{gh_org}/{d.identifier}").edit(
-                        description=self.describe_dandiset(d)
-                    )
+            changed = self.sync_dataset(d, ds)
+            if gh_org is not None:
+                self.ensure_github_remote(
+                    ds, d.identifier, gh_org=gh_org, backup_remote=backup_remote
+                )
+            self.tag_releases(d, ds, push=gh_org is not None)
+            if changed and gh_org is not None:
+                log.info("Pushing to sibling")
+                ds.push(to="github", jobs=self.jobs)
+                self.gh.get_repo(f"{gh_org}/{d.identifier}").edit(
+                    description=self.describe_dandiset(d)
+                )
 
     def init_dataset(self, dsdir: Path, backup_remote: Optional[str]) -> Dataset:
         ds = Dataset(str(dsdir))
