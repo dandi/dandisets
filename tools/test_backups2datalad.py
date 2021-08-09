@@ -1,19 +1,73 @@
-from pathlib import Path
+import os
 
 import pytest
 
-# all imports seems needed for pytest to discover those fixtures
-from dandi.tests.fixtures import (
-    docker_compose_setup,
-    local_dandi_api,
-    text_dandiset,
-)
+from dandi.consts import dandiset_metadata_file
+from dandi.dandiapi import DandiAPIClient
+from dandi.upload import upload
 
-# needs  nose
+# needs nose
 from datalad.api import Dataset
 from datalad.tests.utils import assert_repo_status, ok_file_under_git
 
 from backups2datalad import DandiDatasetter
+
+
+@pytest.fixture(scope="session")
+def dandi_client():
+    api_token = os.environ["DANDI_API_KEY"]
+    with DandiAPIClient.for_dandi_instance("dandi-staging", token=api_token) as client:
+        yield client
+
+
+@pytest.fixture()
+def text_dandiset(dandi_client, tmp_path_factory):
+    d = dandi_client.create_dandiset(
+        "Text Dandiset",
+        {
+            "schemaKey": "Dandiset",
+            "name": "Text Dandiset",
+            "description": "A test text Dandiset",
+            "contributor": [
+                {
+                    "schemaKey": "Person",
+                    "name": "Wodder, John",
+                    "roleName": ["dcite:Author", "dcite:ContactPerson"],
+                }
+            ],
+            "license": ["spdx:CC0-1.0"],
+            "manifestLocation": ["https://github.com/dandi/dandi-cli"],
+        },
+    )
+    dandiset_id = d.identifier
+    dspath = tmp_path_factory.mktemp("text_dandiset")
+    (dspath / dandiset_metadata_file).write_text(f"identifier: '{dandiset_id}'\n")
+    (dspath / "file.txt").write_text("This is test text.\n")
+    (dspath / "subdir1").mkdir()
+    (dspath / "subdir1" / "apple.txt").write_text("Apple\n")
+    (dspath / "subdir2").mkdir()
+    (dspath / "subdir2" / "banana.txt").write_text("Banana\n")
+    (dspath / "subdir2" / "coconut.txt").write_text("Coconut\n")
+
+    def upload_dandiset(paths=None, **kwargs):
+        upload(
+            paths=paths or [],
+            dandiset_path=dspath,
+            dandi_instance="dandi-staging",
+            devel_debug=True,
+            allow_any_path=True,
+            validation="skip",
+            **kwargs,
+        )
+
+    upload_dandiset()
+    return {
+        "client": dandi_client,
+        "dspath": dspath,
+        "dandiset": d,
+        "dandiset_id": dandiset_id,
+        "reupload": upload_dandiset,
+    }
 
 
 def test_1(text_dandiset, tmp_path):
@@ -33,11 +87,12 @@ def test_1(text_dandiset, tmp_path):
         # jobs=jobs,
         # force=force,
         content_url_regex=r".*/blobs/",
+        s3bucket="dandi-api-staging-dandisets",
     )
 
     with pytest.raises(Exception):
-        di.update_from_backup(["000999"])
-    assert not (target_path / "000999").exists()
+        di.update_from_backup(["999999"])
+    assert not (target_path / "999999").exists()
 
     # Since we are using text_dandiset, that immediately creates us a dandiset
     # TODO: may be separate it out, so we could start "clean" and still work ok
@@ -45,7 +100,8 @@ def test_1(text_dandiset, tmp_path):
     # ret = di.update_from_backup()
     # assert ret is None, "nothing is returned ATM, if added -- test should be extended"
 
-    di.update_from_backup()
+    dandiset_id = text_dandiset["dandiset_id"]
+    di.update_from_backup([dandiset_id])
 
     ds = Dataset(
         target_path / text_dandiset["dandiset_id"]
@@ -56,12 +112,12 @@ def test_1(text_dandiset, tmp_path):
     (text_dandiset["dspath"] / "new.txt").write_text("This is a new file.\n")
     text_dandiset["reupload"]()
     assert_repo_status(ds.path)  # no side-effects somehow
-    di.update_from_backup()
+    di.update_from_backup([dandiset_id])
     assert_repo_status(ds.path)  # that all is clean etc
     assert (ds.path / "new.txt").read_text() == "This is a new file.\n"
 
     version1 = text_dandiset["dandiset"].publish().version.identifier
-    di.update_from_backup()
+    di.update_from_backup([dandiset_id])
     assert_repo_status(ds.path)  # that all is clean etc
     assert version1 in ds.repo.get_tags()
 
@@ -69,12 +125,12 @@ def test_1(text_dandiset, tmp_path):
         "This file's contents were changed.\n"
     )
     text_dandiset["reupload"]()
-    di.update_from_backup()
+    di.update_from_backup([dandiset_id])
     assert_repo_status(ds.path)  # that all is clean etc
     assert (ds.path / "new.txt").read_text() == "This file's contents were changed.\n"
 
     version2 = text_dandiset["dandiset"].publish().version.identifier
-    di.update_from_backup()
+    di.update_from_backup([dandiset_id])
     assert_repo_status(ds.path)  # that all is clean etc
     assert version1 in ds.repo.get_tags()
     assert version2 in ds.repo.get_tags()

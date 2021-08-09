@@ -73,6 +73,7 @@ class DandiDatasetter:
     jobs: int = 10
     force: Optional[str] = None
     content_url_regex: str = r"amazonaws.com/.*blobs/"
+    s3bucket: str = "dandiarchive"
 
     def update_from_backup(
         self,
@@ -444,7 +445,7 @@ class DandiDatasetter:
         urlbits = urlparse(aws_url)
         log.debug("About to query S3")
         s3meta = self.s3client.get_object(
-            Bucket="dandiarchive", Key=urlbits.path.lstrip("/")
+            Bucket=self.s3bucket, Key=urlbits.path.lstrip("/")
         )
         log.debug("Got bucket URL for asset")
         return urlunparse(urlbits._replace(query=f"versionId={s3meta['VersionId']}"))
