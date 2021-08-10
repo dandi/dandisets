@@ -453,11 +453,12 @@ class DandiDatasetter:
     def tag_releases(self, dandiset: RemoteDandiset, ds: Dataset, push: bool) -> None:
         log.info("Tagging releases for Dandiset %s", dandiset.identifier)
         for v in dandiset.get_versions():
-            if readcmd("git", "tag", "-l", v.identifier):
-                log.debug("Version %s already tagged", v.identifier)
-            else:
-                log.info("Tagging version %s", v.identifier)
-                self.mkrelease(dandiset.for_version(v), ds, push=push)
+            if v.identifier != "draft":
+                if readcmd("git", "tag", "-l", v.identifier):
+                    log.debug("Version %s already tagged", v.identifier)
+                else:
+                    log.info("Tagging version %s", v.identifier)
+                    self.mkrelease(dandiset.for_version(v), ds, push=push)
 
     def mkrelease(
         self,
