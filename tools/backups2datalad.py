@@ -338,7 +338,7 @@ class DatasetInstantiator:
                     dandi_hash = adict["metadata"]["digest"]["dandi:sha2-256"]
                 except KeyError:
                     dandi_hash = None
-                    log.info(
+                    log.warning(
                         "%s: %s: Asset metadata does not include sha256 hash",
                         dandiset_id,
                         a.path,
