@@ -510,13 +510,12 @@ class DandiDatasetter:
             dandiset.version_id,
             commitish,
         )
-        if push:
-            # if branching:
-            #     git("push", "-u", "github", "release-{dandiset.version_id}")
-            # git("push", "--follow-tags", "github")
-            ds.push(to="github", jobs=self.jobs)
         if branching:
             git("checkout", "master")
+            git("branch", "-D", f"release-{dandiset.version_id}")
+        if push:
+            # git("push", "--follow-tags", "github")
+            ds.push(to="github", jobs=self.jobs)
 
     @cached_property
     def s3client(self) -> "S3Client":
