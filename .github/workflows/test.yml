@@ -43,6 +43,10 @@ jobs:
           python -m pip install --upgrade pip wheel
           python -m pip install --upgrade --upgrade-strategy=eager nox
 
+      - name: Install hdf5
+        if: matrix.python-version == '3.9'
+        run: sudo apt-get update && sudo apt-get install -y libhdf5-dev
+
       - name: Run tests
         run: nox -e ${{ matrix.noxenv }}
         working-directory: tools
