@@ -503,13 +503,14 @@ class DandiDatasetter:
             self.sync_dataset(dandiset, ds)
         else:
             branching = False
-        git(
-            "tag",
-            "-m",
-            f"Version {dandiset.version_id} of Dandiset {dandiset.identifier}",
-            dandiset.version_id,
-            commitish,
-        )
+        with custom_commit_date(dandiset.version.created):
+            git(
+                "tag",
+                "-m",
+                f"Version {dandiset.version_id} of Dandiset {dandiset.identifier}",
+                dandiset.version_id,
+                commitish,
+            )
         if branching:
             git("checkout", "master")
             git("branch", "-D", f"release-{dandiset.version_id}")
