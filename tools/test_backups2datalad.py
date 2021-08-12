@@ -114,7 +114,7 @@ def test_1(text_dandiset, tmp_path):
     assert_repo_status(ds.path)  # no side-effects somehow
     di.update_from_backup([dandiset_id])
     assert_repo_status(ds.path)  # that all is clean etc
-    assert (ds.path / "new.txt").read_text() == "This is a new file.\n"
+    assert (ds.pathobj / "new.txt").read_text() == "This is a new file.\n"
 
     version1 = text_dandiset["dandiset"].publish().version.identifier
     di.update_from_backup([dandiset_id])
@@ -127,7 +127,7 @@ def test_1(text_dandiset, tmp_path):
     text_dandiset["reupload"]()
     di.update_from_backup([dandiset_id])
     assert_repo_status(ds.path)  # that all is clean etc
-    assert (ds.path / "new.txt").read_text() == "This file's contents were changed.\n"
+    assert (ds.pathobj / "new.txt").read_text() == "This file's contents were changed.\n"
 
     version2 = text_dandiset["dandiset"].publish().version.identifier
     di.update_from_backup([dandiset_id])
