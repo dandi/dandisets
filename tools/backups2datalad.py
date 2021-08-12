@@ -666,8 +666,7 @@ def release(
 def custom_commit_date(dt: Optional[datetime]) -> Iterator[None]:
     if dt is not None:
         with envset("GIT_AUTHOR_DATE", str(dt)):
-            with envset("GIT_COMMITTER_DATE", str(dt)):
-                yield
+            yield
     else:
         yield
 
