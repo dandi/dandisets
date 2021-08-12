@@ -1,3 +1,4 @@
+import logging
 import os
 
 import pytest
@@ -12,6 +13,9 @@ from datalad.tests.utils import assert_repo_status, ok_file_under_git
 
 from backups2datalad import DandiDatasetter
 
+@pytest.fixture(autouse=True)
+def capture_all_logs(caplog):
+    caplog.set_level(logging.DEBUG, logger="backups2datalad")
 
 @pytest.fixture(scope="session")
 def dandi_client():
@@ -119,7 +123,7 @@ def test_1(text_dandiset, tmp_path):
     version1 = text_dandiset["dandiset"].publish().version.identifier
     di.update_from_backup([dandiset_id])
     assert_repo_status(ds.path)  # that all is clean etc
-    assert version1 in ds.repo.get_tags()
+    assert version1 in [t["name"] for t in ds.repo.get_tags()]
 
     (text_dandiset["dspath"] / "new.txt").write_text(
         "This file's contents were changed.\n"
@@ -132,5 +136,6 @@ def test_1(text_dandiset, tmp_path):
     version2 = text_dandiset["dandiset"].publish().version.identifier
     di.update_from_backup([dandiset_id])
     assert_repo_status(ds.path)  # that all is clean etc
-    assert version1 in ds.repo.get_tags()
-    assert version2 in ds.repo.get_tags()
+    tagnames = [t["name"] for t in ds.repo.get_tags()]
+    assert version1 in tagnames
+    assert version2 in tagnames

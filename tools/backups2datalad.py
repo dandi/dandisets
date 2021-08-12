@@ -60,7 +60,7 @@ if TYPE_CHECKING:
 
 # from fscacher import PersistentCache
 
-log = logging.getLogger(Path(sys.argv[0]).name)
+log = logging.getLogger("backups2datalad")
 
 
 @dataclass
@@ -454,7 +454,7 @@ class DandiDatasetter:
         log.info("Tagging releases for Dandiset %s", dandiset.identifier)
         for v in dandiset.get_versions():
             if v.identifier != "draft":
-                if readcmd("git", "tag", "-l", v.identifier):
+                if readcmd("git", "tag", "-l", v.identifier, cwd=ds.path):
                     log.debug("Version %s already tagged", v.identifier)
                 else:
                     log.info("Tagging version %s", v.identifier)
