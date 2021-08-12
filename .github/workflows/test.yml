@@ -2,11 +2,15 @@ name: Test
 
 on:
   pull_request:
-  push:
-    branches:
-      - master
+  # Due to use of staging and not be able to clean up published dandisets
+  # https://github.com/dandi/dandi-api/issues/476
+  # do testing only sparingly (once a week).  cron run on drogon will do the
+  # in-use "testing".
+  #push:
+  #  branches:
+  #    - master
   schedule:
-    - cron: '0 6 * * *'
+    - cron: '0 6 * * 0'
 
 defaults:
   run:
