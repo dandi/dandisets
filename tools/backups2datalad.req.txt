@@ -1,0 +1,10 @@
+# Python ~= 3.8
+boto3
+click >= 8.0.1
+click-loglevel ~= 0.2
+dandi >= 0.24.0
+datalad
+#fscacher
+humanize
+morecontext ~= 0.1
+PyGithub ~= 1.53

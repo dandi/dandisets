@@ -1,0 +1,52 @@
+name: Test
+
+on:
+  pull_request:
+  # Due to use of staging and not be able to clean up published dandisets
+  # https://github.com/dandi/dandi-api/issues/476
+  # do testing only sparingly (once a week).  cron run on drogon will do the
+  # in-use "testing".
+  #push:
+  #  branches:
+  #    - master
+  schedule:
+    - cron: '0 6 * * 0'
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+          - '3.8'
+          - '3.9'
+        noxenv: [test]
+        include:
+          - python-version: '3.8'
+            noxenv: typing
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v2
+
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip wheel
+          python -m pip install --upgrade --upgrade-strategy=eager nox
+
+      - name: Run tests
+        run: nox -e ${{ matrix.noxenv }}
+        working-directory: tools
+        env:
+          DANDI_API_KEY: ${{ secrets.DANDI_API_KEY }}
+
+# vim:set et sts=2:

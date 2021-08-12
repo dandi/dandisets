@@ -12,6 +12,7 @@ ds=$(dirname "$ds")
 
 source ~/.bashrc-miniconda
 conda activate dandisets
+pip install -r backups2datalad.req.txt
 
 cd "$ds"
 export DATALAD_LOG_LEVEL=WARNING  # otherwise too much of noise
@@ -19,12 +20,13 @@ export DATALAD_LOG_LEVEL=WARNING  # otherwise too much of noise
 set -o pipefail
 set -x
 eval tools/backups2datalad.py \
-   --backup-remote dandi-dandisets-dropbox  \
-   --gh-org dandisets \
    -l WARNING \
    -J 5 \
-   "$girderdir" \
-   "$ds" \
+   --assetstore "$girderdir" \
+   --target "$ds" \
+   update-from-backup \
+   --backup-remote dandi-dandisets-dropbox  \
+   --gh-org dandisets \
    "$*" 2>&1 | grep -v 'nothing to save, working tree clean'
 
 # TODO - save only the ones which were updated
