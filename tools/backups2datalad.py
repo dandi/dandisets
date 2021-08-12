@@ -514,7 +514,7 @@ class DandiDatasetter:
             git("checkout", "master")
             git("branch", "-D", f"release-{dandiset.version_id}")
         if push:
-            # git("push", "--follow-tags", "github")
+            git("push", "github", dandiset.version_id)
             ds.push(to="github", jobs=self.jobs)
 
     @cached_property
