@@ -247,7 +247,7 @@ class DandiDatasetter:
                 mtime = ensure_datetime(adict["metadata"]["dateModified"])
                 download_url = a.download_url
                 dest.parent.mkdir(parents=True, exist_ok=True)
-                if not dest.exists():
+                if not (dest.exists() or dest.is_symlink()):
                     log.info("Asset not in dataset; will copy")
                     to_update = True
                     added += 1
