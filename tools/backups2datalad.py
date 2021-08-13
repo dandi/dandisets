@@ -35,7 +35,19 @@ import shlex
 import subprocess
 import sys
 from types import TracebackType
-from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Optional, Sequence, Set, Type, Union, cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Dict,
+    Iterator,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Type,
+    Union,
+    cast,
+)
 from urllib.parse import urlparse, urlunparse
 
 import boto3
@@ -47,7 +59,6 @@ from dandi.consts import dandiset_metadata_file, known_instances
 from dandi.dandiapi import DandiAPIClient, RemoteAsset, RemoteDandiset
 from dandi.dandiset import APIDandiset
 from dandi.support.digests import Digester, get_digest
-from dandi.utils import ensure_datetime
 import datalad
 from datalad.api import Dataset
 from datalad.support.json_py import dump
@@ -187,7 +198,6 @@ class DandiDatasetter:
                 return cast(str, digester(filepath)["sha256"])
 
         dsdir: Path = ds.pathobj
-        latest_mtime: Optional[datetime] = None
         added = 0
         updated = 0
         deleted = 0
@@ -244,7 +254,6 @@ class DandiDatasetter:
                         a.path,
                     )
                 dandi_etag = adict["metadata"]["digest"]["dandi:dandi-etag"]
-                mtime = ensure_datetime(adict["metadata"]["dateModified"])
                 download_url = a.download_url
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 if not (dest.exists() or dest.is_symlink()):
@@ -331,8 +340,6 @@ class DandiDatasetter:
                             )
                         else:
                             log.info("File is not managed by git annex; not adding URL")
-                    if latest_mtime is None or mtime > latest_mtime:
-                        latest_mtime = mtime
                 if dandi_hash is not None:
                     annex_key = get_annex_hash(dest)
                     if dandi_hash != annex_key:
@@ -377,7 +384,7 @@ class DandiDatasetter:
                 msgparts.append(f"{deleted} files deleted")
             if not msgparts:
                 msgparts.append("only some metadata updates")
-            with custom_commit_date(latest_mtime):
+            with custom_commit_date(dandiset.version.modified):
                 ds.save(message=f"[backups2datalad] {', '.join(msgparts)}")
             return True
         else:
