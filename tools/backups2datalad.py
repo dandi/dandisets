@@ -377,19 +377,6 @@ class DandiDatasetter:
                 msgparts.append(f"{deleted} files deleted")
             if not msgparts:
                 msgparts.append("only some metadata updates")
-            last_commit_time = ensure_datetime(
-                readcmd(
-                    "git",
-                    "--no-pager",
-                    "show",
-                    "-s",
-                    "--format=%aI",
-                    "HEAD",
-                    cwd=dsdir,
-                )
-            )
-            if latest_mtime is not None and last_commit_time > latest_mtime:
-                latest_mtime = last_commit_time
             with custom_commit_date(latest_mtime):
                 ds.save(message=f"[backups2datalad] {', '.join(msgparts)}")
             return True
@@ -503,13 +490,14 @@ class DandiDatasetter:
             self.sync_dataset(dandiset, ds)
         else:
             branching = False
-        git(
-            "tag",
-            "-m",
-            f"Version {dandiset.version_id} of Dandiset {dandiset.identifier}",
-            dandiset.version_id,
-            commitish,
-        )
+        with custom_commit_date(dandiset.version.created):
+            git(
+                "tag",
+                "-m",
+                f"Version {dandiset.version_id} of Dandiset {dandiset.identifier}",
+                dandiset.version_id,
+                commitish,
+            )
         if branching:
             git("checkout", "master")
             git("branch", "-D", f"release-{dandiset.version_id}")
@@ -666,8 +654,7 @@ def release(
 def custom_commit_date(dt: Optional[datetime]) -> Iterator[None]:
     if dt is not None:
         with envset("GIT_AUTHOR_DATE", str(dt)):
-            with envset("GIT_COMMITTER_DATE", str(dt)):
-                yield
+            yield
     else:
         yield
 
