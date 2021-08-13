@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 import logging
 import os
 
@@ -11,7 +12,7 @@ from dandi.upload import upload
 from datalad.api import Dataset
 from datalad.tests.utils import assert_repo_status, ok_file_under_git
 
-from backups2datalad import DandiDatasetter
+from backups2datalad import DandiDatasetter, custom_commit_date, readcmd
 
 @pytest.fixture(autouse=True)
 def capture_all_logs(caplog):
@@ -139,3 +140,21 @@ def test_1(text_dandiset, tmp_path):
     tagnames = [t["name"] for t in ds.repo.get_tags()]
     assert version1 in tagnames
     assert version2 in tagnames
+
+
+def test_custom_commit_date(tmp_path):
+    ds = Dataset(str(tmp_path))
+    ds.create(cfg_proc="text2git")
+    (tmp_path / "file.txt").write_text("This is test text.\n")
+    with custom_commit_date(datetime(2021, 6, 1, 12, 34, 56, tzinfo=timezone.utc)):
+        ds.save(message="Add a file")
+    ts = readcmd(
+        "git",
+        "--no-pager",
+        "show",
+        "-s",
+        "--format=%aI",
+        "HEAD",
+        cwd=tmp_path,
+    )
+    assert ts == "2021-06-01T12:34:56+00:00"
