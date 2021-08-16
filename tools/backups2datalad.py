@@ -203,14 +203,7 @@ class DandiDatasetter:
         deleted = 0
 
         with dandi_logging(dsdir) as logfile:
-            log.info("Updating metadata file")
-            try:
-                (dsdir / dandiset_metadata_file).unlink()
-            except FileNotFoundError:
-                pass
-            metadata = dandiset.get_raw_metadata()
-            APIDandiset(dsdir, allow_empty=True).update_metadata(metadata)
-            ds.repo.add([dandiset_metadata_file])
+            update_dandiset_metadata(dandiset, ds)
             local_assets: Set[str] = set(dataset_files(dsdir))
             local_assets.discard(dandiset_metadata_file)
             asset_metadata: List[dict] = []
@@ -488,22 +481,21 @@ class DandiDatasetter:
                 commitish,
                 dandiset.version_id,
             )
-            branching = True
             git("checkout", "-b", f"release-{dandiset.version_id}")
             self.sync_dataset(dandiset, ds)
         else:
-            branching = False
+            git("checkout", "-b", f"release-{dandiset.version_id}")
+            update_dandiset_metadata(dandiset, ds)
+            ds.save(message=f"[backups2datalad] Updating {dandiset_metadata_file}")
         with custom_commit_date(dandiset.version.created):
             git(
                 "tag",
                 "-m",
                 f"Version {dandiset.version_id} of Dandiset {dandiset.identifier}",
                 dandiset.version_id,
-                commitish,
             )
-        if branching:
-            git("checkout", "master")
-            git("branch", "-D", f"release-{dandiset.version_id}")
+        git("checkout", "master")
+        git("branch", "-D", f"release-{dandiset.version_id}")
         if push:
             git("push", "github", dandiset.version_id)
             ds.push(to="github", jobs=self.jobs)
@@ -760,6 +752,17 @@ def mklink(src: Union[str, Path], dest: Union[str, Path]) -> None:
         ],
         check=True,
     )
+
+
+def update_dandiset_metadata(dandiset: RemoteDandiset, ds: Dataset) -> None:
+    log.info("Updating metadata file")
+    try:
+        (ds.pathobj / dandiset_metadata_file).unlink()
+    except FileNotFoundError:
+        pass
+    metadata = dandiset.get_raw_metadata()
+    APIDandiset(ds.pathobj, allow_empty=True).update_metadata(metadata)
+    ds.repo.add([dandiset_metadata_file])
 
 
 if __name__ == "__main__":
