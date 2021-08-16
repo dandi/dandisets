@@ -228,11 +228,7 @@ class DandiDatasetter:
             for a in dandiset.get_assets():
                 dest = dsdir / a.path
                 local_assets.discard(a.path)
-                adict = {**a.json_dict(), "metadata": a.get_raw_metadata()}
-                # Let's pop dandiset "linkage" since yoh thinks it should not be there
-                # TODO/discussion: https://github.com/dandi/dandi-cli/issues/690
-                for f in ("dandiset_id", "version_id"):
-                    adict.pop(f, None)
+                adict = asset2dict(a)
                 asset_metadata.append(adict)
                 if self.force != "check" and adict == saved_metadata.get(a.path):
                     log.debug(
@@ -731,9 +727,18 @@ def sanitize_contentUrls(urls: List[str]) -> List[str]:
     return urls_
 
 
+def asset2dict(asset: RemoteAsset) -> Dict[str, Any]:
+    adict = {**asset.json_dict(), "metadata": asset.get_raw_metadata()}
+    # Let's pop dandiset "linkage" since yoh thinks it should not be there
+    # TODO/discussion: https://github.com/dandi/dandi-cli/issues/690
+    for f in ("dandiset_id", "version_id"):
+        adict.pop(f, None)
+    return adict
+
+
 def assets_eq(remote_assets: List[RemoteAsset], local_assets: List[dict]) -> bool:
-    return {a.identifier for a in remote_assets} == {
-        a["asset_id"] for a in local_assets
+    return {a.identifier: asset2dict(a) for a in remote_assets} == {
+        a["asset_id"]: a for a in local_assets
     }
 
 
