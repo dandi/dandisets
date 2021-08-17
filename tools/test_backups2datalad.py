@@ -1,32 +1,36 @@
 from datetime import datetime, timezone
 import logging
 import os
-
-import pytest
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 from dandi.consts import dandiset_metadata_file
-from dandi.dandiapi import DandiAPIClient
+from dandi.dandiapi import DandiAPIClient, Version
 from dandi.upload import upload
-
-# needs nose
+from dandi.utils import yaml_load
 from datalad.api import Dataset
 from datalad.tests.utils import assert_repo_status, ok_file_under_git
+import pytest
 
 from backups2datalad import DandiDatasetter, custom_commit_date, readcmd
 
+
 @pytest.fixture(autouse=True)
-def capture_all_logs(caplog):
+def capture_all_logs(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.DEBUG, logger="backups2datalad")
 
+
 @pytest.fixture(scope="session")
-def dandi_client():
+def dandi_client() -> DandiAPIClient:
     api_token = os.environ["DANDI_API_KEY"]
     with DandiAPIClient.for_dandi_instance("dandi-staging", token=api_token) as client:
         yield client
 
 
 @pytest.fixture()
-def text_dandiset(dandi_client, tmp_path_factory):
+def text_dandiset(
+    dandi_client: DandiAPIClient, tmp_path_factory: pytest.TempPathFactory
+) -> Dict[str, Any]:
     d = dandi_client.create_dandiset(
         "Text Dandiset",
         {
@@ -54,7 +58,7 @@ def text_dandiset(dandi_client, tmp_path_factory):
     (dspath / "subdir2" / "banana.txt").write_text("Banana\n")
     (dspath / "subdir2" / "coconut.txt").write_text("Coconut\n")
 
-    def upload_dandiset(paths=None, **kwargs):
+    def upload_dandiset(paths: Optional[List[str]] = None, **kwargs: Any) -> None:
         upload(
             paths=paths or [],
             dandiset_path=dspath,
@@ -75,7 +79,7 @@ def text_dandiset(dandi_client, tmp_path_factory):
     }
 
 
-def test_1(text_dandiset, tmp_path):
+def test_1(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
     # TODO: move pre-setup into a fixture, e.g. local_setup1 or make code work without?
     assetstore_path = tmp_path / "assetstore"
     assetstore_path.mkdir()
@@ -121,10 +125,42 @@ def test_1(text_dandiset, tmp_path):
     assert_repo_status(ds.path)  # that all is clean etc
     assert (ds.pathobj / "new.txt").read_text() == "This is a new file.\n"
 
-    version1 = text_dandiset["dandiset"].publish().version.identifier
+    def readgit(*args: str) -> str:
+        return readcmd("git", *args, cwd=ds.path)
+
+    def check_version_tag(v: Version) -> None:
+        vid = v.identifier
+
+        # Assert tag has correct timestamp
+        tag_ts = readgit(
+            "for-each-ref", "--format=%(creatordate:iso-strict)", f"refs/tags/{vid}"
+        )
+        assert tag_ts == v.created.isoformat(timespec="seconds")
+
+        # Assert tagged commit has correct timestamp
+        cmd_ts = readgit("show", "-s", "--format=%aI", f"{vid}^{{commit}}")
+        assert cmd_ts == v.created.isoformat(timespec="seconds")
+
+        # Assert tag is not on master
+        assert readgit("rev-list", vid, "^master") != ""
+
+        # Assert tag branches from master commit
+        assert readgit("merge-base", vid, "master") == readgit(
+            "show", "-s", "--format=%H", "master"
+        )
+
+        # Assert dandiset.yaml in tagged commit has doi
+        metadata = yaml_load(readgit("show", f"{vid}:{dandiset_metadata_file}"))
+        assert metadata.get("doi")
+
+    v1 = text_dandiset["dandiset"].publish().version
+    version1 = v1.identifier
     di.update_from_backup([dandiset_id])
     assert_repo_status(ds.path)  # that all is clean etc
-    assert version1 in [t["name"] for t in ds.repo.get_tags()]
+    tags = {t["name"]: t["hexsha"] for t in ds.repo.get_tags()}
+    assert version1 in tags
+    v1_hash = tags[version1]
+    check_version_tag(v1)
 
     (text_dandiset["dspath"] / "new.txt").write_text(
         "This file's contents were changed.\n"
@@ -132,29 +168,26 @@ def test_1(text_dandiset, tmp_path):
     text_dandiset["reupload"]()
     di.update_from_backup([dandiset_id])
     assert_repo_status(ds.path)  # that all is clean etc
-    assert (ds.pathobj / "new.txt").read_text() == "This file's contents were changed.\n"
+    assert (
+        ds.pathobj / "new.txt"
+    ).read_text() == "This file's contents were changed.\n"
 
-    version2 = text_dandiset["dandiset"].publish().version.identifier
+    v2 = text_dandiset["dandiset"].publish().version
+    version2 = v2.identifier
     di.update_from_backup([dandiset_id])
     assert_repo_status(ds.path)  # that all is clean etc
-    tagnames = [t["name"] for t in ds.repo.get_tags()]
-    assert version1 in tagnames
-    assert version2 in tagnames
+    tags = {t["name"]: t["hexsha"] for t in ds.repo.get_tags()}
+    assert version1 in tags
+    assert tags[version1] == v1_hash
+    assert version2 in tags
+    check_version_tag(v2)
 
 
-def test_custom_commit_date(tmp_path):
+def test_custom_commit_date(tmp_path: Path) -> None:
     ds = Dataset(str(tmp_path))
     ds.create(cfg_proc="text2git")
     (tmp_path / "file.txt").write_text("This is test text.\n")
     with custom_commit_date(datetime(2021, 6, 1, 12, 34, 56, tzinfo=timezone.utc)):
         ds.save(message="Add a file")
-    ts = readcmd(
-        "git",
-        "--no-pager",
-        "show",
-        "-s",
-        "--format=%aI",
-        "HEAD",
-        cwd=tmp_path,
-    )
+    ts = readcmd("git", "show", "-s", "--format=%aI", "HEAD", cwd=tmp_path)
     assert ts == "2021-06-01T12:34:56+00:00"

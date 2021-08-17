@@ -203,14 +203,7 @@ class DandiDatasetter:
         deleted = 0
 
         with dandi_logging(dsdir) as logfile:
-            log.info("Updating metadata file")
-            try:
-                (dsdir / dandiset_metadata_file).unlink()
-            except FileNotFoundError:
-                pass
-            metadata = dandiset.get_raw_metadata()
-            APIDandiset(dsdir, allow_empty=True).update_metadata(metadata)
-            ds.repo.add([dandiset_metadata_file])
+            update_dandiset_metadata(dandiset, ds)
             local_assets: Set[str] = set(dataset_files(dsdir))
             local_assets.discard(dandiset_metadata_file)
             asset_metadata: List[dict] = []
@@ -228,11 +221,7 @@ class DandiDatasetter:
             for a in dandiset.get_assets():
                 dest = dsdir / a.path
                 local_assets.discard(a.path)
-                adict = {**a.json_dict(), "metadata": a.get_raw_metadata()}
-                # Let's pop dandiset "linkage" since yoh thinks it should not be there
-                # TODO/discussion: https://github.com/dandi/dandi-cli/issues/690
-                for f in ("dandiset_id", "version_id"):
-                    adict.pop(f, None)
+                adict = asset2dict(a)
                 asset_metadata.append(adict)
                 if self.force != "check" and adict == saved_metadata.get(a.path):
                     log.debug(
@@ -462,52 +451,82 @@ class DandiDatasetter:
         commitish: Optional[str] = None,
     ) -> None:
         # `dandiset` must have its version set to the published version
+        repo: Path = ds.pathobj
+        remote_assets = list(dandiset.get_assets())
+
         def git(*args: str, **kwargs: Any) -> None:
             log.debug("Running: git %s", " ".join(shlex.quote(str(a)) for a in args))
             subprocess.run(["git", *args], cwd=repo, check=True, **kwargs)
 
-        repo: Path = ds.pathobj
+        def commit_has_assets(commit_hash: str) -> bool:
+            repo_assets = json.loads(
+                readcmd("git", "show", f"{commit_hash}:.dandi/assets.json", cwd=repo)
+            )
+            return (not remote_assets and not repo_assets) or (
+                repo_assets
+                and isinstance(repo_assets[0], dict)
+                and "asset_id" in repo_assets[0]
+                and assets_eq(remote_assets, repo_assets)
+            )
+
+        candidates: List[str]
         if commitish is None:
-            commitish = readcmd(
-                "git",
-                "rev-list",
-                f"--before={dandiset.version.created}",
-                "-n1",
-                "HEAD",
-                cwd=repo,
+            candidates = []
+            candidates.append(
+                readcmd(
+                    "git",
+                    "rev-list",
+                    f"--before={dandiset.version.created}",
+                    "-n1",
+                    "HEAD",
+                    cwd=repo,
+                )
             )
-        remote_assets = list(dandiset.get_assets())
-        repo_assets = json.loads(
-            readcmd("git", "show", f"{commitish}:.dandi/assets.json", cwd=repo)
+            if (
+                cmt := readcmd(
+                    "git",
+                    "rev-list",
+                    f"--after={dandiset.version.created}",
+                    "-n1",
+                    "HEAD",
+                    cwd=repo,
+                )
+            ) != "":
+                candidates.append(cmt)
+        else:
+            candidates = [commitish]
+        matching = list(filter(commit_has_assets, candidates))
+        assert len(matching) < 2, (
+            f"Commits both before and after {dandiset.version.created} have"
+            " matching asset metadata"
         )
-        if (
-            repo_assets
-            and (
-                not isinstance(repo_assets[0], dict) or "asset_id" not in repo_assets[0]
-            )
-        ) or not assets_eq(remote_assets, repo_assets):
+        if matching:
             log.info(
-                "Assets in commit %s do not match assets in version %s;"
-                " creating branch for version",
-                commitish,
+                "Found commit %s with matching asset metadata;"
+                " updating Dandiset metadata",
+                matching[0],
+            )
+            git("checkout", "-b", f"release-{dandiset.version_id}", matching[0])
+            update_dandiset_metadata(dandiset, ds)
+            with custom_commit_date(dandiset.version.created):
+                ds.save(message=f"[backups2datalad] {dandiset_metadata_file} updated")
+        else:
+            log.info(
+                "Assets in candidate commits do not match assets in version %s;"
+                " syncing",
                 dandiset.version_id,
             )
-            branching = True
-            git("checkout", "-b", f"release-{dandiset.version_id}")
+            git("checkout", "-b", f"release-{dandiset.version_id}", candidates[-1])
             self.sync_dataset(dandiset, ds)
-        else:
-            branching = False
-        with custom_commit_date(dandiset.version.created):
+        with envset("GIT_COMMITTER_DATE", str(dandiset.version.created)):
             git(
                 "tag",
                 "-m",
                 f"Version {dandiset.version_id} of Dandiset {dandiset.identifier}",
                 dandiset.version_id,
-                commitish,
             )
-        if branching:
-            git("checkout", "master")
-            git("branch", "-D", f"release-{dandiset.version_id}")
+        git("checkout", "master")
+        git("branch", "-D", f"release-{dandiset.version_id}")
         if push:
             git("push", "github", dandiset.version_id)
             ds.push(to="github", jobs=self.jobs)
@@ -731,9 +750,18 @@ def sanitize_contentUrls(urls: List[str]) -> List[str]:
     return urls_
 
 
+def asset2dict(asset: RemoteAsset) -> Dict[str, Any]:
+    adict = {**asset.json_dict(), "metadata": asset.get_raw_metadata()}
+    # Let's pop dandiset "linkage" since yoh thinks it should not be there
+    # TODO/discussion: https://github.com/dandi/dandi-cli/issues/690
+    for f in ("dandiset_id", "version_id"):
+        adict.pop(f, None)
+    return adict
+
+
 def assets_eq(remote_assets: List[RemoteAsset], local_assets: List[dict]) -> bool:
-    return {a.identifier for a in remote_assets} == {
-        a["asset_id"] for a in local_assets
+    return {a.identifier: asset2dict(a) for a in remote_assets} == {
+        a["asset_id"]: a for a in local_assets
     }
 
 
@@ -755,6 +783,17 @@ def mklink(src: Union[str, Path], dest: Union[str, Path]) -> None:
         ],
         check=True,
     )
+
+
+def update_dandiset_metadata(dandiset: RemoteDandiset, ds: Dataset) -> None:
+    log.info("Updating metadata file")
+    try:
+        (ds.pathobj / dandiset_metadata_file).unlink()
+    except FileNotFoundError:
+        pass
+    metadata = dandiset.get_raw_metadata()
+    APIDandiset(ds.pathobj, allow_empty=True).update_metadata(metadata)
+    ds.repo.add([dandiset_metadata_file])
 
 
 if __name__ == "__main__":
