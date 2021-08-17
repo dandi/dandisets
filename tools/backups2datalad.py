@@ -508,7 +508,8 @@ class DandiDatasetter:
             )
             git("checkout", "-b", f"release-{dandiset.version_id}", matching[0])
             update_dandiset_metadata(dandiset, ds)
-            ds.save(message=f"[backups2datalad] {dandiset_metadata_file} updated")
+            with custom_commit_date(dandiset.version.created):
+                ds.save(message=f"[backups2datalad] {dandiset_metadata_file} updated")
         else:
             log.info(
                 "Assets in candidate commits do not match assets in version %s;"
