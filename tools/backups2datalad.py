@@ -518,7 +518,7 @@ class DandiDatasetter:
             )
             git("checkout", "-b", f"release-{dandiset.version_id}", candidates[-1])
             self.sync_dataset(dandiset, ds)
-        with custom_commit_date(dandiset.version.created):
+        with envset("GIT_COMMITTER_DATE", str(dandiset.version.created)):
             git(
                 "tag",
                 "-m",
