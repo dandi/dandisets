@@ -28,6 +28,7 @@ from datetime import datetime
 from functools import cached_property
 import json
 import logging
+from operator import attrgetter
 import os
 from pathlib import Path
 import re
@@ -65,6 +66,7 @@ from datalad.support.json_py import dump
 from github import Github
 from humanize import naturalsize
 from morecontext import envset
+from packaging.version import Version
 
 if TYPE_CHECKING:
     from mypy_boto3_s3 import S3Client
@@ -435,13 +437,46 @@ class DandiDatasetter:
 
     def tag_releases(self, dandiset: RemoteDandiset, ds: Dataset, push: bool) -> None:
         log.info("Tagging releases for Dandiset %s", dandiset.identifier)
-        for v in dandiset.get_versions():
-            if v.identifier != "draft":
-                if readcmd("git", "tag", "-l", v.identifier, cwd=ds.path):
-                    log.debug("Version %s already tagged", v.identifier)
-                else:
-                    log.info("Tagging version %s", v.identifier)
-                    self.mkrelease(dandiset.for_version(v), ds, push=push)
+        versions = [v for v in dandiset.get_versions() if v.identifier != "draft"]
+        for v in versions:
+            if readcmd("git", "tag", "-l", v.identifier, cwd=ds.path):
+                log.debug("Version %s already tagged", v.identifier)
+            else:
+                log.info("Tagging version %s", v.identifier)
+                self.mkrelease(dandiset.for_version(v), ds, push=push)
+        if versions:
+            latest = max(map(attrgetter("identifier"), versions), key=Version)
+            description = readcmd(
+                "git", "describe", "--tags", "--long", "--always", cwd=ds.path
+            )
+            if "-" not in description:
+                # No tags on master branch
+                merge = True
+            else:
+                m = re.fullmatch(
+                    r"(?P<tag>.+)-(?P<distance>[0-9]+)-g(?P<rev>[0-9a-f]+)?",
+                    description,
+                )
+                assert m, f"Could not parse `git describe` output: {description!r}"
+                merge = Version(latest) > Version(m["tag"])
+            if merge:
+                log.debug("Running: git merge -s ours %s", shlex.quote(latest))
+                subprocess.run(
+                    [
+                        "git",
+                        "merge",
+                        "-s",
+                        "ours",
+                        "-m",
+                        f"Merge '{latest}' into drafts branch (no differences"
+                        " in content merged)",
+                        latest,
+                    ],
+                    cwd=ds.path,
+                    check=True,
+                )
+            if push:
+                ds.push(to="github", jobs=self.jobs)
 
     def mkrelease(
         self,
@@ -529,7 +564,6 @@ class DandiDatasetter:
         git("branch", "-D", f"release-{dandiset.version_id}")
         if push:
             git("push", "github", dandiset.version_id)
-            ds.push(to="github", jobs=self.jobs)
 
     @cached_property
     def s3client(self) -> "S3Client":
@@ -674,6 +708,8 @@ def release(
     dandiset_obj = datasetter.dandi_client.get_dandiset(dandiset, version)
     dataset = Dataset(str(datasetter.target_path / dandiset))
     datasetter.mkrelease(dandiset_obj, dataset, commitish=commitish, push=push)
+    if push:
+        dataset.push(to="github", jobs=datasetter.jobs)
 
 
 @contextmanager
