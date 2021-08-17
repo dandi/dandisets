@@ -462,7 +462,18 @@ class DandiDatasetter:
             if merge:
                 log.debug("Running: git merge -s ours %s", shlex.quote(latest))
                 subprocess.run(
-                    ["git", "merge", "-s", "ours", latest], cwd=ds.path, check=True
+                    [
+                        "git",
+                        "merge",
+                        "-s",
+                        "-m",
+                        f"Merge '{latest}' into drafts branch (no differences"
+                        " in content merged)",
+                        "ours",
+                        latest,
+                    ],
+                    cwd=ds.path,
+                    check=True,
                 )
             if push:
                 ds.push(to="github", jobs=self.jobs)
