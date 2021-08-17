@@ -13,7 +13,12 @@ from datalad.api import Dataset
 from datalad.tests.utils import assert_repo_status, ok_file_under_git
 import pytest
 
-from backups2datalad import DandiDatasetter, custom_commit_date, readcmd
+from backups2datalad import (
+    DandiDatasetter,
+    custom_commit_author,
+    custom_commit_date,
+    readcmd,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -200,3 +205,25 @@ def test_custom_commit_date(tmp_path: Path) -> None:
         ds.save(message="Add a file")
     ts = readcmd("git", "show", "-s", "--format=%aI", "HEAD", cwd=tmp_path)
     assert ts == "2021-06-01T12:34:56+00:00"
+
+
+def test_custom_commit_author(tmp_path: Path) -> None:
+    ds = Dataset(str(tmp_path))
+    ds.create(cfg_proc="text2git")
+    (tmp_path / "file.txt").write_text("This is test text.\n")
+    with custom_commit_author():
+        ds.save(message="Add a file")
+    ts = readcmd(
+        "git",
+        "show",
+        "-s",
+        "--format=%an%n%ae%n%cn%n%ce",
+        "HEAD",
+        cwd=tmp_path,
+    )
+    assert ts.splitlines() == [
+        "DANDI User",
+        "info@dandiarchive.org",
+        "DANDI Team",
+        "help@dandiarchive.org",
+    ]

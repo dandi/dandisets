@@ -375,8 +375,9 @@ class DandiDatasetter:
                 msgparts.append(f"{deleted} files deleted")
             if not msgparts:
                 msgparts.append("only some metadata updates")
-            with custom_commit_date(dandiset.version.modified):
-                ds.save(message=f"[backups2datalad] {', '.join(msgparts)}")
+            with custom_commit_author():
+                with custom_commit_date(dandiset.version.modified):
+                    ds.save(message=f"[backups2datalad] {', '.join(msgparts)}")
             return True
         else:
             log.info("No changes made to repository; deleting logfile")
@@ -553,13 +554,14 @@ class DandiDatasetter:
             )
             git("checkout", "-b", f"release-{dandiset.version_id}", candidates[-1])
             self.sync_dataset(dandiset, ds)
-        with envset("GIT_COMMITTER_DATE", str(dandiset.version.created)):
-            git(
-                "tag",
-                "-m",
-                f"Version {dandiset.version_id} of Dandiset {dandiset.identifier}",
-                dandiset.version_id,
-            )
+        with custom_commit_author():
+            with envset("GIT_COMMITTER_DATE", str(dandiset.version.created)):
+                git(
+                    "tag",
+                    "-m",
+                    f"Version {dandiset.version_id} of Dandiset {dandiset.identifier}",
+                    dandiset.version_id,
+                )
         git("checkout", "master")
         git("branch", "-D", f"release-{dandiset.version_id}")
         if push:
@@ -710,6 +712,15 @@ def release(
     datasetter.mkrelease(dandiset_obj, dataset, commitish=commitish, push=push)
     if push:
         dataset.push(to="github", jobs=datasetter.jobs)
+
+
+@contextmanager
+def custom_commit_author() -> Iterator[None]:
+    with envset("GIT_AUTHOR_NAME", "DANDI User"):
+        with envset("GIT_AUTHOR_EMAIL", "info@dandiarchive.org"):
+            with envset("GIT_COMMITTER_NAME", "DANDI Team"):
+                with envset("GIT_COMMITTER_EMAIL", "help@dandiarchive.org"):
+                    yield
 
 
 @contextmanager
