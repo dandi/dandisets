@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 import logging
 import os
 from pathlib import Path
+import subprocess
 from typing import Any, Dict, List, Optional
 
 from dandi.consts import dandiset_metadata_file
@@ -141,12 +142,20 @@ def test_1(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
         cmd_ts = readgit("show", "-s", "--format=%aI", f"{vid}^{{commit}}")
         assert cmd_ts == v.created.isoformat(timespec="seconds")
 
-        # Assert tag is not on master
-        assert readgit("rev-list", vid, "^master") != ""
+        # Assert that tag was merged into master
+        assert (
+            subprocess.run(
+                ["git", "merge-base", "--is-ancestor", vid, "master"], cwd=ds.path
+            ).returncode
+            == 0
+        )
 
-        # Assert tag branches from master commit
-        assert readgit("merge-base", vid, "master") == readgit(
-            "show", "-s", "--format=%H", "master"
+        # Assert tag branches from master branch
+        assert (
+            subprocess.run(
+                ["git", "merge-base", "--is-ancestor", "master^", vid], cwd=ds.path
+            ).returncode
+            == 0
         )
 
         # Assert dandiset.yaml in tagged commit has doi

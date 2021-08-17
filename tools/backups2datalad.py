@@ -466,10 +466,10 @@ class DandiDatasetter:
                         "git",
                         "merge",
                         "-s",
+                        "ours",
                         "-m",
                         f"Merge '{latest}' into drafts branch (no differences"
                         " in content merged)",
-                        "ours",
                         latest,
                     ],
                     cwd=ds.path,
