@@ -523,17 +523,18 @@ class DandiDatasetter:
                     cwd=repo,
                 )
             )
+            assert candidates, "we should have had at least a single commit"
             if (
+                # --reverse is applied after -n 1, so we cannot use it to get just one commit
+                # in chronological order after the first candidate, so we will get all and take last
                 cmt := readcmd(
                     "git",
                     "rev-list",
-                    f"--after={dandiset.version.created}",
-                    "-n1",
-                    "HEAD",
+                    f"{candidates[0]}..HEAD",
                     cwd=repo,
                 )
             ) != "":
-                candidates.append(cmt)
+                candidates.append(cmt.split()[-1])
         else:
             candidates = [commitish]
         matching = list(filter(commit_has_assets, candidates))
