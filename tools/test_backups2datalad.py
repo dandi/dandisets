@@ -138,6 +138,10 @@ def test_1(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
         )
         assert tag_ts == v.created.isoformat(timespec="seconds")
 
+        # Assert tag has correct committer
+        tag_creator = readgit("for-each-ref", "--format=%(creator)", f"refs/tags/{vid}")
+        assert tag_creator.startswith("DANDI User <info@dandiarchive.org>")
+
         # Assert tagged commit has correct timestamp
         cmd_ts = readgit("show", "-s", "--format=%aI", f"{vid}^{{commit}}")
         assert cmd_ts == v.created.isoformat(timespec="seconds")
@@ -191,6 +195,11 @@ def test_1(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
     assert version2 in tags
     check_version_tag(v2)
 
+    commit_authors = readgit("log", "--no-merges", "--format=%an <%ae>").splitlines()
+    assert commit_authors == ["DANDI User <info@dandiarchive.org>"] * len(
+        commit_authors
+    )
+
 
 def test_custom_commit_date(tmp_path: Path) -> None:
     ds = Dataset(str(tmp_path))
@@ -198,5 +207,9 @@ def test_custom_commit_date(tmp_path: Path) -> None:
     (tmp_path / "file.txt").write_text("This is test text.\n")
     with custom_commit_date(datetime(2021, 6, 1, 12, 34, 56, tzinfo=timezone.utc)):
         ds.save(message="Add a file")
-    ts = readcmd("git", "show", "-s", "--format=%aI", "HEAD", cwd=tmp_path)
-    assert ts == "2021-06-01T12:34:56+00:00"
+    about = readcmd("git", "show", "-s", "--format=%aI%n%an%n%ae", "HEAD", cwd=tmp_path)
+    assert about.splitlines() == [
+        "2021-06-01T12:34:56+00:00",
+        "DANDI User",
+        "info@dandiarchive.org",
+    ]

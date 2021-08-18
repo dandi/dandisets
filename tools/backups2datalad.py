@@ -103,7 +103,9 @@ class DandiDatasetter:
         datalad.cfg.set("datalad.repo.backend", "SHA256E", where="override")
         for d in self.get_dandisets(dandiset_ids, exclude=exclude):
             dsdir = self.target_path / d.identifier
-            ds = self.init_dataset(dsdir, backup_remote=backup_remote)
+            ds = self.init_dataset(
+                dsdir, backup_remote=backup_remote, create_time=d.version.created
+            )
             changed = self.sync_dataset(d, ds)
             if gh_org is not None:
                 self.ensure_github_remote(
@@ -117,11 +119,14 @@ class DandiDatasetter:
                     description=self.describe_dandiset(d)
                 )
 
-    def init_dataset(self, dsdir: Path, backup_remote: Optional[str]) -> Dataset:
+    def init_dataset(
+        self, dsdir: Path, backup_remote: Optional[str], create_time: datetime
+    ) -> Dataset:
         ds = Dataset(str(dsdir))
         if not ds.is_installed():
             log.info("Creating Datalad dataset")
-            ds.create(cfg_proc="text2git")
+            with custom_commit_date(create_time):
+                ds.create(cfg_proc="text2git")
             if backup_remote is not None:
                 ds.repo.init_remote(
                     backup_remote,
@@ -319,7 +324,8 @@ class DandiDatasetter:
                             dest.unlink()
                         except FileNotFoundError:
                             pass
-                        ds.download_url(urls=bucket_url, path=a.path)
+                        with custom_commit_date(dandiset.version.modified):
+                            ds.download_url(urls=bucket_url, path=a.path)
                         if ds.repo.is_under_annex(a.path, batch=True):
                             log.info("Adding URL %s to asset", download_url)
                             ds.repo.call_annex(
@@ -402,7 +408,7 @@ class DandiDatasetter:
                 for did in dandiset_ids
             )
         else:
-            diter = self.dandi_client.get_dandisets()
+            diter = (d.for_version("draft") for d in self.dandi_client.get_dandisets())
         for d in diter:
             if exclude is not None and exclude.search(d.identifier):
                 log.debug("Skipping dandiset %s", d.identifier)
@@ -553,13 +559,16 @@ class DandiDatasetter:
             )
             git("checkout", "-b", f"release-{dandiset.version_id}", candidates[-1])
             self.sync_dataset(dandiset, ds)
-        with envset("GIT_COMMITTER_DATE", str(dandiset.version.created)):
-            git(
-                "tag",
-                "-m",
-                f"Version {dandiset.version_id} of Dandiset {dandiset.identifier}",
-                dandiset.version_id,
-            )
+        with envset("GIT_COMMITTER_NAME", "DANDI User"):
+            with envset("GIT_COMMITTER_EMAIL", "info@dandiarchive.org"):
+                with envset("GIT_COMMITTER_DATE", str(dandiset.version.created)):
+                    git(
+                        "tag",
+                        "-m",
+                        f"Version {dandiset.version_id} of Dandiset"
+                        f" {dandiset.identifier}",
+                        dandiset.version_id,
+                    )
         git("checkout", "master")
         git("branch", "-D", f"release-{dandiset.version_id}")
         if push:
@@ -715,8 +724,10 @@ def release(
 @contextmanager
 def custom_commit_date(dt: Optional[datetime]) -> Iterator[None]:
     if dt is not None:
-        with envset("GIT_AUTHOR_DATE", str(dt)):
-            yield
+        with envset("GIT_AUTHOR_NAME", "DANDI User"):
+            with envset("GIT_AUTHOR_EMAIL", "info@dandiarchive.org"):
+                with envset("GIT_AUTHOR_DATE", str(dt)):
+                    yield
     else:
         yield
 
