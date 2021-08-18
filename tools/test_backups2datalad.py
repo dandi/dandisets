@@ -195,7 +195,7 @@ def test_1(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
     assert version2 in tags
     check_version_tag(v2)
 
-    commit_authors = readgit("log", "--format=%an <%ae>").splitlines()
+    commit_authors = readgit("log", "--no-merges", "--format=%an <%ae>").splitlines()
     assert commit_authors == ["DANDI User <info@dandiarchive.org>"] * len(
         commit_authors
     )
