@@ -73,6 +73,8 @@ if TYPE_CHECKING:
 
 # from fscacher import PersistentCache
 
+DEFAULT_BRANCH = "draft"
+
 log = logging.getLogger("backups2datalad")
 
 
@@ -126,7 +128,10 @@ class DandiDatasetter:
         if not ds.is_installed():
             log.info("Creating Datalad dataset")
             with custom_commit_date(create_time):
-                ds.create(cfg_proc="text2git")
+                with envset(
+                    "GIT_CONFIG_PARAMETERS", f"'init.defaultBranch={DEFAULT_BRANCH}'"
+                ):
+                    ds.create(cfg_proc="text2git")
             if backup_remote is not None:
                 ds.repo.init_remote(
                     backup_remote,
@@ -168,8 +173,12 @@ class DandiDatasetter:
                 f"git@github.com:{gh_org}/{dandiset_id}.git",
                 where="local",
             )
-            ds.config.set("branch.master.remote", "github", where="local")
-            ds.config.set("branch.master.merge", "refs/heads/master", where="local")
+            ds.config.set(f"branch.{DEFAULT_BRANCH}.remote", "github", where="local")
+            ds.config.set(
+                f"branch.{DEFAULT_BRANCH}.merge",
+                f"refs/heads/{DEFAULT_BRANCH}",
+                where="local",
+            )
             self.gh.get_repo(f"{gh_org}/{dandiset_id}").edit(
                 homepage=f"https://identifiers.org/DANDI:{dandiset_id}"
             )
@@ -456,7 +465,7 @@ class DandiDatasetter:
                 "git", "describe", "--tags", "--long", "--always", cwd=ds.path
             )
             if "-" not in description:
-                # No tags on master branch
+                # No tags on default branch
                 merge = True
             else:
                 m = re.fullmatch(
@@ -569,7 +578,7 @@ class DandiDatasetter:
                         f" {dandiset.identifier}",
                         dandiset.version_id,
                     )
-        git("checkout", "master")
+        git("checkout", DEFAULT_BRANCH)
         git("branch", "-D", f"release-{dandiset.version_id}")
         if push:
             git("push", "github", dandiset.version_id)

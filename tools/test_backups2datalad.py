@@ -13,7 +13,7 @@ from datalad.api import Dataset
 from datalad.tests.utils import assert_repo_status, ok_file_under_git
 import pytest
 
-from backups2datalad import DandiDatasetter, custom_commit_date, readcmd
+from backups2datalad import DEFAULT_BRANCH, DandiDatasetter, custom_commit_date, readcmd
 
 
 @pytest.fixture(autouse=True)
@@ -146,18 +146,19 @@ def test_1(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
         cmd_ts = readgit("show", "-s", "--format=%aI", f"{vid}^{{commit}}")
         assert cmd_ts == v.created.isoformat(timespec="seconds")
 
-        # Assert that tag was merged into master
+        # Assert that tag was merged into default branch
         assert (
             subprocess.run(
-                ["git", "merge-base", "--is-ancestor", vid, "master"], cwd=ds.path
+                ["git", "merge-base", "--is-ancestor", vid, DEFAULT_BRANCH], cwd=ds.path
             ).returncode
             == 0
         )
 
-        # Assert tag branches from master branch
+        # Assert tag branches from default branch
         assert (
             subprocess.run(
-                ["git", "merge-base", "--is-ancestor", "master^", vid], cwd=ds.path
+                ["git", "merge-base", "--is-ancestor", f"{DEFAULT_BRANCH}^", vid],
+                cwd=ds.path,
             ).returncode
             == 0
         )
