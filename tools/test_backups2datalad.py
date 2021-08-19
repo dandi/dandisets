@@ -3,7 +3,7 @@ import logging
 import os
 from pathlib import Path
 import subprocess
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
 from dandi.consts import dandiset_metadata_file
 from dandi.dandiapi import DandiAPIClient, Version
@@ -31,7 +31,7 @@ def dandi_client() -> DandiAPIClient:
 @pytest.fixture()
 def text_dandiset(
     dandi_client: DandiAPIClient, tmp_path_factory: pytest.TempPathFactory
-) -> Dict[str, Any]:
+) -> Iterator[Dict[str, Any]]:
     d = dandi_client.create_dandiset(
         "Text Dandiset",
         {
@@ -71,13 +71,18 @@ def text_dandiset(
         )
 
     upload_dandiset()
-    return {
+    yield {
         "client": dandi_client,
         "dspath": dspath,
         "dandiset": d,
         "dandiset_id": dandiset_id,
         "reupload": upload_dandiset,
     }
+
+    for v in d.get_versions():
+        if v.identifier != "draft":
+            dandi_client.delete(f"{d.api_path}versions/{v.identifier}/")
+    d.delete()
 
 
 def test_1(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
