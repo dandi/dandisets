@@ -202,6 +202,46 @@ def test_1(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
     )
 
 
+def test_2(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
+    assetstore_path = tmp_path / "assetstore"
+    assetstore_path.mkdir()
+    (assetstore_path / "girder-assetstore").mkdir()
+    target_path = tmp_path / "target"
+    di = DandiDatasetter(
+        dandi_client=text_dandiset["client"],
+        assetstore_path=assetstore_path,
+        target_path=target_path,
+        ignore_errors=False,
+        content_url_regex=r".*/blobs/",
+        s3bucket="dandi-api-staging-dandisets",
+        enable_tags=False,
+    )
+
+    dandiset_id = text_dandiset["dandiset_id"]
+    di.update_from_backup([dandiset_id])
+    ds = Dataset(target_path / text_dandiset["dandiset_id"])
+
+    def readgit(*args: str) -> str:
+        return readcmd("git", *args, cwd=ds.path)
+
+    versions = []
+    for i in range(1, 4):
+        (text_dandiset["dspath"] / "counter.txt").write_text(f"{i}\n")
+        text_dandiset["reupload"]()
+        v = text_dandiset["dandiset"].publish().version
+        di.update_from_backup([dandiset_id])
+        assert readgit("tag") == ""
+        assert (ds.pathobj / "counter.txt").read_text() == f"{i}\n"
+        base = readgit("show", "-s", "--format=%H", "HEAD")
+        versions.append((v, base))
+
+    di.enable_tags = True
+    di.update_from_backup([dandiset_id])
+
+    for v, base in versions:
+        assert readgit("rev-parse", f"{v.identifier}^") == base
+
+
 def test_custom_commit_date(tmp_path: Path) -> None:
     ds = Dataset(str(tmp_path))
     ds.create(cfg_proc="text2git")

@@ -89,6 +89,7 @@ class DandiDatasetter:
     force: Optional[str] = None
     content_url_regex: str = r"amazonaws.com/.*blobs/"
     s3bucket: str = "dandiarchive"
+    enable_tags: bool = True
 
     def update_from_backup(
         self,
@@ -451,6 +452,8 @@ class DandiDatasetter:
         return urlunparse(urlbits._replace(query=f"versionId={s3meta['VersionId']}"))
 
     def tag_releases(self, dandiset: RemoteDandiset, ds: Dataset, push: bool) -> None:
+        if not self.enable_tags:
+            return
         log.info("Tagging releases for Dandiset %s", dandiset.identifier)
         versions = [v for v in dandiset.get_versions() if v.identifier != "draft"]
         for v in versions:
@@ -522,27 +525,31 @@ class DandiDatasetter:
         candidates: List[str]
         if commitish is None:
             candidates = []
-            candidates.append(
-                readcmd(
-                    "git",
-                    "rev-list",
-                    f"--before={dandiset.version.created}",
-                    "-n1",
-                    "HEAD",
-                    cwd=repo,
-                )
-            )
+            # --before orders by commit date, not author date, so we need to
+            # filter commits ourselves.
+            commits = readcmd(
+                "git", "log", r"--grep=\[backups2datalad\]", "--format=%H %aI", cwd=repo
+            ).splitlines()
+            for cmt in commits:
+                chash, _, cdate = cmt.partition(" ")
+                ts = datetime.fromisoformat(cdate)
+                if ts <= dandiset.version.created:
+                    candidates.append(chash)
+                    break
+            assert candidates, "we should have had at least a single commit"
             if (
+                # --reverse is applied after -n 1, so we cannot use it to get
+                # just one commit in chronological order after the first
+                # candidate, so we will get all and take last
                 cmt := readcmd(
                     "git",
                     "rev-list",
-                    f"--after={dandiset.version.created}",
-                    "-n1",
-                    "HEAD",
+                    r"--grep=\[backups2datalad\]",
+                    f"{candidates[0]}..HEAD",
                     cwd=repo,
                 )
             ) != "":
-                candidates.append(cmt)
+                candidates.append(cmt.split()[-1])
         else:
             candidates = [commitish]
         matching = list(filter(commit_has_assets, candidates))
