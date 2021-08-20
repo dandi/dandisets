@@ -433,12 +433,14 @@ class DandiDatasetter:
             for c in metadata.get("contributor", [])
             if "dandi:ContactPerson" in c.get("roleName", []) and "name" in c
         )
+        if contact:
+            desc = f"{contact}, {desc}"
+        versions = sum(1 for v in dandiset.get_versions() if v.identifier != "draft")
+        if versions:
+            desc = f"{versions} release{'s' if versions > 1 else ''}, {desc}"
         num_files = dandiset.version.asset_count
         size = naturalsize(dandiset.version.size)
-        if contact:
-            return f"{num_files} files, {size}, {contact}, {desc}"
-        else:
-            return f"{num_files} files, {size}, {desc}"
+        return f"{num_files} files, {size}, {desc}"
 
     def get_file_bucket_url(self, asset: RemoteAsset) -> str:
         log.debug("Fetching bucket URL for asset")
