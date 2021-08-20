@@ -14,7 +14,7 @@ source ~/.bashrc-miniconda
 conda activate dandisets
 
 cd "$ds"
-pip install -r tools/backups2datalad.req.txt
+chronic pip install -r tools/backups2datalad.req.txt
 
 export DATALAD_LOG_LEVEL=WARNING  # otherwise too much of noise
 
