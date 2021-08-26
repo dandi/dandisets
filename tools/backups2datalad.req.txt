@@ -2,7 +2,7 @@
 boto3
 click >= 8.0.1
 click-loglevel ~= 0.2
-dandi >= 0.24.0
+dandi >= 0.27.0
 datalad
 #fscacher
 humanize
