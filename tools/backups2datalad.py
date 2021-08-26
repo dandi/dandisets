@@ -260,7 +260,7 @@ class DandiDatasetter:
                         a.path,
                     )
                 dandi_etag = adict["metadata"]["digest"]["dandi:dandi-etag"]
-                download_url = a.download_url
+                download_url = a.base_download_url
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 if not (dest.exists() or dest.is_symlink()):
                     log.info("Asset not in dataset; will copy")
