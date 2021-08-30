@@ -25,9 +25,9 @@ def main(datasets):
                     ds.repo.call_annex(["registerurl", key, new_url])
                     changed = True
         if changed:
-            ds.save(
-                message="Change Dandiset-specific asset URLs to top-level /assets/ URLs"
-            )
+            # just to trigger annex to commit its changes
+            ds.repo.always_commit = True
+            print(ds.repo.call_annex(["info"]))
 
 
 if __name__ == "__main__":
