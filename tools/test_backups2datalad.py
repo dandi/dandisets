@@ -172,6 +172,7 @@ def test_1(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
         metadata = yaml_load(readgit("show", f"{vid}:{dandiset_metadata_file}"))
         assert metadata.get("doi")
 
+    text_dandiset["dandiset"].wait_until_valid()
     v1 = text_dandiset["dandiset"].publish().version
     version1 = v1.identifier
     di.update_from_backup([dandiset_id])
@@ -191,6 +192,7 @@ def test_1(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
         ds.pathobj / "new.txt"
     ).read_text() == "This file's contents were changed.\n"
 
+    text_dandiset["dandiset"].wait_until_valid()
     v2 = text_dandiset["dandiset"].publish().version
     version2 = v2.identifier
     di.update_from_backup([dandiset_id])
@@ -233,6 +235,7 @@ def test_2(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
     for i in range(1, 4):
         (text_dandiset["dspath"] / "counter.txt").write_text(f"{i}\n")
         text_dandiset["reupload"]()
+        text_dandiset["dandiset"].wait_until_valid()
         v = text_dandiset["dandiset"].publish().version
         di.update_from_backup([dandiset_id])
         assert readgit("tag") == ""
