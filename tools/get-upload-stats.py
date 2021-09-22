@@ -3,6 +3,7 @@ from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
 import json
+import logging
 from operator import attrgetter
 from pathlib import Path, PurePosixPath
 import re
@@ -13,6 +14,8 @@ import click
 from datalad.support.annexrepo import AnnexRepo
 from dateutil.parser import parse
 import ruamel.yaml
+
+log = logging.getLogger("get-upload-stats")
 
 IGNORED = {".dandi", ".datalad", ".gitattributes", "dandiset.yaml"}
 
@@ -161,11 +164,15 @@ class DandiDataSet:
         # --before orders by commit date, not author date, so we need to filter
         # commits ourselves.
         cmtlines = self.readgit(
-            "log", r"--grep=\[backups2datalad\]", "--format=%H!%h!%aI"
+            "log", r"--grep=\[backups2datalad\]", "--format=%H %h %aI %p"
         ).splitlines()
         commits: List[CommitInfo] = []
+        warned_nonlinear = False
         for cmt in cmtlines:
-            committish, short_hash, ts = cmt.split("!")
+            committish, short_hash, ts, *parents = cmt.strip().split()
+            if len(parents) > 1 and not warned_nonlinear:
+                log.warning("Commits in given timeframe are nonlinear")
+                warned_nonlinear = True
             commits.append(
                 CommitInfo(
                     committish=committish,
@@ -290,6 +297,11 @@ def main(
     outfile: TextIO,
     fmt: str,
 ) -> None:
+    logging.basicConfig(
+        format="%(asctime)s [%(levelname)-8s] %(name)s %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S%z",
+        level=logging.INFO,
+    )
     dd = DandiDataSet(dandiset)
     commit1, commit2 = dd.get_first_and_last_commit(from_dt, to_dt)
     commit_delta = dd.cmp_commit_assets(commit1, commit2)
