@@ -164,7 +164,10 @@ class DandiDataSet:
         # --before orders by commit date, not author date, so we need to filter
         # commits ourselves.
         cmtlines = self.readgit(
-            "log", r"--grep=\[backups2datalad\]", "--format=%H %h %aI %p"
+            "log",
+            r"--grep=\[backups2datalad\]",
+            r"--grep=Ran backups2datalad\.py",
+            "--format=%H %h %aI %p",
         ).splitlines()
         commits: List[CommitInfo] = []
         warned_nonlinear = False
