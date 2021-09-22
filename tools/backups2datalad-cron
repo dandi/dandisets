@@ -6,7 +6,7 @@ export PS1='$ '
 PS4='> '
 #set -x
 
-girderdir=/mnt/backup/dandi/dandiarchive-s3-backup/ 
+girderdir=/mnt/backup/dandi/dandiarchive-s3-backup/
 ds=$(dirname "$0")
 ds=$(dirname "$ds")
 
@@ -36,4 +36,4 @@ datalad save -m "CRON update" -d . 00*
 datalad push -J 5
 
 # we must be clean
-git diff --exit-code 
+git diff --exit-code

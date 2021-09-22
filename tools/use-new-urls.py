@@ -65,7 +65,6 @@ class URLUpdater:
         if ds.repo.dirty:
             raise RuntimeError("Dirty repository; clean or save before running")
         ds.repo.always_commit = False
-        dsdir = ds.pathobj
         for a in self.dandi_client.get_dandiset_assets(
             dandiset_id, "draft", include_metadata=False
         ):

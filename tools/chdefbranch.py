@@ -2,6 +2,7 @@
 __requires__ = ["click >= 8.0.1", "PyGithub ~= 1.53"]
 from pathlib import Path
 from subprocess import check_output, run
+
 import click
 from github import Github
 
