@@ -279,8 +279,26 @@ class DandiDataSet:
 
 
 @click.command()
-@click.option("--from", "from_dt", type=parse, metavar="DATETIME")
-@click.option("--to", "to_dt", type=parse, metavar="DATETIME")
+@click.option(
+    "--from",
+    "from_dt",
+    type=parse,
+    metavar="DATETIME",
+    help=(
+        "The lower bound (inclusive) on author dates of commits to consider;"
+        " defaults to the beginning of time"
+    ),
+)
+@click.option(
+    "--to",
+    "to_dt",
+    type=parse,
+    metavar="DATETIME",
+    help=(
+        "The upper bound (exclusive) on author dates of commits to consider;"
+        " defaults to the end of time"
+    ),
+)
 @click.option("-o", "--outfile", type=click.File("w"), default="-")
 @click.option(
     "-f",
@@ -300,11 +318,34 @@ def main(
     outfile: TextIO,
     fmt: str,
 ) -> None:
+    """
+    Summarize the net changes in assets in a `backups2datalad.py` dataset
+    across a given time range.
+
+    The timestamps passed to the --from and --to options can be in any format
+    supported by python-dateutil's `dateutil.parser.parse()` function.
+    Recommended formats include:
+
+    \b
+        * 2021-09-22T14:21:43-04:00
+        * 2021-09-22 14:21:43 -0400
+        * 2021-09-22  (Time defaults to midnight)
+        * Wed, 22 Sep 2021 14:21:43 -0400
+        * Wed Sep 22 14:21:43 EDT 2021  (when the given timezone abbreviation
+          is either "UTC" or for the local system timezone)
+
+    If a timestamp lacks timezone information, it is assumed to be in the local
+    system timezone.
+    """
     logging.basicConfig(
         format="%(asctime)s [%(levelname)-8s] %(name)s %(message)s",
         datefmt="%Y-%m-%dT%H:%M:%S%z",
         level=logging.INFO,
     )
+    if from_dt is not None and from_dt.tzinfo is None:
+        from_dt = from_dt.astimezone()
+    if to_dt is not None and to_dt.tzinfo is None:
+        to_dt = to_dt.astimezone()
     dd = DandiDataSet(dandiset)
     commit1, commit2 = dd.get_first_and_last_commit(from_dt, to_dt)
     commit_delta = dd.cmp_commit_assets(commit1, commit2)
