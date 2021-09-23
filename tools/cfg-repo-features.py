@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 __requires__ = ["click == 7.*", "PyGithub == 1.*"]
 from subprocess import check_output
+
 import click
 from github import Github
 
