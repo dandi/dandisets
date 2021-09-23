@@ -13,6 +13,7 @@ from typing import Any, Dict, Iterator, List, Optional, Set, TextIO, Tuple, Unio
 import click
 from datalad.support.annexrepo import AnnexRepo
 from dateutil.parser import parse
+from humanize import naturalsize
 import ruamel.yaml
 
 log = logging.getLogger("get-upload-stats")
@@ -93,14 +94,17 @@ class CommitDelta:
 
     def to_markdown(self) -> str:
         s = f"## Changes from {self.first.short_hash} to {self.second.short_hash}\n\n"
-        s += f"* Assets added: {self.assets_added} ({self.assets_added_size} bytes)\n"
+        s += (
+            f"* Assets added: {self.assets_added}"
+            f" ({naturalsize(self.assets_added_size)})\n"
+        )
         s += (
             f"* Assets removed: {self.assets_removed}"
-            f" ({self.assets_removed_size} bytes)\n"
+            f" ({naturalsize(self.assets_removed_size)})\n"
         )
         s += (
             f"* Duplicates delta: {self.duplicates_delta}"
-            f" ({self.duplicates_delta_size} bytes)\n"
+            f" ({naturalsize(self.duplicates_delta_size)})\n"
         )
         s += f"* Duplicates remaining: {self.duplicates_remaining}\n"
         s += f"* Subjects added: {self.subjects_added}\n"
