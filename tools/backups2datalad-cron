@@ -33,6 +33,7 @@ eval tools/backups2datalad.py \
 # TODO - save only the ones which were updated
 #  probably should be done by backups2datalad.py itself!
 datalad save -m "CRON update" -d . 00*
+git pull  # so we possibly merge changes on the server
 datalad push -J 5
 
 # we must be clean
