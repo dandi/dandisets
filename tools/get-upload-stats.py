@@ -167,7 +167,7 @@ class MetadataDiff(BaseModel):
             elif not v:
                 s += " no change\n"
             else:
-                s += ":\n"
+                s += "\n"
                 s += "    * Added: "
                 if v.added:
                     s += ", ".join(sorted(v.added))
