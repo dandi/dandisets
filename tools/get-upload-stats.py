@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 from collections import Counter
-from dataclasses import dataclass
 from datetime import datetime
 import json
 import logging
@@ -14,121 +13,245 @@ import click
 from datalad.support.annexrepo import AnnexRepo
 from dateutil.parser import parse
 from humanize import naturalsize
-import ruamel.yaml
+from pydantic import BaseModel
+from ruamel.yaml import YAML  # type: ignore[attr-defined]
 
 log = logging.getLogger("get-upload-stats")
 
 IGNORED = {".dandi", ".datalad", ".gitattributes", "dandiset.yaml"}
 
 
-@dataclass
-class AssetInfo:
+class AddedRemoved(BaseModel):
+    added: int
+    removed: int
+
+    def __bool__(self) -> bool:
+        return bool(self.added or self.removed)
+
+
+class SetAddedRemoved(BaseModel):
+    added: Set[str]
+    removed: Set[str]
+
+    def __bool__(self) -> bool:
+        return bool(self.added or self.removed)
+
+
+class AssetInfo(BaseModel):
     path: str
     size: int
     key: str
     subject: Optional[str]
 
 
-@dataclass
-class CommitInfo:
+class CommitInfo(BaseModel):
     committish: str
-    short_hash: str
+    short_id: str
     created: datetime
 
 
-@dataclass
-class CommitDelta:
-    first: CommitInfo
-    second: CommitInfo
-    assets_added: int
-    assets_added_size: int
-    assets_removed: int
-    assets_removed_size: int
-    duplicates_delta: int
-    duplicates_delta_size: int
-    duplicates_remaining: int
-    subjects_added: int
+class MetadataSummary(BaseModel):
+    specimens: Optional[Set[str]]
+    species: Optional[Set[str]]
+    modalities: Optional[Set[str]]
+    techniques: Optional[Set[str]]
+    anatomies: Set[str]
 
-    def __bool__(self) -> bool:
-        return any(
-            getattr(self, field) != 0
-            for field in [
-                "assets_added",
-                "assets_added_size",
-                "assets_removed",
-                "assets_removed_size",
-                "duplicates_delta",
-                "duplicates_delta_size",
-                # NOT "duplicates_remaining",
-                "subjects_added",
-            ]
+    class Config:
+        json_encoders = {set: sorted}
+
+    @classmethod
+    def from_metadata(
+        cls, dandiset_metadata: dict, asset_metadata: Optional[List[dict]]
+    ) -> "MetadataSummary":
+        specimens: Optional[Set[str]]
+        if asset_metadata is not None:
+            specimens = {sp for am in asset_metadata for sp in cls.get_specimens(am)}
+        else:
+            specimens = None
+        species: Optional[Set[str]]
+        techniques: Optional[Set[str]]
+        modalities: Optional[Set[str]]
+        try:
+            summary = dandiset_metadata["assetsSummary"]
+        except KeyError:
+            species = None
+            techniques = None
+            modalities = None
+        else:
+            species = {sp["name"] for sp in (summary.get("species") or [])}
+            techniques = {
+                tq["name"] for tq in (summary.get("measurementTechnique") or [])
+            }
+            modalities = {md["name"] for md in (summary.get("approach") or [])}
+        anatomies = {
+            ab["name"]
+            for ab in dandiset_metadata.get("about") or []
+            if ab["schemaKey"] == "Anatomy"
+        }
+        return cls(
+            specimens=specimens,
+            species=species,
+            modalities=modalities,
+            techniques=techniques,
+            anatomies=anatomies,
         )
 
-    def for_json(self) -> dict:
-        return {
-            "first": {
-                "committish": self.first.short_hash,
-                "created": self.first.created.isoformat(),
-            },
-            "second": {
-                "committish": self.second.short_hash,
-                "created": self.second.created.isoformat(),
-            },
-            "assets": {
-                "distinct": {
-                    "added": self.assets_added,
-                    "added_size": self.assets_added_size,
-                    "removed": self.assets_removed,
-                    "removed_size": self.assets_removed_size,
-                },
-                "duplicates": {
-                    "delta": self.duplicates_delta,
-                    "delta_size": self.duplicates_delta_size,
-                    "remaining": self.duplicates_remaining,
-                },
-            },
-            "subjects": {
-                "added": self.subjects_added,
-            },
-        }
+    @staticmethod
+    def get_specimens(d: dict) -> Iterator[str]:
+        for biosample in d.get("wasDerivedFrom") or []:
+            yield biosample["sampleType"]["name"]
+            yield from MetadataSummary.get_specimens(biosample)
 
     def to_markdown(self) -> str:
-        s = f"## Changes from {self.first.short_hash} to {self.second.short_hash}\n\n"
-        s += (
-            f"* Assets added: {self.assets_added}"
-            f" ({naturalsize(self.assets_added_size)})\n"
-        )
-        s += (
-            f"* Assets removed: {self.assets_removed}"
-            f" ({naturalsize(self.assets_removed_size)})\n"
-        )
-        s += (
-            f"* Duplicates delta: {self.duplicates_delta}"
-            f" ({naturalsize(self.duplicates_delta_size)})\n"
-        )
-        s += f"* Duplicates remaining: {self.duplicates_remaining}\n"
-        s += f"* Subjects added: {self.subjects_added}\n"
+        s = ""
+        for label, field in [
+            ("Specimen Types", "specimens"),
+            ("Species", "species"),
+            ("Modalities", "modalities"),
+            ("Techniques", "techniques"),
+            ("Anatomical Structures", "anatomies"),
+        ]:
+            s += f"* **{label}:** "
+            v: Optional[Set[str]] = getattr(self, field)
+            if v is None:
+                s += "[data not available]"
+            elif not v:
+                s += "[none]"
+            else:
+                s += ", ".join(sorted(v))
+            s += "\n"
         return s
 
 
-@dataclass
-class Report:
+class MetadataDiff(BaseModel):
+    specimens: Optional[SetAddedRemoved]
+    species: Optional[SetAddedRemoved]
+    modalities: Optional[SetAddedRemoved]
+    techniques: Optional[SetAddedRemoved]
+    anatomies: SetAddedRemoved
+
+    @classmethod
+    def compare(cls, first: MetadataSummary, second: MetadataSummary) -> "MetadataDiff":
+        def cmp(
+            one: Optional[Set[str]], two: Optional[Set[str]]
+        ) -> Optional[SetAddedRemoved]:
+            if one is None or two is None:
+                return None
+            else:
+                return SetAddedRemoved(added=two - one, removed=one - two)
+
+        return cls(
+            **{
+                k: cmp(getattr(first, k), getattr(second, k))
+                for k in cls.__fields__.keys()
+            }
+        )
+
+    def __bool__(self) -> bool:
+        return any(bool(v) for v in self.dict().values())
+
+    def to_markdown(self) -> str:
+        s = ""
+        for label, field in [
+            ("Specimen Types", "specimens"),
+            ("Species", "species"),
+            ("Modalities", "modalities"),
+            ("Techniques", "techniques"),
+            ("Anatomical Structures", "anatomies"),
+        ]:
+            s += f"* **{label}:**"
+            v: Optional[SetAddedRemoved] = getattr(self, field)
+            if v is None:
+                s += " [data not available]\n"
+            elif not v:
+                s += " no change\n"
+            else:
+                s += ":\n"
+                s += "    * Added: "
+                if v.added:
+                    s += ", ".join(sorted(v.added))
+                else:
+                    s += "\u2014"
+                s += "\n"
+                s += "    * Removed: "
+                if v.removed:
+                    s += ", ".join(sorted(v.removed))
+                else:
+                    s += "\u2014"
+                s += "\n"
+        return s
+
+
+class UniqueAssetsDelta(BaseModel):
+    by_qty: AddedRemoved
+    by_bytes: AddedRemoved
+
+    def __bool__(self) -> bool:
+        return bool(self.by_qty) or bool(self.by_bytes)
+
+
+class DuplicatesDelta(BaseModel):
+    delta: int
+    delta_size: int
+    remaining: int
+
+    def __bool__(self) -> bool:
+        return bool(self.delta or self.delta_size)  # NOT remaining
+
+
+class CommitDelta(BaseModel):
+    first: CommitInfo
+    second: CommitInfo
+    first_metadata: MetadataSummary
+    second_metadata: MetadataSummary
+    metadata_diff: MetadataDiff
+    unique_assets: UniqueAssetsDelta
+    duplicate_assets: DuplicatesDelta
+    subjects: AddedRemoved
+
+    def __bool__(self) -> bool:
+        return any(
+            bool(getattr(self, field))
+            for field in [
+                "metadata_diff",
+                "unique_assets",
+                "duplicate_assets",
+                "subjects",
+            ]
+        )
+
+    def to_markdown(self) -> str:
+        s = f"## {self.first.short_id} versus {self.second.short_id}\n\n"
+        s += (
+            f"* Assets added: {self.unique_assets.by_qty.added}"
+            f" ({naturalsize(self.unique_assets.by_bytes.added)})\n"
+        )
+        s += (
+            f"* Assets removed: {self.unique_assets.by_qty.removed}"
+            f" ({naturalsize(self.unique_assets.by_bytes.removed)})\n"
+        )
+        s += (
+            f"* Duplicates delta: {self.duplicate_assets.delta}"
+            f" ({naturalsize(self.duplicate_assets.delta_size)})\n"
+        )
+        s += f"* Duplicates remaining: {self.duplicate_assets.remaining}\n"
+        s += f"* Subjects added: {self.subjects.added}\n\n"
+        s += f"### Metadata summary for {self.first.short_id}\n\n"
+        s += self.first_metadata.to_markdown() + "\n"
+        s += f"### Metadata summary for {self.second.short_id}\n\n"
+        s += self.second_metadata.to_markdown() + "\n"
+        s += "### Changes in metadata\n\n"
+        s += self.metadata_diff.to_markdown()
+        return s
+
+
+class Report(BaseModel):
     from_dt: Optional[datetime]
     to_dt: Optional[datetime]
     commit_delta: CommitDelta
     published_versions: int
     since_latest: Optional[CommitDelta]
-
-    def for_json(self) -> dict:
-        return {
-            "from_dt": self.from_dt.isoformat() if self.from_dt is not None else None,
-            "to_dt": self.to_dt.isoformat() if self.to_dt is not None else None,
-            "commit_delta": self.commit_delta.for_json(),
-            "published_versions": self.published_versions,
-            "since_latest": self.since_latest.for_json()
-            if self.since_latest is not None
-            else None,
-        }
 
     def to_markdown(self) -> str:
         s = ""
@@ -143,7 +266,7 @@ class Report:
         s += f"**Versions published:** {self.published_versions}\n\n"
         if self.since_latest is not None and not self.since_latest:
             s += (
-                f"No changes since version {self.since_latest.first.short_hash}"
+                f"No changes since version {self.since_latest.first.short_id}"
                 f" published on {self.since_latest.first.created}\n\n"
             )
         s += self.commit_delta.to_markdown()
@@ -152,8 +275,7 @@ class Report:
         return s
 
 
-@dataclass
-class DandiDataSet:
+class DandiDataSet(BaseModel):
     path: Path
 
     def readgit(self, *args: Union[str, Path], **kwargs: Any) -> str:
@@ -176,16 +298,12 @@ class DandiDataSet:
         commits: List[CommitInfo] = []
         warned_nonlinear = False
         for cmt in cmtlines:
-            committish, short_hash, ts, *parents = cmt.strip().split()
+            committish, short_id, created, *parents = cmt.strip().split()
             if len(parents) > 1 and not warned_nonlinear:
                 log.warning("Commits in given timeframe are nonlinear")
                 warned_nonlinear = True
             commits.append(
-                CommitInfo(
-                    committish=committish,
-                    short_hash=short_hash,
-                    created=datetime.fromisoformat(ts),
-                )
+                CommitInfo(committish=committish, short_id=short_id, created=created)
             )
         commits.sort(key=attrgetter("created"))
         commits = filter_commits(commits, from_dt, to_dt)
@@ -208,11 +326,7 @@ class DandiDataSet:
         tags: List[CommitInfo] = []
         for tl in taglines:
             ts, _, tag = tl.partition(" ")
-            tags.append(
-                CommitInfo(
-                    committish=tag, short_hash=tag, created=datetime.fromisoformat(ts)
-                )
-            )
+            tags.append(CommitInfo(committish=tag, short_id=tag, created=ts))
         return filter_commits(tags, from_dt, to_dt)
 
     def get_assets(self, commit: CommitInfo) -> Iterator[AssetInfo]:
@@ -243,12 +357,30 @@ class DandiDataSet:
                         subject=subject,
                     )
 
+    def get_dandiset_metadata(self, commit: CommitInfo) -> dict:
+        return cast(
+            dict,
+            YAML(typ="safe").load(
+                self.readgit("show", f"{commit.committish}:dandiset.yaml")
+            ),
+        )
+
+    def get_asset_metadata(self, commit: CommitInfo) -> Optional[List[dict]]:
+        assets = json.loads(
+            self.readgit("show", f"{commit.committish}:.dandi/assets.json")
+        )
+        if assets and not (isinstance(assets[0], dict) and "asset_id" in assets[0]):
+            return None
+        else:
+            return [a["metadata"] for a in assets]
+
     def cmp_commit_assets(
         self, commit1: CommitInfo, commit2: CommitInfo
     ) -> CommitDelta:
         asset_sizes: Dict[str, int] = {}
         key_qtys: List[Dict[str, int]] = []
         subjects_sets: List[Set[str]] = []
+        metadata_summaries: List[MetadataSummary] = []
         for cmt in [commit1, commit2]:
             keys: Dict[str, int] = Counter()
             subjects: Set[str] = set()
@@ -259,26 +391,45 @@ class DandiDataSet:
                     subjects.add(asset.subject)
             key_qtys.append(keys)
             subjects_sets.append(subjects)
+            metadata_summaries.append(
+                MetadataSummary.from_metadata(
+                    self.get_dandiset_metadata(cmt),
+                    self.get_asset_metadata(cmt),
+                )
+            )
         keys1, keys2 = key_qtys
         added_keys = keys2.keys() - keys1.keys()
         removed_keys = keys1.keys() - keys2.keys()
         duplicates1 = Counter({k: n - 1 for k, n in keys1.items() if n > 1})
         duplicates2 = Counter({k: n - 1 for k, n in keys2.items() if n > 1})
         subjects1, subjects2 = subjects_sets
+        mds1, mds2 = metadata_summaries
         return CommitDelta(
             first=commit1,
             second=commit2,
-            assets_added=len(added_keys),
-            assets_added_size=sum(asset_sizes[k] for k in added_keys),
-            assets_removed=len(removed_keys),
-            assets_removed_size=sum(asset_sizes[k] for k in removed_keys),
-            duplicates_delta=sum(duplicates2.values()) - sum(duplicates1.values()),
-            duplicates_delta_size=sum(
-                asset_sizes[k] * n for k, n in duplicates2.items()
-            )
-            - sum(asset_sizes[k] * n for k, n in duplicates1.items()),
-            duplicates_remaining=sum(duplicates2.values()),
-            subjects_added=len(subjects2 - subjects1),
+            first_metadata=mds1,
+            second_metadata=mds2,
+            metadata_diff=MetadataDiff.compare(mds1, mds2),
+            unique_assets={
+                "by_qty": {
+                    "added": len(added_keys),
+                    "removed": len(removed_keys),
+                },
+                "by_bytes": {
+                    "added": sum(asset_sizes[k] for k in added_keys),
+                    "removed": sum(asset_sizes[k] for k in removed_keys),
+                },
+            },
+            duplicate_assets={
+                "delta": sum(duplicates2.values()) - sum(duplicates1.values()),
+                "delta_size": sum(asset_sizes[k] * n for k, n in duplicates2.items())
+                - sum(asset_sizes[k] * n for k, n in duplicates1.items()),
+                "remaining": sum(duplicates2.values()),
+            },
+            subjects={
+                "added": len(subjects2 - subjects1),
+                "removed": len(subjects1 - subjects2),
+            },
         )
 
 
@@ -350,7 +501,7 @@ def main(
         from_dt = from_dt.astimezone()
     if to_dt is not None and to_dt.tzinfo is None:
         to_dt = to_dt.astimezone()
-    dd = DandiDataSet(dandiset)
+    dd = DandiDataSet(path=dandiset)
     commit1, commit2 = dd.get_first_and_last_commit(from_dt, to_dt)
     commit_delta = dd.cmp_commit_assets(commit1, commit2)
     tags = dd.get_tags(from_dt, to_dt)
@@ -367,11 +518,11 @@ def main(
         since_latest=since_latest,
     )
     if fmt == "json":
-        print(json.dumps(report.for_json(), indent=4), file=outfile)
+        print(report.json(indent=4), file=outfile)
     elif fmt == "yaml":
-        yaml = ruamel.yaml.YAML(typ="safe")  # type: ignore[attr-defined]
+        yaml = YAML(typ="safe")
         yaml.default_flow_style = False
-        yaml.dump(report.for_json(), outfile)
+        yaml.dump(report.dict(), outfile)
     elif fmt == "markdown":
         print(report.to_markdown(), file=outfile)
 
