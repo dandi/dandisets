@@ -87,7 +87,7 @@ class MetadataSummary(BaseModel):
         anatomies = {
             ab["name"]
             for ab in dandiset_metadata.get("about") or []
-            if ab["schemaKey"] == "Anatomy"
+            if ab.get("schemaKey") == "Anatomy"
         }
         return cls(
             specimens=specimens,
