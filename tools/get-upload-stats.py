@@ -256,17 +256,21 @@ class Report(BaseModel):
 
     def to_markdown(self) -> str:
         s = ""
-        if self.from_dt is not None and self.to_dt is not None:
-            s += (
-                f"# Changes from {short_datetime(self.from_dt)}"
-                f" to {short_datetime(self.to_dt)}\n\n"
-            )
-        elif self.from_dt is not None:
-            s += f"# Changes since {short_datetime(self.from_dt)}\n\n"
-        elif self.to_dt is not None:
-            s += f"# Changes up to {short_datetime(self.to_dt)}\n\n"
+        if self.from_dt is None:
+            start_time = self.commit_delta.first.created
         else:
-            s += "# Changes\n\n"
+            start_time = self.from_dt
+        if self.to_dt is None:
+            end_time = self.commit_delta.second.created
+        else:
+            end_time = self.to_dt
+        if self.since_latest is not None:
+            start_time = min(start_time, self.since_latest.first.created)
+            end_time = max(end_time, self.since_latest.first.created)
+        s += (
+            f"# Changes from {short_datetime(start_time)}"
+            f" to {short_datetime(end_time)}\n\n"
+        )
         s += f"**Versions published:** {self.published_versions}\n\n"
         if self.since_latest is not None and not self.since_latest:
             s += (
