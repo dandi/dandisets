@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, time, timezone
 import json
 import logging
 from operator import attrgetter
@@ -257,18 +257,21 @@ class Report(BaseModel):
     def to_markdown(self) -> str:
         s = ""
         if self.from_dt is not None and self.to_dt is not None:
-            s += f"# Changes from {self.from_dt} to {self.to_dt}\n\n"
+            s += (
+                f"# Changes from {short_datetime(self.from_dt)}"
+                f" to {short_datetime(self.to_dt)}\n\n"
+            )
         elif self.from_dt is not None:
-            s += f"# Changes since {self.from_dt}\n\n"
+            s += f"# Changes since {short_datetime(self.from_dt)}\n\n"
         elif self.to_dt is not None:
-            s += f"# Changes up to {self.to_dt}\n\n"
+            s += f"# Changes up to {short_datetime(self.to_dt)}\n\n"
         else:
             s += "# Changes\n\n"
         s += f"**Versions published:** {self.published_versions}\n\n"
         if self.since_latest is not None and not self.since_latest:
             s += (
                 f"No changes since version {self.since_latest.first.short_id}"
-                f" published on {self.since_latest.first.created}\n\n"
+                f" published on {short_datetime(self.since_latest.first.created)}\n\n"
             )
         s += self.commit_delta.to_markdown()
         if self.since_latest is not None and self.since_latest:
@@ -540,6 +543,15 @@ def filter_commits(
         while commits and commits[-1].created >= to_dt:
             commits.pop(-1)
     return commits
+
+
+def short_datetime(dt: datetime) -> str:
+    if dt.timetz() == time(0, tzinfo=timezone.utc):
+        return dt.strftime("%Y-%m-%d")
+    elif dt.time() == time(0):
+        return dt.strftime("%Y-%m-%d %z")
+    else:
+        return str(dt)
 
 
 if __name__ == "__main__":
