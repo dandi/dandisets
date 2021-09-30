@@ -136,10 +136,11 @@ class MetadataDiff(BaseModel):
         def cmp(
             one: Optional[Set[str]], two: Optional[Set[str]]
         ) -> Optional[SetAddedRemoved]:
-            if one is None or two is None:
+            if one is None:
+                one = set()
+            if two is None:
                 return None
-            else:
-                return SetAddedRemoved(added=two - one, removed=one - two)
+            return SetAddedRemoved(added=two - one, removed=one - two)
 
         return cls(
             **{
