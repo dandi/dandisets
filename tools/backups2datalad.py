@@ -23,7 +23,7 @@ Later TODOs
 
 from collections import deque
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from functools import cached_property
 import json
@@ -91,6 +91,9 @@ class DandiDatasetter:
     s3bucket: str = "dandiarchive"
     enable_tags: bool = True
 
+    def match_asset(self, asset_path: str) -> bool:
+        return bool(self.asset_filter is None or self.asset_filter.search(asset_path))
+
     def update_from_backup(
         self,
         dandiset_ids: Sequence[str] = (),
@@ -98,6 +101,7 @@ class DandiDatasetter:
         gh_org: Optional[str] = None,
         backup_remote: Optional[str] = None,
     ) -> None:
+        ### TODO: Remove this check?
         if not (self.assetstore_path / "girder-assetstore").exists():
             raise RuntimeError(
                 "Given assetstore path does not contain girder-assetstore folder"
@@ -191,208 +195,17 @@ class DandiDatasetter:
         log.info("Syncing Dandiset %s", dandiset.identifier)
         if ds.repo.dirty:
             raise RuntimeError("Dirty repository; clean or save before running")
-        digester = Digester(digests=["sha256"])
-        # cache = PersistentCache("backups2datalad")
-        # cache.clear()
-
-        # do not cache due to fscacher resolving the path so we end
-        # up with a path under .git/annex/objects
-        # https://github.com/con/fscacher/issues/44
-        # @cache.memoize_path
-        def get_annex_hash(filepath: Union[str, Path]) -> str:
-            # relpath = str(Path(filepath).relative_to(dsdir))
-            # OPT: do not bother checking or talking to annex --
-            # shaves off about 20% of runtime on 000003, so let's just
-            # not bother checking etc but judge from the resolved path to be
-            # under (some) annex
-            realpath = os.path.realpath(filepath)
-            if (
-                os.path.islink(filepath) and ".git/annex/object" in realpath
-            ):  # ds.repo.is_under_annex(relpath, batch=True):
-                return os.path.basename(realpath).split("-")[-1].partition(".")[0]
-            else:
-                log.debug("Asset not under annex; calculating sha256 digest ourselves")
-                return cast(str, digester(filepath)["sha256"])
-
-        dsdir: Path = ds.pathobj
-        added = 0
-        updated = 0
-        deleted = 0
-
-        with dandi_logging(dsdir) as logfile:
+        with dandi_logging(ds.pathobj) as logfile:
             update_dandiset_metadata(dandiset, ds)
-            local_assets: Set[str] = set(dataset_files(dsdir))
-            local_assets.discard(dandiset_metadata_file)
-            asset_metadata: List[dict] = []
-            saved_metadata: Dict[str, dict] = {}
-            try:
-                with (dsdir / ".dandi" / "assets.json").open() as fp:
-                    for md in json.load(fp):
-                        if isinstance(md, str):
-                            # Old version of assets.json; ignore
-                            pass
-                        else:
-                            saved_metadata[md["path"].lstrip("/")] = md
-            except FileNotFoundError:
-                pass
+            syncer = Syncer(datasetter=self, dandiset=dandiset, ds=ds)
             for a in dandiset.get_assets():
-                dest = dsdir / a.path
-                local_assets.discard(a.path)
-                adict = asset2dict(a)
-                asset_metadata.append(adict)
-                if self.force != "check" and adict == saved_metadata.get(a.path):
-                    log.debug(
-                        "Asset %s metadata unchanged; not taking any further action",
-                        a.path,
-                    )
-                    continue
-                if self.asset_filter and not self.asset_filter.search(a.path):
-                    log.debug("Skipping asset %s", a.path)
-                    continue
-                log.info("Syncing asset %s", a.path)
-                try:
-                    dandi_hash = adict["metadata"]["digest"]["dandi:sha2-256"]
-                except KeyError:
-                    dandi_hash = None
-                    log.warning(
-                        "%s: %s: Asset metadata does not include sha256 hash",
-                        dandiset.identifier,
-                        a.path,
-                    )
-                dandi_etag = adict["metadata"]["digest"]["dandi:dandi-etag"]
-                download_url = a.base_download_url
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                if not (dest.exists() or dest.is_symlink()):
-                    log.info("Asset not in dataset; will copy")
-                    to_update = True
-                    added += 1
-                elif dandi_hash is not None:
-                    log.debug("About to fetch hash from annex")
-                    if dandi_hash == get_annex_hash(dest):
-                        log.info(
-                            "Asset in dataset, and hash shows no modification;"
-                            " will not update"
-                        )
-                        to_update = False
-                    else:
-                        log.info(
-                            "Asset in dataset, and hash shows modification; will update"
-                        )
-                        to_update = True
-                        updated += 1
-                else:
-                    log.debug("About to calculate dandi-etag")
-                    if dandi_etag == get_digest(dest, "dandi-etag"):
-                        log.info(
-                            "Asset in dataset, and etag shows no modification;"
-                            " will not update"
-                        )
-                        to_update = False
-                    else:
-                        log.info(
-                            "Asset in dataset, and etag shows modification; will update"
-                        )
-                        to_update = True
-                        updated += 1
-                if to_update:
-                    bucket_url = self.get_file_bucket_url(a)
-                    src = self.assetstore_path / urlparse(bucket_url).path.lstrip("/")
-                    if src.exists():
-                        try:
-                            mklink(src, dest)
-                        except Exception:
-                            if self.ignore_errors:
-                                log.warning(
-                                    "%s: %s: cp command failed; ignoring",
-                                    dandiset.identifier,
-                                    a.path,
-                                )
-                                continue
-                            else:
-                                raise
-                        log.info("Adding asset to dataset")
-                        ds.repo.add([a.path])
-                        if ds.repo.is_under_annex(a.path, batch=True):
-                            log.info("Adding URL %s to asset", bucket_url)
-                            ds.repo.add_url_to_file(a.path, bucket_url, batch=True)
-                            log.info("Adding URL %s to asset", download_url)
-                            ds.repo.call_annex(
-                                [
-                                    "registerurl",
-                                    ds.repo.get_file_key(a.path),
-                                    download_url,
-                                ]
-                            )
-                        else:
-                            log.info("File is not managed by git annex; not adding URL")
-                    else:
-                        log.info(
-                            "Asset not found in assetstore; downloading from %s",
-                            bucket_url,
-                        )
-                        try:
-                            dest.unlink()
-                        except FileNotFoundError:
-                            pass
-                        with custom_commit_date(dandiset.version.modified):
-                            ds.download_url(urls=bucket_url, path=a.path)
-                        if ds.repo.is_under_annex(a.path, batch=True):
-                            log.info("Adding URL %s to asset", download_url)
-                            ds.repo.call_annex(
-                                [
-                                    "registerurl",
-                                    ds.repo.get_file_key(a.path),
-                                    download_url,
-                                ]
-                            )
-                        else:
-                            log.info("File is not managed by git annex; not adding URL")
-                if dandi_hash is not None:
-                    annex_key = get_annex_hash(dest)
-                    if dandi_hash != annex_key:
-                        raise RuntimeError(
-                            f"Hash mismatch for {dest.relative_to(self.target_path)}!"
-                            f"  Dandiarchive reports {dandi_hash},"
-                            f" datalad reports {annex_key}"
-                        )
-                else:
-                    annex_etag = get_digest(dest, "dandi-etag")
-                    if dandi_etag != annex_etag:
-                        raise RuntimeError(
-                            f"ETag mismatch for {dest.relative_to(self.target_path)}!"
-                            f"  Dandiarchive reports {dandi_hash},"
-                            f" file has {annex_etag}"
-                        )
-            for apath in local_assets:
-                if self.asset_filter and not self.asset_filter.search(apath):
-                    continue
-                log.info(
-                    "Asset %s is in dataset but not in Dandiarchive; deleting", apath
-                )
-                ds.repo.remove([apath])
-                deleted += 1
-
-            # due to  https://github.com/dandi/dandi-api/issues/231
-            # we need to sanitize temporary URLs. TODO: remove when "fixed"
-            for asset in asset_metadata:
-                if "contentUrl" in asset["metadata"]:
-                    asset["metadata"]["contentUrl"] = sanitize_contentUrls(
-                        asset["metadata"]["contentUrl"]
-                    )
-            dump(asset_metadata, dsdir / ".dandi" / "assets.json")
+                syncer.sync_asset(a)
+            syncer.prune_deleted()
+            syncer.dump_asset_metadata()
         if any(r["state"] != "clean" for r in ds.status()):
             log.info("Commiting changes")
-            msgparts = []
-            if added:
-                msgparts.append(f"{added} files added")
-            if updated:
-                msgparts.append(f"{updated} files updated")
-            if deleted:
-                msgparts.append(f"{deleted} files deleted")
-            if not msgparts:
-                msgparts.append("only some metadata updates")
             with custom_commit_date(dandiset.version.modified):
-                ds.save(message=f"[backups2datalad] {', '.join(msgparts)}")
+                ds.save(message=syncer.get_commit_message())
             return True
         else:
             log.info("No changes made to repository; deleting logfile")
@@ -600,6 +413,203 @@ class DandiDatasetter:
     def gh(self) -> Github:
         token = readcmd("git", "config", "hub.oauthtoken")
         return Github(token)
+
+
+@dataclass
+class Syncer:
+    datasetter: DandiDatasetter
+    dandiset: RemoteDandiset
+    ds: Dataset
+    added: int = 0
+    updated: int = 0
+    deleted: int = 0
+    local_assets: Set[str] = field(init=False)
+    asset_metadata: List[dict] = field(init=False, default_factory=list)
+    saved_metadata: Dict[str, dict] = field(init=False, default_factory=dict)
+    digester: Digester = field(init=False)
+    # cache: PersistentCache = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.digester = Digester(digests=["sha256"])
+        # self.cache = PersistentCache("backups2datalad")
+        # self.cache.clear()
+        self.local_assets = set(dataset_files(self.ds.pathobj))
+        self.local_assets.discard(dandiset_metadata_file)
+        try:
+            with (self.ds.pathobj / ".dandi" / "assets.json").open() as fp:
+                for md in json.load(fp):
+                    if isinstance(md, str):
+                        # Old version of assets.json; ignore
+                        pass
+                    else:
+                        self.saved_metadata[md["path"].lstrip("/")] = md
+        except FileNotFoundError:
+            pass
+
+    # do not cache due to fscacher resolving the path so we end
+    # up with a path under .git/annex/objects
+    # https://github.com/con/fscacher/issues/44
+    # @cache.memoize_path
+    def get_annex_hash(self, filepath: Union[str, Path]) -> str:
+        # OPT: do not bother checking or talking to annex --
+        # shaves off about 20% of runtime on 000003, so let's just
+        # not bother checking etc but judge from the resolved path to be
+        # under (some) annex
+        realpath = os.path.realpath(filepath)
+        if os.path.islink(filepath) and ".git/annex/object" in realpath:
+            return os.path.basename(realpath).split("-")[-1].partition(".")[0]
+        else:
+            log.debug("Asset not under annex; calculating sha256 digest ourselves")
+            return cast(str, self.digester(filepath)["sha256"])
+
+    def sync_asset(self, a: RemoteAsset) -> None:
+        dest = self.ds.pathobj / a.path
+        self.local_assets.discard(a.path)
+        adict = asset2dict(a)
+        self.asset_metadata.append(adict)
+        if self.datasetter.force != "check" and adict == self.saved_metadata.get(
+            a.path
+        ):
+            log.debug(
+                "Asset %s metadata unchanged; not taking any further action",
+                a.path,
+            )
+            return
+        if not self.datasetter.match_asset(a.path):
+            log.debug("Skipping asset %s", a.path)
+            return
+        log.info("Syncing asset %s", a.path)
+        try:
+            dandi_hash = adict["metadata"]["digest"]["dandi:sha2-256"]
+        except KeyError:
+            dandi_hash = None
+            log.warning(
+                "%s: %s: Asset metadata does not include sha256 hash",
+                self.dandiset.identifier,
+                a.path,
+            )
+        dandi_etag = adict["metadata"]["digest"]["dandi:dandi-etag"]
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if not (dest.exists() or dest.is_symlink()):
+            log.info("Asset not in dataset; will copy")
+            self.save_asset(a, dest)
+            self.added += 1
+        elif dandi_hash is not None:
+            log.debug("About to fetch hash from annex")
+            if dandi_hash == self.get_annex_hash(dest):
+                log.info(
+                    "Asset in dataset, and hash shows no modification;"
+                    " will not update"
+                )
+            else:
+                log.info("Asset in dataset, and hash shows modification; will update")
+                self.save_asset(a, dest)
+                self.updated += 1
+        else:
+            log.debug("About to calculate dandi-etag")
+            if dandi_etag == get_digest(dest, "dandi-etag"):
+                log.info(
+                    "Asset in dataset, and etag shows no modification;"
+                    " will not update"
+                )
+            else:
+                log.info("Asset in dataset, and etag shows modification; will update")
+                self.save_asset(a, dest)
+                self.updated += 1
+        if dandi_hash is not None:
+            annex_key = self.get_annex_hash(dest)
+            if dandi_hash != annex_key:
+                raise RuntimeError(
+                    f"Hash mismatch for {a.path}!"
+                    f"  Dandiarchive reports {dandi_hash},"
+                    f" datalad reports {annex_key}"
+                )
+        else:
+            annex_etag = get_digest(dest, "dandi-etag")
+            if dandi_etag != annex_etag:
+                raise RuntimeError(
+                    f"ETag mismatch for {a.path}!"
+                    f"  Dandiarchive reports {dandi_hash},"
+                    f" file has {annex_etag}"
+                )
+
+    def save_asset(self, a: RemoteAsset, dest: Path) -> None:
+        download_url = a.base_download_url
+        bucket_url = self.datasetter.get_file_bucket_url(a)
+        src = self.datasetter.assetstore_path / urlparse(bucket_url).path.lstrip("/")
+        if src.exists():
+            try:
+                mklink(src, dest)
+            except Exception:
+                if self.datasetter.ignore_errors:
+                    log.warning(
+                        "%s: %s: cp command failed; ignoring",
+                        self.dandiset.identifier,
+                        a.path,
+                    )
+                    return
+                else:
+                    raise
+            log.info("Adding asset to dataset")
+            self.ds.repo.add([a.path])
+            if self.ds.repo.is_under_annex(a.path, batch=True):
+                log.info("Adding URL %s to asset", bucket_url)
+                self.ds.repo.add_url_to_file(a.path, bucket_url, batch=True)
+                log.info("Adding URL %s to asset", download_url)
+                self.ds.repo.call_annex(
+                    [
+                        "registerurl",
+                        self.ds.repo.get_file_key(a.path),
+                        download_url,
+                    ]
+                )
+            else:
+                log.info("File is not managed by git annex; not adding URL")
+        else:
+            log.info(
+                "Asset not found in assetstore; downloading from %s",
+                bucket_url,
+            )
+            try:
+                dest.unlink()
+            except FileNotFoundError:
+                pass
+            with custom_commit_date(self.dandiset.version.modified):
+                self.ds.download_url(urls=bucket_url, path=a.path)
+            if self.ds.repo.is_under_annex(a.path, batch=True):
+                log.info("Adding URL %s to asset", download_url)
+                self.ds.repo.call_annex(
+                    [
+                        "registerurl",
+                        self.ds.repo.get_file_key(a.path),
+                        download_url,
+                    ]
+                )
+            else:
+                log.info("File is not managed by git annex; not adding URL")
+
+    def prune_deleted(self) -> None:
+        for apath in self.local_assets:
+            if not self.datasetter.match_asset(apath):
+                continue
+            log.info("Asset %s is in dataset but not in Dandiarchive; deleting", apath)
+            self.ds.repo.remove([apath])
+            self.deleted += 1
+
+    def dump_asset_metadata(self) -> None:
+        dump(self.asset_metadata, self.ds.pathobj / ".dandi" / "assets.json")
+
+    def get_commit_message(self) -> str:
+        msgparts = []
+        if self.added:
+            msgparts.append(f"{self.added} files added")
+        if self.updated:
+            msgparts.append(f"{self.updated} files updated")
+        if self.deleted:
+            msgparts.append(f"{self.deleted} files deleted")
+        if not msgparts:
+            msgparts.append("only some metadata updates")
+        return f"[backups2datalad] {', '.join(msgparts)}"
 
 
 @click.group()
@@ -817,10 +827,12 @@ def sanitize_contentUrls(urls: List[str]) -> List[str]:
 
 def asset2dict(asset: RemoteAsset) -> Dict[str, Any]:
     adict = {**asset.json_dict(), "metadata": asset.get_raw_metadata()}
-    # Let's pop dandiset "linkage" since yoh thinks it should not be there
-    # TODO/discussion: https://github.com/dandi/dandi-cli/issues/690
-    for f in ("dandiset_id", "version_id"):
-        adict.pop(f, None)
+    # due to  https://github.com/dandi/dandi-api/issues/231
+    # we need to sanitize temporary URLs. TODO: remove when "fixed"
+    if "contentUrl" in adict["metadata"]:
+        adict["metadata"]["contentUrl"] = sanitize_contentUrls(
+            adict["metadata"]["contentUrl"]
+        )
     return adict
 
 
