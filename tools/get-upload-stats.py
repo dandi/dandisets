@@ -294,15 +294,16 @@ class DandiDataSet(BaseModel):
             "log",
             r"--grep=\[backups2datalad\]",
             r"--grep=Ran backups2datalad\.py",
-            "--format=%H %h %aI %p",
+            "--format=%H %aI %p",
         ).splitlines()
         commits: List[CommitInfo] = []
         warned_nonlinear = False
         for cmt in cmtlines:
-            committish, short_id, created, *parents = cmt.strip().split()
+            committish, created, *parents = cmt.strip().split()
             if len(parents) > 1 and not warned_nonlinear:
                 log.warning("Commits in given timeframe are nonlinear")
                 warned_nonlinear = True
+            short_id = self.readgit("describe", "--always", committish)
             commits.append(
                 CommitInfo(committish=committish, short_id=short_id, created=created)
             )
