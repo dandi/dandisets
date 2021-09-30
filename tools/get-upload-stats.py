@@ -248,10 +248,11 @@ class CommitDelta(BaseModel):
 
 
 class Report(BaseModel):
+    dandiset_id: str
     from_dt: Optional[datetime]
     to_dt: Optional[datetime]
     commit_delta: CommitDelta
-    published_versions: int
+    published_versions: List[CommitInfo]
     since_latest: Optional[CommitDelta]
 
     def to_markdown(self) -> str:
@@ -268,10 +269,25 @@ class Report(BaseModel):
             start_time = min(start_time, self.since_latest.first.created)
             end_time = max(end_time, self.since_latest.first.created)
         s += (
-            f"# Changes from {short_datetime(start_time)}"
+            f"# Changes in [DANDI:{self.dandiset_id}]"
+            f"(https://dandiarchive.org/dandiset/{self.dandiset_id}/)"
+            f" from {short_datetime(start_time)}"
             f" to {short_datetime(end_time)}\n\n"
         )
-        s += f"**Versions published:** {self.published_versions}\n\n"
+        s += f"* **GitHub URL:** <https://github.com/dandisets/{self.dandiset_id}>\n"
+        s += "* **Versions published:**"
+        if self.published_versions:
+            s += "\n"
+            for v in self.published_versions:
+                s += (
+                    f"    * [{v.short_id}](https://dandiarchive.org/dandiset/"
+                    f"{self.dandiset_id}/{v.short_id}/) [[GitHub URL]"
+                    f"(https://github.com/dandisets/{self.dandiset_id}/"
+                    f"releases/tag/{v.short_id})]\n"
+                )
+        else:
+            s += " [none]\n"
+        s += "\n"
         if self.since_latest is not None and not self.since_latest:
             s += (
                 f"No changes since version {self.since_latest.first.short_id}"
@@ -512,6 +528,7 @@ def main(
         to_dt = to_dt.astimezone()
     dd = DandiDataSet(path=dandiset)
     commit1, commit2 = dd.get_first_and_last_commit(from_dt, to_dt)
+    did = re.sub(r"^.+?:", "", dd.get_dandiset_metadata(commit1)["identifier"])
     commit_delta = dd.cmp_commit_assets(commit1, commit2)
     tags = dd.get_tags(from_dt, to_dt)
     since_latest: Optional[CommitDelta]
@@ -520,10 +537,11 @@ def main(
     else:
         since_latest = None
     report = Report(
+        dandiset_id=did,
         from_dt=from_dt,
         to_dt=to_dt,
         commit_delta=commit_delta,
-        published_versions=len(tags),
+        published_versions=tags,
         since_latest=since_latest,
     )
     if fmt == "json":
