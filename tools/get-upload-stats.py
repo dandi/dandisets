@@ -361,7 +361,7 @@ class DandiDataSet(BaseModel):
             if info.get("type") == "file" and relpath.parts[0] not in IGNORED:
                 path = str(PurePosixPath(relpath))
                 subject: Optional[str]
-                if m := re.fullmatch(r"sub-([^/]+)/[^/]+\.nwb", path):
+                if m := re.match(r"sub-([^/]+)/", path):
                     subject = m.group(1)
                 else:
                     subject = None
