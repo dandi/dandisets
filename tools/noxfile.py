@@ -14,5 +14,8 @@ def test(session):
 @nox.session
 def typing(session):
     session.install("-r", "backups2datalad.req.txt")
-    session.install("mypy", "boto3-stubs[s3]")
-    session.run("mypy", "backups2datalad.py", "test_backups2datalad.py")
+    session.install("-r", "get-upload-stats.req.txt")
+    session.install("mypy", "boto3-stubs[s3]", "types-python-dateutil")
+    session.run(
+        "mypy", "backups2datalad.py", "test_backups2datalad.py", "get-upload-stats.py"
+    )

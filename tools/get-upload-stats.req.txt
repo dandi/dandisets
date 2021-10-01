@@ -1,0 +1,7 @@
+# Python ~= 3.8
+click >= 8.0
+datalad
+humanize
+pydantic ~= 1.7
+python-dateutil ~= 2.0
+ruamel.yaml ~= 0.15
