@@ -228,20 +228,23 @@ class CommitDelta(BaseModel):
 
     def to_markdown(self) -> str:
         s = f"## {self.first.short_id} versus {self.second.short_id}\n\n"
-        s += (
-            f"* Assets added: {self.unique_assets.by_qty.added}"
-            f" ({naturalsize(self.unique_assets.by_bytes.added)})\n"
-        )
-        s += (
-            f"* Assets removed: {self.unique_assets.by_qty.removed}"
-            f" ({naturalsize(self.unique_assets.by_bytes.removed)})\n"
-        )
-        s += (
-            f"* Duplicates delta: {self.duplicate_assets.delta}"
-            f" ({naturalsize(self.duplicate_assets.delta_size)})\n"
-        )
-        s += f"* Duplicates remaining: {self.duplicate_assets.remaining}\n"
-        s += f"* Subjects added: {self.subjects.added}\n\n"
+        if self.unique_assets or self.duplicate_assets or self.subjects:
+            s += (
+                f"* Assets added: {self.unique_assets.by_qty.added}"
+                f" ({naturalsize(self.unique_assets.by_bytes.added)})\n"
+            )
+            s += (
+                f"* Assets removed: {self.unique_assets.by_qty.removed}"
+                f" ({naturalsize(self.unique_assets.by_bytes.removed)})\n"
+            )
+            s += (
+                f"* Duplicates delta: {self.duplicate_assets.delta}"
+                f" ({naturalsize(self.duplicate_assets.delta_size)})\n"
+            )
+            s += f"* Duplicates remaining: {self.duplicate_assets.remaining}\n"
+            s += f"* Subjects added: {self.subjects.added}\n\n"
+        else:
+            s += "No change in assets\n\n"
         s += f"### Metadata summary for {self.first.short_id}\n\n"
         s += self.first_metadata.to_markdown() + "\n"
         s += f"### Metadata summary for {self.second.short_id}\n\n"
