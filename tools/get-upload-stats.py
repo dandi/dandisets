@@ -150,9 +150,11 @@ class MetadataDiff(BaseModel):
         )
 
     def __bool__(self) -> bool:
-        return any(bool(v) for v in self.dict().values())
+        return bool(any(self.dict().values()))
 
     def to_markdown(self) -> str:
+        if not self:
+            return "No change\n"
         s = ""
         for label, field in [
             ("Specimen Types", "specimens"),
