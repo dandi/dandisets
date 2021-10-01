@@ -150,7 +150,9 @@ class MetadataDiff(BaseModel):
         )
 
     def __bool__(self) -> bool:
-        return bool(any(self.dict().values()))
+        # Don't iterate over self.dict().values(), as that converts models in
+        # subfields to dicts
+        return bool(any(v for _, v in self))
 
     def to_markdown(self) -> str:
         if not self:
