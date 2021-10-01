@@ -255,29 +255,32 @@ class Report(BaseModel):
     dandiset_id: str
     from_dt: Optional[datetime]
     to_dt: Optional[datetime]
-    commit_delta: CommitDelta
+    commit_delta: Optional[CommitDelta]
     published_versions: List[CommitInfo]
     since_latest: Optional[CommitDelta]
 
     def to_markdown(self) -> str:
-        s = ""
-        if self.from_dt is None:
-            start_time = self.commit_delta.first.created
-        else:
-            start_time = self.from_dt
-        if self.to_dt is None:
-            end_time = self.commit_delta.second.created
-        else:
-            end_time = self.to_dt
-        if self.since_latest is not None:
-            start_time = min(start_time, self.since_latest.first.created)
-            end_time = max(end_time, self.since_latest.first.created)
-        s += (
+        start_time = self.from_dt
+        end_time = self.to_dt
+        if self.commit_delta is not None:
+            if start_time is None:
+                start_time = self.commit_delta.first.created
+            if end_time is None:
+                end_time = self.commit_delta.second.created
+            if self.since_latest is not None:
+                assert start_time is not None
+                assert end_time is not None
+                start_time = min(start_time, self.since_latest.first.created)
+                end_time = max(end_time, self.since_latest.first.created)
+        s = (
             f"# Changes in [DANDI:{self.dandiset_id}]"
             f"(https://dandiarchive.org/dandiset/{self.dandiset_id}/)"
-            f" from {short_datetime(start_time)}"
-            f" to {short_datetime(end_time)}\n\n"
         )
+        if start_time is not None:
+            s += f" from {short_datetime(start_time)}"
+        if end_time is not None:
+            s += f" to {short_datetime(end_time)}"
+        s += "\n\n"
         s += f"* **GitHub URL:** <https://github.com/dandisets/{self.dandiset_id}>\n"
         s += "* **Versions published:**"
         if self.published_versions:
@@ -297,7 +300,10 @@ class Report(BaseModel):
                 f"No changes since version {self.since_latest.first.short_id}"
                 f" published on {short_datetime(self.since_latest.first.created)}\n\n"
             )
-        s += self.commit_delta.to_markdown()
+        if self.commit_delta is None:
+            s += "**No changes in the given timeframe**\n"
+        else:
+            s += self.commit_delta.to_markdown()
         if self.since_latest is not None and self.since_latest:
             s += "\n\n" + self.since_latest.to_markdown()
         return s
@@ -336,10 +342,8 @@ class DandiDataSet(BaseModel):
             )
         commits.sort(key=attrgetter("created"))
         commits = filter_commits(commits, from_dt, to_dt)
-        if not commits:
-            raise ValueError("No commits in given timeframe")
-        elif len(commits) == 1:
-            raise ValueError("Only one commit in given timeframe")
+        if len(commits) < 2:
+            raise InsufficientCommitsError()
         return (commits[0], commits[-1])
 
     def get_tags(
@@ -386,12 +390,14 @@ class DandiDataSet(BaseModel):
                         subject=subject,
                     )
 
-    def get_dandiset_metadata(self, commit: CommitInfo) -> dict:
+    def get_dandiset_metadata(self, commit: Union[str, CommitInfo]) -> dict:
+        if isinstance(commit, str):
+            committish = commit
+        else:
+            committish = commit.committish
         return cast(
             dict,
-            YAML(typ="safe").load(
-                self.readgit("show", f"{commit.committish}:dandiset.yaml")
-            ),
+            YAML(typ="safe").load(self.readgit("show", f"{committish}:dandiset.yaml")),
         )
 
     def get_asset_metadata(self, commit: CommitInfo) -> Optional[List[dict]]:
@@ -460,6 +466,10 @@ class DandiDataSet(BaseModel):
                 "removed": len(subjects1 - subjects2),
             },
         )
+
+
+class InsufficientCommitsError(Exception):
+    pass
 
 
 @click.command()
@@ -531,15 +541,21 @@ def main(
     if to_dt is not None and to_dt.tzinfo is None:
         to_dt = to_dt.astimezone()
     dd = DandiDataSet(path=dandiset)
-    commit1, commit2 = dd.get_first_and_last_commit(from_dt, to_dt)
-    did = re.sub(r"^.+?:", "", dd.get_dandiset_metadata(commit1)["identifier"])
-    commit_delta = dd.cmp_commit_assets(commit1, commit2)
+    did = re.sub(r"^.+?:", "", dd.get_dandiset_metadata("HEAD")["identifier"])
     tags = dd.get_tags(from_dt, to_dt)
+    commit_delta: Optional[CommitDelta]
     since_latest: Optional[CommitDelta]
-    if tags:
-        since_latest = dd.cmp_commit_assets(tags[-1], commit2)
-    else:
+    try:
+        commit1, commit2 = dd.get_first_and_last_commit(from_dt, to_dt)
+    except InsufficientCommitsError:
+        commit_delta = None
         since_latest = None
+    else:
+        commit_delta = dd.cmp_commit_assets(commit1, commit2)
+        if tags:
+            since_latest = dd.cmp_commit_assets(tags[-1], commit2)
+        else:
+            since_latest = None
     report = Report(
         dandiset_id=did,
         from_dt=from_dt,
