@@ -574,7 +574,7 @@ def main(
         yaml.default_flow_style = False
         yaml.dump(report.dict(), outfile)
     elif fmt == "markdown":
-        print(report.to_markdown(), file=outfile)
+        print(report.to_markdown(), file=outfile, end="")
 
 
 def filter_commits(
