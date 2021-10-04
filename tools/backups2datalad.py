@@ -405,14 +405,6 @@ class DandiDatasetter:
 
 
 @dataclass
-class ToDownload:
-    asset: RemoteAsset
-    dest: Path
-    bucket_url: str
-    updating: bool
-
-
-@dataclass
 class Syncer:
     datasetter: DandiDatasetter
     dandiset: RemoteDandiset
@@ -420,20 +412,26 @@ class Syncer:
     added: int = 0
     updated: int = 0
     deleted: int = 0
+    #: Paths of files found when the syncing started, minus the paths for any
+    #: assets downloaded during syncing
     local_assets: Set[str] = field(init=False)
+    #: Metadata of assets downloaded during the sync
     asset_metadata: List[dict] = field(init=False, default_factory=list)
+    #: Asset metadata from previous sync, as a mapping from asset paths to
+    #: metadata
     saved_metadata: Dict[str, dict] = field(init=False, default_factory=dict)
+    #: Paths of assets that are not being downloaded this run due to a lack of
+    #: SHA256 digests
+    future_assets: Set[str] = field(init=False, default_factory=set)
     digester: Digester = field(init=False)
     # cache: PersistentCache = field(init=False)
     batches: BatchedAnnexes = field(init=False, default_factory=BatchedAnnexes)
-    to_download: List[ToDownload] = field(init=False, default_factory=list)
 
     def __post_init__(self) -> None:
         self.digester = Digester(digests=["sha256"])
         # self.cache = PersistentCache("backups2datalad")
         # self.cache.clear()
         self.local_assets = set(dataset_files(self.ds.pathobj))
-        self.local_assets.discard(dandiset_metadata_file)
         try:
             with (self.ds.pathobj / ".dandi" / "assets.json").open() as fp:
                 for md in json.load(fp):
@@ -491,25 +489,29 @@ class Syncer:
             return cast(str, self.digester(filepath)["sha256"])
 
     def sync_assets(self, assetiter: Iterable[RemoteAsset]) -> None:
-        assetlist = sorted(assetiter, key=attrgetter("created"))
         now = datetime.now(timezone.utc)
-        for asset in assetlist:
-            try:
-                sha256_digest = asset.get_digest(DigestType.sha2_256)
-            except NotFoundError:
-                log.info(
-                    "SHA256 for %s has not been computed yet;"
-                    " not downloading any more assets",
-                    asset.path,
-                )
-                if now - asset.created > timedelta(days=1):
-                    raise RuntimeError(
-                        f"Asset {asset.path} created more than a day ago"
-                        " but SHA256 digest has not yet been computed"
+        downloading = True
+        for asset in sorted(assetiter, key=attrgetter("created")):
+            if downloading:
+                try:
+                    sha256_digest = asset.get_digest(DigestType.sha2_256)
+                except NotFoundError:
+                    log.info(
+                        "SHA256 for %s has not been computed yet;"
+                        " not downloading any more assets",
+                        asset.path,
                     )
-                break
+                    if now - asset.created > timedelta(days=1):
+                        raise RuntimeError(
+                            f"Asset {asset.path} created more than a day ago"
+                            " but SHA256 digest has not yet been computed"
+                        )
+                    downloading = False
+                else:
+                    self.download_asset(asset, sha256_digest)
             else:
-                self.download_asset(asset, sha256_digest)
+                log.info("Will download %s later", asset.path)
+                self.future_assets.add(asset.path)
 
     def download_asset(self, asset: RemoteAsset, sha256_digest: str) -> None:
         dest = self.ds.pathobj / asset.path
@@ -610,18 +612,22 @@ class Syncer:
         )
 
     def prune_deleted(self) -> None:
-        ### Don't delete undownloaded assets
         for apath in self.local_assets:
             if not self.datasetter.match_asset(apath):
-                continue
-            log.info("Asset %s is in dataset but not in Dandiarchive; deleting", apath)
-            self.ds.repo.remove([apath])
-            self.deleted += 1
+                pass
+            elif apath in self.future_assets:
+                try:
+                    self.asset_metadata.append(self.saved_metadata[apath])
+                except KeyError:
+                    pass
+            else:
+                log.info(
+                    "Asset %s is in dataset but not in Dandiarchive; deleting", apath
+                )
+                self.ds.repo.remove([apath])
+                self.deleted += 1
 
     def dump_asset_metadata(self) -> None:
-        ### - Don't dump metadata for undownloaded assets
-        ### - Include metadata for replaced assets whose replacements haven't
-        ###   been downloaded
         dump(self.asset_metadata, self.ds.pathobj / ".dandi" / "assets.json")
 
     def get_commit_message(self) -> str:
@@ -632,7 +638,8 @@ class Syncer:
             msgparts.append(f"{self.updated} files updated")
         if self.deleted:
             msgparts.append(f"{self.deleted} files deleted")
-        ### Add message about undownloaded assets
+        if self.future_assets:
+            msgparts.append(f"{len(self.future_assets)} files not yet downloaded")
         if not msgparts:
             msgparts.append("only some metadata updates")
         return f"[backups2datalad] {', '.join(msgparts)}"
@@ -783,7 +790,8 @@ def dataset_files(dspath: Path) -> Iterator[str]:
     files = deque(
         p
         for p in dspath.iterdir()
-        if p.name not in (".dandi", ".datalad", ".git", ".gitattributes")
+        if p.name
+        not in (".dandi", ".datalad", ".git", ".gitattributes", dandiset_metadata_file)
     )
     while files:
         p = files.popleft()
@@ -864,21 +872,6 @@ def assets_eq(remote_assets: List[RemoteAsset], local_assets: List[dict]) -> boo
 def readcmd(*args: Union[str, Path], **kwargs: Any) -> str:
     log.debug("Running: %s", shlex.join(map(str, args)))
     return cast(str, subprocess.check_output(args, text=True, **kwargs)).strip()
-
-
-def mklink(src: Union[str, Path], dest: Union[str, Path]) -> None:
-    log.info("cp %s -> %s", src, dest)
-    subprocess.run(
-        [
-            "cp",
-            "-L",
-            "--reflink=always",
-            "--remove-destination",
-            str(src),
-            str(dest),
-        ],
-        check=True,
-    )
 
 
 def update_dandiset_metadata(dandiset: RemoteDandiset, ds: Dataset) -> None:
