@@ -24,13 +24,13 @@ Later TODOs
 from collections import deque
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from functools import cached_property
 import json
 import logging
 from operator import attrgetter
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import shlex
 import subprocess
@@ -40,6 +40,7 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Dict,
+    Iterable,
     Iterator,
     List,
     Optional,
@@ -59,9 +60,12 @@ from click_loglevel import LogLevel
 from dandi.consts import dandiset_metadata_file, known_instances
 from dandi.dandiapi import DandiAPIClient, RemoteAsset, RemoteDandiset
 from dandi.dandiset import APIDandiset
+from dandi.exceptions import NotFoundError
 from dandi.support.digests import Digester, get_digest
+from dandischema.models import DigestType
 import datalad
 from datalad.api import Dataset
+from datalad.support.annexrepo import BatchedAnnexes
 from datalad.support.json_py import dump
 from github import Github
 from humanize import naturalsize
@@ -81,7 +85,6 @@ log = logging.getLogger("backups2datalad")
 @dataclass
 class DandiDatasetter:
     dandi_client: DandiAPIClient
-    assetstore_path: Path
     target_path: Path
     ignore_errors: bool = False
     asset_filter: Optional[re.Pattern] = None
@@ -90,6 +93,7 @@ class DandiDatasetter:
     content_url_regex: str = r"amazonaws.com/.*blobs/"
     s3bucket: str = "dandiarchive"
     enable_tags: bool = True
+    backup_remote: Optional[str] = None
 
     def match_asset(self, asset_path: str) -> bool:
         return bool(self.asset_filter is None or self.asset_filter.search(asset_path))
@@ -99,25 +103,15 @@ class DandiDatasetter:
         dandiset_ids: Sequence[str] = (),
         exclude: Optional[re.Pattern] = None,
         gh_org: Optional[str] = None,
-        backup_remote: Optional[str] = None,
     ) -> None:
-        ### TODO: Remove this check?
-        if not (self.assetstore_path / "girder-assetstore").exists():
-            raise RuntimeError(
-                "Given assetstore path does not contain girder-assetstore folder"
-            )
         self.target_path.mkdir(parents=True, exist_ok=True)
         datalad.cfg.set("datalad.repo.backend", "SHA256E", where="override")
         for d in self.get_dandisets(dandiset_ids, exclude=exclude):
             dsdir = self.target_path / d.identifier
-            ds = self.init_dataset(
-                dsdir, backup_remote=backup_remote, create_time=d.version.created
-            )
+            ds = self.init_dataset(dsdir, create_time=d.version.created)
             changed = self.sync_dataset(d, ds)
             if gh_org is not None:
-                self.ensure_github_remote(
-                    ds, d.identifier, gh_org=gh_org, backup_remote=backup_remote
-                )
+                self.ensure_github_remote(ds, d.identifier, gh_org=gh_org)
             self.tag_releases(d, ds, push=gh_org is not None)
             if changed and gh_org is not None:
                 log.info("Pushing to sibling")
@@ -126,9 +120,7 @@ class DandiDatasetter:
                     description=self.describe_dandiset(d)
                 )
 
-    def init_dataset(
-        self, dsdir: Path, backup_remote: Optional[str], create_time: datetime
-    ) -> Dataset:
+    def init_dataset(self, dsdir: Path, create_time: datetime) -> Dataset:
         ds = Dataset(str(dsdir))
         if not ds.is_installed():
             log.info("Creating Datalad dataset")
@@ -137,14 +129,14 @@ class DandiDatasetter:
                     "GIT_CONFIG_PARAMETERS", f"'init.defaultBranch={DEFAULT_BRANCH}'"
                 ):
                     ds.create(cfg_proc="text2git")
-            if backup_remote is not None:
+            if self.backup_remote is not None:
                 ds.repo.init_remote(
-                    backup_remote,
+                    self.backup_remote,
                     [
                         "type=external",
                         "externaltype=rclone",
                         "chunk=1GB",
-                        f"target={backup_remote}",  # I made them matching
+                        f"target={self.backup_remote}",  # I made them matching
                         "prefix=dandi-dandisets/annexstore",
                         "embedcreds=no",
                         "uuid=727f466f-60c3-4778-90b2-b2332856c2f8",
@@ -152,17 +144,15 @@ class DandiDatasetter:
                         # shared, initialized in 000003
                     ],
                 )
-                ds.repo.call_annex(["untrust", backup_remote])
+                ds.repo.call_annex(["untrust", self.backup_remote])
                 ds.repo.set_preferred_content(
                     "wanted",
                     "(not metadata=distribution-restrictions=*)",
-                    remote=backup_remote,
+                    remote=self.backup_remote,
                 )
         return ds
 
-    def ensure_github_remote(
-        self, ds: Dataset, dandiset_id: str, gh_org: str, backup_remote: Optional[str]
-    ) -> None:
+    def ensure_github_remote(self, ds: Dataset, dandiset_id: str, gh_org: str) -> None:
         if "github" not in ds.repo.get_remotes():
             log.info("Creating GitHub sibling for %s", dandiset_id)
             ds.create_sibling_github(
@@ -171,7 +161,7 @@ class DandiDatasetter:
                 name="github",
                 access_protocol="https",
                 github_organization=gh_org,
-                publish_depends=backup_remote,
+                publish_depends=self.backup_remote,
             )
             ds.config.set(
                 "remote.github.pushurl",
@@ -195,22 +185,21 @@ class DandiDatasetter:
         log.info("Syncing Dandiset %s", dandiset.identifier)
         if ds.repo.dirty:
             raise RuntimeError("Dirty repository; clean or save before running")
-        with dandi_logging(ds.pathobj) as logfile:
-            update_dandiset_metadata(dandiset, ds)
-            syncer = Syncer(datasetter=self, dandiset=dandiset, ds=ds)
-            for a in dandiset.get_assets():
-                syncer.sync_asset(a)
-            syncer.prune_deleted()
-            syncer.dump_asset_metadata()
-        if any(r["state"] != "clean" for r in ds.status()):
-            log.info("Commiting changes")
-            with custom_commit_date(dandiset.version.modified):
-                ds.save(message=syncer.get_commit_message())
-            return True
-        else:
-            log.info("No changes made to repository; deleting logfile")
-            logfile.unlink()
-            return False
+        with Syncer(datasetter=self, dandiset=dandiset, ds=ds) as syncer:
+            with dandi_logging(ds.pathobj) as logfile:
+                update_dandiset_metadata(dandiset, ds)
+                syncer.sync_assets(dandiset.get_assets())
+                syncer.prune_deleted()
+                syncer.dump_asset_metadata()
+            if any(r["state"] != "clean" for r in ds.status()):
+                log.info("Commiting changes")
+                with custom_commit_date(dandiset.version.modified):
+                    ds.save(message=syncer.get_commit_message())
+                return True
+            else:
+                log.info("No changes made to repository; deleting logfile")
+                logfile.unlink()
+                return False
 
     def update_github_metadata(
         self, dandiset_ids: Sequence[str], gh_org: str, exclude: Optional[re.Pattern]
@@ -416,6 +405,14 @@ class DandiDatasetter:
 
 
 @dataclass
+class ToDownload:
+    asset: RemoteAsset
+    dest: Path
+    bucket_url: str
+    updating: bool
+
+
+@dataclass
 class Syncer:
     datasetter: DandiDatasetter
     dandiset: RemoteDandiset
@@ -428,6 +425,8 @@ class Syncer:
     saved_metadata: Dict[str, dict] = field(init=False, default_factory=dict)
     digester: Digester = field(init=False)
     # cache: PersistentCache = field(init=False)
+    batches: BatchedAnnexes = field(init=False, default_factory=BatchedAnnexes)
+    to_download: List[ToDownload] = field(init=False, default_factory=list)
 
     def __post_init__(self) -> None:
         self.digester = Digester(digests=["sha256"])
@@ -446,6 +445,35 @@ class Syncer:
         except FileNotFoundError:
             pass
 
+    def __enter__(self) -> "Syncer":
+        return self
+
+    def __exit__(self, *_exc_info: Any) -> None:
+        self.batches.close()
+
+    def mkkey(self, filename: str, size: int, sha256_digest: str) -> str:
+        return cast(
+            str,
+            self.batches.get(
+                "examinekey",
+                annex_options=["--migrate-to-backend=SHA256E"],
+                path=self.ds.path,
+            )(f"SHA256-s{size}--{sha256_digest} {filename}"),
+        )
+
+    def get_key_remotes(self, key: str) -> Optional[List[str]]:
+        # Returns None if key is not known to git-annex
+        whereis = self.batches.get(
+            "whereis", annex_options=["--batch-keys"], path=self.ds.path, json=True
+        )(key)
+        if whereis["success"]:
+            return [
+                w["description"].strip("[]")
+                for w in whereis["whereis"] + whereis["untrusted"]
+            ]
+        else:
+            return None
+
     # do not cache due to fscacher resolving the path so we end
     # up with a path under .git/annex/objects
     # https://github.com/con/fscacher/issues/44
@@ -462,37 +490,59 @@ class Syncer:
             log.debug("Asset not under annex; calculating sha256 digest ourselves")
             return cast(str, self.digester(filepath)["sha256"])
 
-    def sync_asset(self, a: RemoteAsset) -> None:
-        dest = self.ds.pathobj / a.path
-        self.local_assets.discard(a.path)
-        adict = asset2dict(a)
+    def sync_assets(self, assetiter: Iterable[RemoteAsset]) -> None:
+        assetlist = sorted(assetiter, key=attrgetter("created"))
+        now = datetime.now(timezone.utc)
+        for asset in assetlist:
+            try:
+                sha256_digest = asset.get_digest(DigestType.sha2_256)
+            except NotFoundError:
+                log.info(
+                    "SHA256 for %s has not been computed yet;"
+                    " not downloading any more assets",
+                    asset.path,
+                )
+                if now - asset.created > timedelta(days=1):
+                    raise RuntimeError(
+                        f"Asset {asset.path} created more than a day ago"
+                        " but SHA256 digest has not yet been computed"
+                    )
+                break
+            else:
+                self.download_asset(asset, sha256_digest)
+
+    def download_asset(self, asset: RemoteAsset, sha256_digest: str) -> None:
+        dest = self.ds.pathobj / asset.path
+        self.local_assets.discard(asset.path)
+        adict = asset2dict(asset)
         self.asset_metadata.append(adict)
         if self.datasetter.force != "check" and adict == self.saved_metadata.get(
-            a.path
+            asset.path
         ):
             log.debug(
                 "Asset %s metadata unchanged; not taking any further action",
-                a.path,
+                asset.path,
             )
             return
-        if not self.datasetter.match_asset(a.path):
-            log.debug("Skipping asset %s", a.path)
+        if not self.datasetter.match_asset(asset.path):
+            log.debug("Skipping asset %s", asset.path)
             return
-        log.info("Syncing asset %s", a.path)
+        log.info("Syncing asset %s", asset.path)
         try:
-            dandi_hash = adict["metadata"]["digest"]["dandi:sha2-256"]
-        except KeyError:
+            dandi_hash = asset.get_digest(DigestType.sha2_256)
+        except NotFoundError:
             dandi_hash = None
             log.warning(
                 "%s: %s: Asset metadata does not include sha256 hash",
                 self.dandiset.identifier,
-                a.path,
+                asset.path,
             )
-        dandi_etag = adict["metadata"]["digest"]["dandi:dandi-etag"]
+        dandi_etag = asset.get_digest(DigestType.dandi_etag)
         dest.parent.mkdir(parents=True, exist_ok=True)
+        to_update = False
         if not (dest.exists() or dest.is_symlink()):
-            log.info("Asset not in dataset; will copy")
-            self.save_asset(a, dest)
+            log.info("Asset not in dataset; will add")
+            to_update = True
             self.added += 1
         elif dandi_hash is not None:
             log.debug("About to fetch hash from annex")
@@ -503,7 +553,7 @@ class Syncer:
                 )
             else:
                 log.info("Asset in dataset, and hash shows modification; will update")
-                self.save_asset(a, dest)
+                to_update = True
                 self.updated += 1
         else:
             log.debug("About to calculate dandi-etag")
@@ -514,81 +564,53 @@ class Syncer:
                 )
             else:
                 log.info("Asset in dataset, and etag shows modification; will update")
-                self.save_asset(a, dest)
+                to_update = True
                 self.updated += 1
-        if dandi_hash is not None:
-            annex_key = self.get_annex_hash(dest)
-            if dandi_hash != annex_key:
-                raise RuntimeError(
-                    f"Hash mismatch for {a.path}!"
-                    f"  Dandiarchive reports {dandi_hash},"
-                    f" datalad reports {annex_key}"
-                )
-        else:
-            annex_etag = get_digest(dest, "dandi-etag")
-            if dandi_etag != annex_etag:
-                raise RuntimeError(
-                    f"ETag mismatch for {a.path}!"
-                    f"  Dandiarchive reports {dandi_hash},"
-                    f" file has {annex_etag}"
-                )
-
-    def save_asset(self, a: RemoteAsset, dest: Path) -> None:
-        download_url = a.base_download_url
-        bucket_url = self.datasetter.get_file_bucket_url(a)
-        src = self.datasetter.assetstore_path / urlparse(bucket_url).path.lstrip("/")
-        if src.exists():
-            try:
-                mklink(src, dest)
-            except Exception:
-                if self.datasetter.ignore_errors:
-                    log.warning(
-                        "%s: %s: cp command failed; ignoring",
-                        self.dandiset.identifier,
-                        a.path,
+        if to_update:
+            bucket_url = self.datasetter.get_file_bucket_url(asset)
+            dest.unlink(missing_ok=True)
+            key = self.mkkey(PurePosixPath(asset.path).name, asset.size, sha256_digest)
+            remotes = self.get_key_remotes(key)
+            if remotes is not None:
+                # Key is known to git-annex
+                self.ds.repo.call_annex(["fromkey", "--force", key, asset.path])
+                self.register_url(asset.path, bucket_url)
+                self.register_url(asset.path, asset.base_download_url)
+                if (
+                    self.datasetter.backup_remote is not None
+                    and self.datasetter.backup_remote not in remotes
+                ):
+                    log.warn(
+                        "Asset %s is not in backup remote %s",
+                        asset.path,
+                        self.datasetter.backup_remote,
                     )
-                    return
+            else:
+                log.info("Downloading asset %s from %s", asset.path, bucket_url)
+                with custom_commit_date(self.dandiset.version.modified):
+                    self.ds.download_url(urls=bucket_url, path=asset.path)
+                if self.ds.repo.is_under_annex(asset.path, batch=True):
+                    self.register_url(asset.path, asset.base_download_url)
                 else:
-                    raise
-            log.info("Adding asset to dataset")
-            self.ds.repo.add([a.path])
-            if self.ds.repo.is_under_annex(a.path, batch=True):
-                log.info("Adding URL %s to asset", bucket_url)
-                self.ds.repo.add_url_to_file(a.path, bucket_url, batch=True)
-                log.info("Adding URL %s to asset", download_url)
-                self.ds.repo.call_annex(
-                    [
-                        "registerurl",
-                        self.ds.repo.get_file_key(a.path),
-                        download_url,
-                    ]
-                )
-            else:
-                log.info("File is not managed by git annex; not adding URL")
-        else:
-            log.info(
-                "Asset not found in assetstore; downloading from %s",
-                bucket_url,
-            )
-            try:
-                dest.unlink()
-            except FileNotFoundError:
-                pass
-            with custom_commit_date(self.dandiset.version.modified):
-                self.ds.download_url(urls=bucket_url, path=a.path)
-            if self.ds.repo.is_under_annex(a.path, batch=True):
-                log.info("Adding URL %s to asset", download_url)
-                self.ds.repo.call_annex(
-                    [
-                        "registerurl",
-                        self.ds.repo.get_file_key(a.path),
-                        download_url,
-                    ]
-                )
-            else:
-                log.info("File is not managed by git annex; not adding URL")
+                    log.info("File is not managed by git annex; not adding URL")
+                if sha256_digest != (annex_hash := self.get_annex_hash(dest)):
+                    raise RuntimeError(
+                        f"Hash mismatch for {asset.path}!"
+                        f"  Dandiarchive reports {sha256_digest},"
+                        f" datalad reports {annex_hash}"
+                    )
+
+    def register_url(self, path: str, url: str) -> None:
+        log.info("Adding URL %s to asset", url)
+        # Use registerurl because add_url_to_file() doesn't support files with
+        # multiple URLs
+        key = self.ds.repo.get_file_key(path)
+        self.batches.get("registerurl", path=self.ds.path, output_proc=lambda _: None)(
+            f"{key} {url}"
+        )
 
     def prune_deleted(self) -> None:
+        ### Don't delete undownloaded assets
         for apath in self.local_assets:
             if not self.datasetter.match_asset(apath):
                 continue
@@ -597,6 +619,9 @@ class Syncer:
             self.deleted += 1
 
     def dump_asset_metadata(self) -> None:
+        ### - Don't dump metadata for undownloaded assets
+        ### - Include metadata for replaced assets whose replacements haven't
+        ###   been downloaded
         dump(self.asset_metadata, self.ds.pathobj / ".dandi" / "assets.json")
 
     def get_commit_message(self) -> str:
@@ -607,6 +632,7 @@ class Syncer:
             msgparts.append(f"{self.updated} files updated")
         if self.deleted:
             msgparts.append(f"{self.deleted} files deleted")
+        ### Add message about undownloaded assets
         if not msgparts:
             msgparts.append("only some metadata updates")
         return f"[backups2datalad] {', '.join(msgparts)}"
@@ -617,12 +643,6 @@ class Syncer:
     "--asset-filter",
     help="Only consider assets matching the given regex",
     metavar="REGEX",
-)
-@click.option(
-    "-A",
-    "--assetstore",
-    type=click.Path(exists=True, file_okay=False, path_type=Path),
-    required=True,
 )
 @click.option(
     "-i",
@@ -657,7 +677,6 @@ class Syncer:
 def main(
     ctx: click.Context,
     asset_filter: str,
-    assetstore: Path,
     dandi_instance: str,
     force: Optional[str],
     ignore_errors: bool,
@@ -670,10 +689,9 @@ def main(
         dandi_client=ctx.with_resource(
             DandiAPIClient.for_dandi_instance(dandi_instance)
         ),
-        assetstore_path=assetstore,
         target_path=target,
         ignore_errors=ignore_errors,
-        asset_filter=re.compile(asset_filter) if asset_filter is not None else None,
+        asset_filter=maybe_compile(asset_filter),
         jobs=jobs,
         force=force,
     )
@@ -702,9 +720,9 @@ def update_from_backup(
     gh_org: Optional[str],
     exclude: Optional[str],
 ) -> None:
-    exclude_rgx = re.compile(exclude) if exclude is not None else None
+    datasetter.backup_remote = backup_remote
     datasetter.update_from_backup(
-        dandisets, exclude=exclude_rgx, gh_org=gh_org, backup_remote=backup_remote
+        dandisets, exclude=maybe_compile(exclude), gh_org=gh_org
     )
 
 
@@ -725,8 +743,9 @@ def update_github_metadata(
     exclude: Optional[str],
     gh_org: str,
 ) -> None:
-    exclude_rgx = re.compile(exclude) if exclude is not None else None
-    datasetter.update_github_metadata(dandisets, exclude=exclude_rgx, gh_org=gh_org)
+    datasetter.update_github_metadata(
+        dandisets, exclude=maybe_compile(exclude), gh_org=gh_org
+    )
 
 
 @main.command()
@@ -864,13 +883,17 @@ def mklink(src: Union[str, Path], dest: Union[str, Path]) -> None:
 
 def update_dandiset_metadata(dandiset: RemoteDandiset, ds: Dataset) -> None:
     log.info("Updating metadata file")
-    try:
-        (ds.pathobj / dandiset_metadata_file).unlink()
-    except FileNotFoundError:
-        pass
+    (ds.pathobj / dandiset_metadata_file).unlink(missing_ok=True)
     metadata = dandiset.get_raw_metadata()
     APIDandiset(ds.pathobj, allow_empty=True).update_metadata(metadata)
     ds.repo.add([dandiset_metadata_file])
+
+
+def maybe_compile(s: Optional[str]) -> Optional[re.Pattern]:
+    if s is None:
+        return None
+    else:
+        return re.compile(s)
 
 
 if __name__ == "__main__":

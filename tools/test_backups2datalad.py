@@ -15,10 +15,13 @@ import pytest
 
 from backups2datalad import DEFAULT_BRANCH, DandiDatasetter, custom_commit_date, readcmd
 
+log = logging.getLogger("test_backups2datalad")
+
 
 @pytest.fixture(autouse=True)
 def capture_all_logs(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.DEBUG, logger="backups2datalad")
+    caplog.set_level(logging.DEBUG, logger="test_backups2datalad")
 
 
 @pytest.fixture(scope="session")
@@ -87,13 +90,9 @@ def text_dandiset(
 
 def test_1(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
     # TODO: move pre-setup into a fixture, e.g. local_setup1 or make code work without?
-    assetstore_path = tmp_path / "assetstore"
-    assetstore_path.mkdir()
-    (assetstore_path / "girder-assetstore").mkdir()
     target_path = tmp_path / "target"
     di = DandiDatasetter(
         dandi_client=text_dandiset["client"],
-        assetstore_path=assetstore_path,
         target_path=target_path,
         ignore_errors=False,
         # gh_org=None,
@@ -210,13 +209,9 @@ def test_1(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
 
 
 def test_2(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
-    assetstore_path = tmp_path / "assetstore"
-    assetstore_path.mkdir()
-    (assetstore_path / "girder-assetstore").mkdir()
     target_path = tmp_path / "target"
     di = DandiDatasetter(
         dandi_client=text_dandiset["client"],
-        assetstore_path=assetstore_path,
         target_path=target_path,
         ignore_errors=False,
         content_url_regex=r".*/blobs/",
@@ -225,6 +220,7 @@ def test_2(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
     )
 
     dandiset_id = text_dandiset["dandiset_id"]
+    log.info("test_2: Creating new backup of Dandiset")
     di.update_from_backup([dandiset_id])
     ds = Dataset(target_path / text_dandiset["dandiset_id"])
 
@@ -235,8 +231,12 @@ def test_2(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
     for i in range(1, 4):
         (text_dandiset["dspath"] / "counter.txt").write_text(f"{i}\n")
         text_dandiset["reupload"]()
+        log.info("test_2: Publishing version #%s", i)
         text_dandiset["dandiset"].wait_until_valid()
         v = text_dandiset["dandiset"].publish().version
+        log.info(
+            "test_2: Updating backup (release-tagging disabled) for version #%s", i
+        )
         di.update_from_backup([dandiset_id])
         assert readgit("tag") == ""
         assert (ds.pathobj / "counter.txt").read_text() == f"{i}\n"
@@ -244,6 +244,7 @@ def test_2(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
         versions.append((v, base))
 
     di.enable_tags = True
+    log.info("test_2: Updating backup, now with release-tagging enabled")
     di.update_from_backup([dandiset_id])
 
     for v, base in versions:

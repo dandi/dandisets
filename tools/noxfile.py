@@ -8,7 +8,7 @@ def test(session):
     session.install("-r", "backups2datalad.req.txt")
     session.install("pytest")
     session.install("datalad[tests]")
-    session.run("pytest", "test_backups2datalad.py")
+    session.run("pytest", *session.posargs, "test_backups2datalad.py")
 
 
 @nox.session
