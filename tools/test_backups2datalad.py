@@ -171,7 +171,7 @@ def test_1(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
         metadata = yaml_load(readgit("show", f"{vid}:{dandiset_metadata_file}"))
         assert metadata.get("doi")
 
-    text_dandiset["dandiset"].wait_until_valid()
+    text_dandiset["dandiset"].wait_until_valid(65)
     v1 = text_dandiset["dandiset"].publish().version
     version1 = v1.identifier
     di.update_from_backup([dandiset_id])
@@ -191,7 +191,7 @@ def test_1(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
         ds.pathobj / "new.txt"
     ).read_text() == "This file's contents were changed.\n"
 
-    text_dandiset["dandiset"].wait_until_valid()
+    text_dandiset["dandiset"].wait_until_valid(65)
     v2 = text_dandiset["dandiset"].publish().version
     version2 = v2.identifier
     di.update_from_backup([dandiset_id])
@@ -232,7 +232,7 @@ def test_2(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
         (text_dandiset["dspath"] / "counter.txt").write_text(f"{i}\n")
         text_dandiset["reupload"]()
         log.info("test_2: Publishing version #%s", i)
-        text_dandiset["dandiset"].wait_until_valid()
+        text_dandiset["dandiset"].wait_until_valid(65)
         v = text_dandiset["dandiset"].publish().version
         log.info(
             "test_2: Updating backup (release-tagging disabled) for version #%s", i
