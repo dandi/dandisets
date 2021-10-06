@@ -3,8 +3,7 @@
 boto3
 click >= 8.0.1
 click-loglevel ~= 0.2
-#dandi >= 0.27.0
-dandi @ git+https://github.com/dandi/dandi-cli.git@asset-created
+dandi >= 0.29.0
 dandischema
 datalad
 #fscacher
