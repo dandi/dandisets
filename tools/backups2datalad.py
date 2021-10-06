@@ -842,25 +842,8 @@ def pdb_excepthook(
         pdb.post_mortem(tb)
 
 
-def sanitize_contentUrls(urls: List[str]) -> List[str]:
-    urls_ = []
-    for url in urls:
-        if "x-amz-expires=" in url.lower():
-            # just strip away everything after ?
-            url = url[: url.index("?")]
-        urls_.append(url)
-    return urls_
-
-
 def asset2dict(asset: RemoteAsset) -> Dict[str, Any]:
-    adict = {**asset.json_dict(), "metadata": asset.get_raw_metadata()}
-    # due to  https://github.com/dandi/dandi-api/issues/231
-    # we need to sanitize temporary URLs. TODO: remove when "fixed"
-    if "contentUrl" in adict["metadata"]:
-        adict["metadata"]["contentUrl"] = sanitize_contentUrls(
-            adict["metadata"]["contentUrl"]
-        )
-    return adict
+    return {**asset.json_dict(), "metadata": asset.get_raw_metadata()}
 
 
 def assets_eq(remote_assets: List[RemoteAsset], local_assets: List[dict]) -> bool:
