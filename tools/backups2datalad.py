@@ -46,6 +46,7 @@ from typing import (
     Optional,
     Sequence,
     Set,
+    Tuple,
     Type,
     Union,
     cast,
@@ -644,7 +645,7 @@ class Syncer:
     "--jobs",
     type=int,
     default=10,
-    help="How many parallel jobs to use when pushing",
+    help="How many parallel jobs to use when downloading and pushing",
     show_default=True,
 )
 @click.option("-f", "--force", type=click.Choice(["check"]))
@@ -850,6 +851,58 @@ def maybe_compile(s: Optional[str]) -> Optional[re.Pattern]:
         return None
     else:
         return re.compile(s)
+
+
+def download_urls(
+    repo_path: Path, urls_paths: Iterable[Tuple[str, str]], jobs: int = 10
+) -> Iterable[Tuple[str, str]]:
+    # Returns a generator of (asset path, key) pairs
+    args = [
+        "git-annex",
+        "addurl",
+        "--batch",
+        "--with-files",
+        "--jobs",
+        str(jobs),
+        "--json",
+        "--json-error-messages",
+        "--raw",
+    ]
+    log.debug("Running: %s", shlex.join(args))
+    process = subprocess.Popen(
+        args,
+        cwd=repo_path,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        bufsize=1,
+    )
+    assert process.stdin is not None
+    assert process.stdout is not None
+    for url, filepath in urls_paths:
+        line = f"{url} {filepath}"
+        log.debug("Feeding %r to git-annex addurl", line)
+        print(line, file=process.stdin)
+    process.stdin.close()
+    failures = 0
+    for line in process.stdout:
+        data = json.loads(line)
+        if not data["success"]:
+            log.error(
+                "%s: download failed; error messages: %r",
+                data["file"],
+                data["error-messages"],
+            )
+            failures += 1
+        else:
+            log.info("Finished downloading %s (key = %s)", data["file"], data["key"])
+            yield (data["file"], data["key"])
+    r = process.wait()
+    if failures:
+        raise RuntimeError(f"{failures} assets failed to download")
+    if r != 0:
+        raise RuntimeError(f"git-annex addurl exited with return code {r}")
 
 
 if __name__ == "__main__":
