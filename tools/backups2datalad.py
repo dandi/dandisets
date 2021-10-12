@@ -854,7 +854,7 @@ def maybe_compile(s: Optional[str]) -> Optional[re.Pattern]:
 
 
 def download_urls(
-    repo_path: Path, urls_paths: Iterable[Tuple[str, str]], jobs: int = 10
+    repo_path: Path, urls_paths: Iterable[Tuple[str, Optional[str]]], jobs: int = 10
 ) -> Iterable[Tuple[str, str]]:
     # Returns a generator of (asset path, key) pairs
     args = [
@@ -896,8 +896,9 @@ def download_urls(
             )
             failures += 1
         else:
-            log.info("Finished downloading %s (key = %s)", data["file"], data["key"])
-            yield (data["file"], data["key"])
+            key = data.get("key")  # Absent for text files
+            log.info("Finished downloading %s (key = %s)", data["file"], key)
+            yield (data["file"], key)
     r = process.wait()
     if failures:
         raise RuntimeError(f"{failures} assets failed to download")
