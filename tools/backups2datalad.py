@@ -21,6 +21,7 @@ Later TODOs
 
 """
 
+import asyncio
 from collections import deque
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -406,6 +407,14 @@ class DandiDatasetter:
 
 
 @dataclass
+class ToDownload:
+    path: str
+    url: str
+    extra_urls: List[str]
+    sha256_digest: str
+
+
+@dataclass
 class Syncer:
     datasetter: DandiDatasetter
     dandiset: RemoteDandiset
@@ -427,6 +436,7 @@ class Syncer:
     digester: Digester = field(init=False)
     # cache: PersistentCache = field(init=False)
     batches: BatchedAnnexes = field(init=False, default_factory=BatchedAnnexes)
+    to_download: List[ToDownload] = field(init=False, default_factory=list)
 
     def __post_init__(self) -> None:
         self.digester = Digester(digests=["sha256"])
@@ -510,12 +520,13 @@ class Syncer:
                     downloading = False
                     self.future_assets.add(asset.path)
                 else:
-                    self.download_asset(asset, sha256_digest)
+                    self.process_asset(asset, sha256_digest)
             else:
-                log.info("Will download %s later", asset.path)
+                log.info("Will download %s in a future run", asset.path)
                 self.future_assets.add(asset.path)
+        self.download_assets()
 
-    def download_asset(self, asset: RemoteAsset, sha256_digest: str) -> None:
+    def process_asset(self, asset: RemoteAsset, sha256_digest: str) -> None:
         dest = self.ds.pathobj / asset.path
         self.local_assets.discard(asset.path)
         adict = asset2dict(asset)
@@ -555,7 +566,7 @@ class Syncer:
             key = self.mkkey(PurePosixPath(asset.path).name, asset.size, sha256_digest)
             remotes = self.get_key_remotes(key)
             if remotes is not None:
-                # Key is known to git-annex
+                log.info("Key is known to git-annex")
                 self.ds.repo.call_annex(["fromkey", "--force", key, asset.path])
                 self.register_url(asset.path, bucket_url)
                 self.register_url(asset.path, asset.base_download_url)
@@ -569,19 +580,42 @@ class Syncer:
                         self.datasetter.backup_remote,
                     )
             else:
-                log.info("Downloading asset %s from %s", asset.path, bucket_url)
-                with custom_commit_date(self.dandiset.version.modified):
-                    self.ds.download_url(urls=bucket_url, path=asset.path)
-                if self.ds.repo.is_under_annex(asset.path, batch=True):
-                    self.register_url(asset.path, asset.base_download_url)
-                else:
-                    log.info("File is not managed by git annex; not adding URL")
-                if sha256_digest != (annex_hash := self.get_annex_hash(dest)):
-                    raise RuntimeError(
-                        f"Hash mismatch for {asset.path}!"
-                        f"  Dandiarchive reports {sha256_digest},"
-                        f" datalad reports {annex_hash}"
+                log.info(
+                    "Scheduling asset %s for download from %s", asset.path, bucket_url
+                )
+                self.to_download.append(
+                    ToDownload(
+                        path=asset.path,
+                        url=bucket_url,
+                        extra_urls=[asset.base_download_url],
+                        sha256_digest=sha256_digest,
                     )
+                )
+
+    def download_assets(self) -> None:
+        if not self.to_download:
+            log.info("No assets scheduled for download")
+            return
+        log.info("Downloading %d scheduled assets", len(self.to_download))
+        urls_paths = [(td.url, td.path) for td in self.to_download]
+        asyncio.run(
+            download_urls(self.ds.pathobj, urls_paths, jobs=self.datasetter.jobs)
+        )
+        log.info("Finished downloading all assets")
+        for td in self.to_download:
+            if self.ds.repo.is_under_annex(td.path, batch=True):
+                for u in td.extra_urls:
+                    self.register_url(td.path, u)
+            else:
+                log.info("File is not managed by git annex; not adding URLs")
+            if td.sha256_digest != (
+                annex_hash := self.get_annex_hash(self.ds.pathobj / td.path)
+            ):
+                raise RuntimeError(
+                    f"Hash mismatch for {td.path}!"
+                    f"  Dandiarchive reports {td.sha256_digest},"
+                    f" datalad reports {annex_hash}"
+                )
 
     def register_url(self, path: str, url: str) -> None:
         log.info("Adding URL %s to asset", url)
@@ -853,10 +887,9 @@ def maybe_compile(s: Optional[str]) -> Optional[re.Pattern]:
         return re.compile(s)
 
 
-def download_urls(
+async def download_urls(
     repo_path: Path, urls_paths: Iterable[Tuple[str, Optional[str]]], jobs: int = 10
-) -> Iterable[Tuple[str, str]]:
-    # Returns a generator of (asset path, key) pairs
+) -> None:
     args = [
         "git-annex",
         "addurl",
@@ -869,24 +902,37 @@ def download_urls(
         "--raw",
     ]
     log.debug("Running: %s", shlex.join(args))
-    process = subprocess.Popen(
-        args,
-        cwd=repo_path,
+    process = await asyncio.create_subprocess_exec(
+        *args,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-        bufsize=1,
+        cwd=repo_path,
     )
     assert process.stdin is not None
     assert process.stdout is not None
-    for url, filepath in urls_paths:
-        line = f"{url} {filepath}"
-        log.debug("Feeding %r to git-annex addurl", line)
-        print(line, file=process.stdin)
-    process.stdin.close()
+    input_lines = [f"{url} {filepath}\n" for url, filepath in urls_paths]
+    _, failures = await asyncio.gather(
+        feed_input(process.stdin, input_lines),
+        read_output(process.stdout),
+    )
+    r = await process.wait()
+    if failures:
+        raise RuntimeError(f"{failures} assets failed to download")
+    if r != 0:
+        raise RuntimeError(f"git-annex addurl exited with return code {r}")
+
+
+async def feed_input(fp: asyncio.StreamWriter, lines: List[str]) -> None:
+    for ln in lines:
+        fp.write(ln.encode("utf-8"))
+        await fp.drain()
+    fp.close()
+    await fp.wait_closed()
+
+
+async def read_output(fp: asyncio.StreamReader) -> int:
     failures = 0
-    for line in process.stdout:
+    async for line in fp:
         data = json.loads(line)
         if not data["success"]:
             log.error(
@@ -898,12 +944,7 @@ def download_urls(
         else:
             key = data.get("key")  # Absent for text files
             log.info("Finished downloading %s (key = %s)", data["file"], key)
-            yield (data["file"], key)
-    r = process.wait()
-    if failures:
-        raise RuntimeError(f"{failures} assets failed to download")
-    if r != 0:
-        raise RuntimeError(f"git-annex addurl exited with return code {r}")
+    return failures
 
 
 if __name__ == "__main__":
