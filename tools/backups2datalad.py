@@ -507,6 +507,7 @@ class Syncer:
                             " but SHA256 digest has not yet been computed"
                         )
                     downloading = False
+                    self.future_assets.add(asset.path)
                 else:
                     self.download_asset(asset, sha256_digest)
             else:
