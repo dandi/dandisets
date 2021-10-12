@@ -1,14 +1,7 @@
 import nox
 
 nox.options.reuse_existing_virtualenvs = True
-
-
-@nox.session
-def test(session):
-    session.install("-r", "backups2datalad.req.txt")
-    session.install("pytest")
-    session.install("datalad[tests]")
-    session.run("pytest", *session.posargs, "test_backups2datalad.py")
+nox.options.stop_on_first_error = True
 
 
 @nox.session
@@ -19,3 +12,11 @@ def typing(session):
     session.run(
         "mypy", "backups2datalad.py", "test_backups2datalad.py", "get-upload-stats.py"
     )
+
+
+@nox.session
+def test(session):
+    session.install("-r", "backups2datalad.req.txt")
+    session.install("pytest")
+    session.install("datalad[tests]")
+    session.run("pytest", *session.posargs, "test_backups2datalad.py")
