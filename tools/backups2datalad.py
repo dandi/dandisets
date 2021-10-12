@@ -61,7 +61,7 @@ from dandi.consts import dandiset_metadata_file, known_instances
 from dandi.dandiapi import DandiAPIClient, RemoteAsset, RemoteDandiset
 from dandi.dandiset import APIDandiset
 from dandi.exceptions import NotFoundError
-from dandi.support.digests import Digester, get_digest
+from dandi.support.digests import Digester
 from dandischema.models import DigestType
 import datalad
 from datalad.api import Dataset
@@ -530,42 +530,21 @@ class Syncer:
             log.debug("Skipping asset %s", asset.path)
             return
         log.info("Syncing asset %s", asset.path)
-        try:
-            dandi_hash = asset.get_digest(DigestType.sha2_256)
-        except NotFoundError:
-            dandi_hash = None
-            log.warning(
-                "%s: %s: Asset metadata does not include sha256 hash",
-                self.dandiset.identifier,
-                asset.path,
-            )
-        dandi_etag = asset.get_digest(DigestType.dandi_etag)
         dest.parent.mkdir(parents=True, exist_ok=True)
         to_update = False
         if not (dest.exists() or dest.is_symlink()):
             log.info("Asset not in dataset; will add")
             to_update = True
             self.added += 1
-        elif dandi_hash is not None:
+        else:
             log.debug("About to fetch hash from annex")
-            if dandi_hash == self.get_annex_hash(dest):
+            if sha256_digest == self.get_annex_hash(dest):
                 log.info(
                     "Asset in dataset, and hash shows no modification;"
                     " will not update"
                 )
             else:
                 log.info("Asset in dataset, and hash shows modification; will update")
-                to_update = True
-                self.updated += 1
-        else:
-            log.debug("About to calculate dandi-etag")
-            if dandi_etag == get_digest(dest, "dandi-etag"):
-                log.info(
-                    "Asset in dataset, and etag shows no modification;"
-                    " will not update"
-                )
-            else:
-                log.info("Asset in dataset, and etag shows modification; will update")
                 to_update = True
                 self.updated += 1
         if to_update:
