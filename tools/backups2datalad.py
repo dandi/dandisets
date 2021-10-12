@@ -241,10 +241,10 @@ class DandiDatasetter:
             desc = f"{contact}, {desc}"
         versions = sum(1 for v in dandiset.get_versions() if v.identifier != "draft")
         if versions:
-            desc = f"{versions} release{'s' if versions > 1 else ''}, {desc}"
+            desc = f"{versions} {quantify(versions, 'release')}, {desc}"
         num_files = dandiset.version.asset_count
         size = naturalsize(dandiset.version.size)
-        return f"{num_files} files, {size}, {desc}"
+        return f"{quantify(num_files, 'file')}, {size}, {desc}"
 
     def get_file_bucket_url(self, asset: RemoteAsset) -> str:
         log.debug("Fetching bucket URL for asset")
@@ -596,7 +596,7 @@ class Syncer:
         if not self.to_download:
             log.info("No assets scheduled for download")
             return
-        log.info("Downloading %d scheduled assets", len(self.to_download))
+        log.info("Downloading %s", quantify(len(self.to_download), "scheduled asset"))
         urls_paths = [(td.url, td.path) for td in self.to_download]
         asyncio.run(
             download_urls(self.ds.pathobj, urls_paths, jobs=self.datasetter.jobs)
@@ -648,13 +648,15 @@ class Syncer:
     def get_commit_message(self) -> str:
         msgparts = []
         if self.added:
-            msgparts.append(f"{self.added} files added")
+            msgparts.append(f"{quantify(self.added, 'file')} added")
         if self.updated:
-            msgparts.append(f"{self.updated} files updated")
+            msgparts.append(f"{quantify(self.updated, 'file')} updated")
         if self.deleted:
-            msgparts.append(f"{self.deleted} files deleted")
+            msgparts.append(f"{quantify(self.deleted, 'file')} deleted")
         if self.future_assets:
-            msgparts.append(f"{len(self.future_assets)} files not yet downloaded")
+            msgparts.append(
+                f"{quantify(len(self.future_assets), 'file')} not yet downloaded"
+            )
         if not msgparts:
             msgparts.append("only some metadata updates")
         return f"[backups2datalad] {', '.join(msgparts)}"
@@ -917,7 +919,7 @@ async def download_urls(
     )
     r = await process.wait()
     if failures:
-        raise RuntimeError(f"{failures} assets failed to download")
+        raise RuntimeError(f"{quantify(failures, 'asset')} failed to download")
     if r != 0:
         raise RuntimeError(f"git-annex addurl exited with return code {r}")
 
@@ -945,6 +947,15 @@ async def read_output(fp: asyncio.StreamReader) -> int:
             key = data.get("key")  # Absent for text files
             log.info("Finished downloading %s (key = %s)", data["file"], key)
     return failures
+
+
+def quantify(qty: int, singular: str, plural: Optional[str] = None) -> str:
+    if qty == 1:
+        return f"{qty} {singular}"
+    elif plural is None:
+        return f"{qty} {singular}s"
+    else:
+        return f"{qty} {plural}"
 
 
 if __name__ == "__main__":
