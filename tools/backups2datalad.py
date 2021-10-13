@@ -735,6 +735,7 @@ def main(
     "-e", "--exclude", help="Skip dandisets matching the given regex", metavar="REGEX"
 )
 @click.option("--gh-org", help="GitHub organization to create repositories under")
+@click.option("--tags/--no-tags", default=True, help="Enable/disable creation of tags for releases  [default: enabled]")
 @click.argument("dandisets", nargs=-1)
 @click.pass_obj
 def update_from_backup(
@@ -743,8 +744,10 @@ def update_from_backup(
     backup_remote: Optional[str],
     gh_org: Optional[str],
     exclude: Optional[str],
+    tags: bool,
 ) -> None:
     datasetter.backup_remote = backup_remote
+    datasetter.enable_tags = tags
     datasetter.update_from_backup(
         dandisets, exclude=maybe_compile(exclude), gh_org=gh_org
     )
