@@ -735,7 +735,11 @@ def main(
     "-e", "--exclude", help="Skip dandisets matching the given regex", metavar="REGEX"
 )
 @click.option("--gh-org", help="GitHub organization to create repositories under")
-@click.option("--tags/--no-tags", default=True, help="Enable/disable creation of tags for releases  [default: enabled]")
+@click.option(
+    "--tags/--no-tags",
+    default=True,
+    help="Enable/disable creation of tags for releases  [default: enabled]",
+)
 @click.argument("dandisets", nargs=-1)
 @click.pass_obj
 def update_from_backup(
@@ -939,7 +943,16 @@ async def read_output(fp: asyncio.StreamReader) -> int:
     failures = 0
     async for line in fp:
         data = json.loads(line)
-        if not data["success"]:
+        if "success" not in data:
+            # Progress message
+            log.info(
+                "%s: Downloaded %d / %d bytes (%s)",
+                data["action"]["file"],
+                data["byte-progress"],
+                data["total-size"],
+                data["percent-progress"],
+            )
+        elif not data["success"]:
             log.error(
                 "%s: download failed; error messages: %r",
                 data["file"],
