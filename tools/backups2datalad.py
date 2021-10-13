@@ -695,6 +695,11 @@ class Syncer:
 )
 @click.option("--pdb", is_flag=True, help="Drop into debugger if an error occurs")
 @click.option(
+    "--quiet-debug",
+    is_flag=True,
+    help="Log backups2datalad at DEBUG and all other loggers at INFO",
+)
+@click.option(
     "-T", "--target", type=click.Path(file_okay=False, path_type=Path), required=True
 )
 @click.pass_context
@@ -707,6 +712,7 @@ def main(
     jobs: int,
     log_level: int,
     pdb: bool,
+    quiet_debug: bool,
     target: Path,
 ) -> None:
     ctx.obj = DandiDatasetter(
@@ -721,6 +727,9 @@ def main(
     )
     if pdb:
         sys.excepthook = pdb_excepthook
+    if quiet_debug:
+        log.setLevel(logging.DEBUG)
+        log_level = logging.INFO
     logging.basicConfig(
         format="%(asctime)s [%(levelname)-8s] %(name)s %(message)s",
         datefmt="%Y-%m-%dT%H:%M:%S%z",
