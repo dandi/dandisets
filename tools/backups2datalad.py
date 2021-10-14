@@ -917,6 +917,7 @@ async def download_urls(
         str(jobs),
         "--json",
         "--json-error-messages",
+        "--json-progress",
         "--raw",
     ]
     log.debug("Running: %s", shlex.join(args))
