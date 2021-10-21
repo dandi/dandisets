@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 from datetime import datetime
 from functools import cached_property
@@ -40,7 +42,7 @@ class DandiDatasetter:
     def update_from_backup(
         self,
         dandiset_ids: Sequence[str] = (),
-        exclude: Optional[re.Pattern] = None,
+        exclude: Optional[re.Pattern[str]] = None,
         gh_org: Optional[str] = None,
     ) -> None:
         self.target_path.mkdir(parents=True, exist_ok=True)
@@ -141,7 +143,10 @@ class DandiDatasetter:
                 return False
 
     def update_github_metadata(
-        self, dandiset_ids: Sequence[str], gh_org: str, exclude: Optional[re.Pattern]
+        self,
+        dandiset_ids: Sequence[str],
+        gh_org: str,
+        exclude: Optional[re.Pattern[str]],
     ) -> None:
         for d in self.get_dandisets(dandiset_ids, exclude=exclude):
             log.info("Setting metadata for %s/%s ...", gh_org, d.identifier)
@@ -151,7 +156,7 @@ class DandiDatasetter:
             )
 
     def get_dandisets(
-        self, dandiset_ids: Sequence[str], exclude: Optional[re.Pattern]
+        self, dandiset_ids: Sequence[str], exclude: Optional[re.Pattern[str]]
     ) -> Iterator[RemoteDandiset]:
         if dandiset_ids:
             diter = (

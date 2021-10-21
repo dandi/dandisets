@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 import logging
 from pathlib import Path
+import re
 import sys
 from typing import Optional, Sequence
 
@@ -11,7 +14,7 @@ from datalad.api import Dataset
 
 from . import log
 from .datasetter import DandiDatasetter
-from .util import Config, maybe_compile, pdb_excepthook
+from .util import Config, pdb_excepthook
 
 
 @click.group()
@@ -19,6 +22,7 @@ from .util import Config, maybe_compile, pdb_excepthook
     "--asset-filter",
     help="Only consider assets matching the given regex",
     metavar="REGEX",
+    type=re.compile,
 )
 @click.option(
     "-i",
@@ -57,7 +61,7 @@ from .util import Config, maybe_compile, pdb_excepthook
 @click.pass_context
 def main(
     ctx: click.Context,
-    asset_filter: str,
+    asset_filter: Optional[re.Pattern[str]],
     dandi_instance: str,
     force: Optional[str],
     ignore_errors: bool,
@@ -74,7 +78,7 @@ def main(
         target_path=target,
         config=Config(
             ignore_errors=ignore_errors,
-            asset_filter=maybe_compile(asset_filter),
+            asset_filter=asset_filter,
             jobs=jobs,
             force=force,
         ),
@@ -95,7 +99,11 @@ def main(
 @main.command()
 @click.option("--backup-remote", help="Name of the rclone remote to push to")
 @click.option(
-    "-e", "--exclude", help="Skip dandisets matching the given regex", metavar="REGEX"
+    "-e",
+    "--exclude",
+    help="Skip dandisets matching the given regex",
+    metavar="REGEX",
+    type=re.compile,
 )
 @click.option("--gh-org", help="GitHub organization to create repositories under")
 @click.option(
@@ -110,19 +118,21 @@ def update_from_backup(
     dandisets: Sequence[str],
     backup_remote: Optional[str],
     gh_org: Optional[str],
-    exclude: Optional[str],
+    exclude: Optional[re.Pattern[str]],
     tags: bool,
 ) -> None:
     datasetter.config.backup_remote = backup_remote
     datasetter.config.enable_tags = tags
-    datasetter.update_from_backup(
-        dandisets, exclude=maybe_compile(exclude), gh_org=gh_org
-    )
+    datasetter.update_from_backup(dandisets, exclude=exclude, gh_org=gh_org)
 
 
 @main.command()
 @click.option(
-    "-e", "--exclude", help="Skip dandisets matching the given regex", metavar="REGEX"
+    "-e",
+    "--exclude",
+    help="Skip dandisets matching the given regex",
+    metavar="REGEX",
+    type=re.compile,
 )
 @click.option(
     "--gh-org",
@@ -134,12 +144,10 @@ def update_from_backup(
 def update_github_metadata(
     datasetter: DandiDatasetter,
     dandisets: Sequence[str],
-    exclude: Optional[str],
+    exclude: Optional[re.Pattern[str]],
     gh_org: str,
 ) -> None:
-    datasetter.update_github_metadata(
-        dandisets, exclude=maybe_compile(exclude), gh_org=gh_org
-    )
+    datasetter.update_github_metadata(dandisets, exclude=exclude, gh_org=gh_org)
 
 
 @main.command()

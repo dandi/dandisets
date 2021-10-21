@@ -32,7 +32,7 @@ from . import log
 @dataclass
 class Config:
     ignore_errors: bool = False
-    asset_filter: Optional[re.Pattern] = None
+    asset_filter: Optional[re.Pattern[str]] = None
     jobs: int = 10
     force: Optional[str] = None
     content_url_regex: str = r"amazonaws.com/.*blobs/"
@@ -147,13 +147,6 @@ def update_dandiset_metadata(dandiset: RemoteDandiset, ds: Dataset) -> None:
     metadata = dandiset.get_raw_metadata()
     APIDandiset(ds.pathobj, allow_empty=True).update_metadata(metadata)
     ds.repo.add([dandiset_metadata_file])
-
-
-def maybe_compile(s: Optional[str]) -> Optional[re.Pattern]:
-    if s is None:
-        return None
-    else:
-        return re.compile(s)
 
 
 def quantify(qty: int, singular: str, plural: Optional[str] = None) -> str:

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -70,7 +72,7 @@ class Syncer:
         except FileNotFoundError:
             pass
 
-    def __enter__(self) -> "Syncer":
+    def __enter__(self) -> Syncer:
         return self
 
     def __exit__(self, *_exc_info: Any) -> None:
