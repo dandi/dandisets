@@ -13,7 +13,9 @@ from datalad.api import Dataset
 from datalad.tests.utils import assert_repo_status, ok_file_under_git
 import pytest
 
-from backups2datalad import DEFAULT_BRANCH, DandiDatasetter, custom_commit_date, readcmd
+from backups2datalad import DEFAULT_BRANCH
+from backups2datalad.datasetter import DandiDatasetter
+from backups2datalad.util import Config, custom_commit_date, readcmd
 
 log = logging.getLogger("test_backups2datalad")
 
@@ -94,14 +96,16 @@ def test_1(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
     di = DandiDatasetter(
         dandi_client=text_dandiset["client"],
         target_path=target_path,
-        ignore_errors=False,
-        # gh_org=None,
-        # re_filter=None,
-        # backup_remote=None,
-        # jobs=jobs,
-        # force=force,
-        content_url_regex=r".*/blobs/",
-        s3bucket="dandi-api-staging-dandisets",
+        config=Config(
+            ignore_errors=False,
+            # gh_org=None,
+            # re_filter=None,
+            # backup_remote=None,
+            # jobs=jobs,
+            # force=force,
+            content_url_regex=r".*/blobs/",
+            s3bucket="dandi-api-staging-dandisets",
+        ),
     )
 
     with pytest.raises(Exception):
@@ -213,10 +217,12 @@ def test_2(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
     di = DandiDatasetter(
         dandi_client=text_dandiset["client"],
         target_path=target_path,
-        ignore_errors=False,
-        content_url_regex=r".*/blobs/",
-        s3bucket="dandi-api-staging-dandisets",
-        enable_tags=False,
+        config=Config(
+            ignore_errors=False,
+            content_url_regex=r".*/blobs/",
+            s3bucket="dandi-api-staging-dandisets",
+            enable_tags=False,
+        ),
     )
 
     dandiset_id = text_dandiset["dandiset_id"]
@@ -243,7 +249,7 @@ def test_2(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
         base = readgit("show", "-s", "--format=%H", "HEAD")
         versions.append((v, base))
 
-    di.enable_tags = True
+    di.config.enable_tags = True
     log.info("test_2: Updating backup, now with release-tagging enabled")
     di.update_from_backup([dandiset_id])
 

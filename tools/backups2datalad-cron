@@ -19,7 +19,7 @@ export DATALAD_LOG_LEVEL=WARNING  # otherwise too much of noise
 
 set -o pipefail
 set -x
-eval tools/backups2datalad.py \
+eval python -m tools.backups2datalad \
    -l WARNING \
    -J 5 \
    --target "$ds" \

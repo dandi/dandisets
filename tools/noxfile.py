@@ -10,7 +10,7 @@ def typing(session):
     session.install("-r", "get-upload-stats.req.txt")
     session.install("mypy", "boto3-stubs[s3]", "types-python-dateutil")
     session.run(
-        "mypy", "backups2datalad.py", "test_backups2datalad.py", "get-upload-stats.py"
+        "mypy", "backups2datalad", "test_backups2datalad.py", "get-upload-stats.py"
     )
 
 
