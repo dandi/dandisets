@@ -56,6 +56,12 @@ from .util import Config, pdb_excepthook
     help="Log backups2datalad at DEBUG and all other loggers at INFO",
 )
 @click.option(
+    "--s3bucket",
+    help="S3 bucket on which the Dandisets' assets are stored",
+    default="dandiarchive",
+    show_default=True,
+)
+@click.option(
     "-T", "--target", type=click.Path(file_okay=False, path_type=Path), required=True
 )
 @click.pass_context
@@ -70,6 +76,7 @@ def main(
     pdb: bool,
     quiet_debug: bool,
     target: Path,
+    s3bucket: str,
 ) -> None:
     ctx.obj = DandiDatasetter(
         dandi_client=ctx.with_resource(
@@ -81,6 +88,7 @@ def main(
             asset_filter=asset_filter,
             jobs=jobs,
             force=force,
+            s3bucket=s3bucket,
         ),
     )
     if pdb:
