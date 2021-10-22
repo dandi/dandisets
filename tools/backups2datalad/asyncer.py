@@ -116,64 +116,64 @@ class Downloader(trio.abc.AsyncResource):
         sha256_digest: str,
         sender: trio.MemorySendChannel[ToDownload],
     ) -> None:
-        dest = self.repo / asset.path
-        if self.tracker.register_asset(asset, force=self.config.force):
-            log.debug(
-                "%s: metadata unchanged; not taking any further action",
-                asset.path,
-            )
-            return
-        if not self.config.match_asset(asset.path):
-            log.debug("%s: Skipping asset", asset.path)
-            return
-        log.info("%s: Syncing", asset.path)
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        to_update = False
-        if not (dest.exists() or dest.is_symlink()):
-            log.info("%s: Not in dataset; will add", asset.path)
-            to_update = True
-            self.report.added += 1
-        else:
-            log.debug("%s: About to fetch hash from annex", asset.path)
-            if sha256_digest == await self.get_annex_hash(dest):
-                log.info(
-                    "%s: Asset in dataset, and hash shows no modification;"
-                    " will not update",
+        async with sender:
+            dest = self.repo / asset.path
+            if self.tracker.register_asset(asset, force=self.config.force):
+                log.debug(
+                    "%s: metadata unchanged; not taking any further action",
                     asset.path,
                 )
-            else:
-                log.info(
-                    "%s: Asset in dataset, and hash shows modification; will update",
-                    asset.path,
-                )
+                return
+            if not self.config.match_asset(asset.path):
+                log.debug("%s: Skipping asset", asset.path)
+                return
+            log.info("%s: Syncing", asset.path)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            to_update = False
+            if not (dest.exists() or dest.is_symlink()):
+                log.info("%s: Not in dataset; will add", asset.path)
                 to_update = True
-                self.report.updated += 1
-        if to_update:
-            bucket_url = await self.get_file_bucket_url(asset)
-            dest.unlink(missing_ok=True)
-            key = await self.annex.mkkey(
-                PurePosixPath(asset.path).name, asset.size, sha256_digest
-            )
-            remotes = await self.annex.get_key_remotes(key)
-            if remotes is not None:
-                log.info(
-                    "%s: Key is known to git-annex; registering new path", asset.path
-                )
-                await self.annex.from_key(key, asset.path)
-                await self.register_url(asset.path, key, bucket_url)
-                await self.register_url(asset.path, key, asset.base_download_url)
-                if (
-                    self.config.backup_remote is not None
-                    and self.config.backup_remote not in remotes
-                ):
-                    log.warn(
-                        "%s: Not in backup remote %s",
-                        asset.path,
-                        self.config.backup_remote,
-                    )
+                self.report.added += 1
             else:
-                log.info("%s: Sending off for download from %s", asset.path, bucket_url)
-                async with sender:
+                log.debug("%s: About to fetch hash from annex", asset.path)
+                if sha256_digest == await self.get_annex_hash(dest):
+                    log.info(
+                        "%s: Asset in dataset, and hash shows no modification;"
+                        " will not update",
+                        asset.path,
+                    )
+                else:
+                    log.info(
+                        "%s: Asset in dataset, and hash shows modification; will update",
+                        asset.path,
+                    )
+                    to_update = True
+                    self.report.updated += 1
+            if to_update:
+                bucket_url = await self.get_file_bucket_url(asset)
+                dest.unlink(missing_ok=True)
+                key = await self.annex.mkkey(
+                    PurePosixPath(asset.path).name, asset.size, sha256_digest
+                )
+                remotes = await self.annex.get_key_remotes(key)
+                if remotes is not None:
+                    log.info(
+                        "%s: Key is known to git-annex; registering new path", asset.path
+                    )
+                    await self.annex.from_key(key, asset.path)
+                    await self.register_url(asset.path, key, bucket_url)
+                    await self.register_url(asset.path, key, asset.base_download_url)
+                    if (
+                        self.config.backup_remote is not None
+                        and self.config.backup_remote not in remotes
+                    ):
+                        log.warn(
+                            "%s: Not in backup remote %s",
+                            asset.path,
+                            self.config.backup_remote,
+                        )
+                else:
+                    log.info("%s: Sending off for download from %s", asset.path, bucket_url)
                     await sender.send(
                         ToDownload(
                             path=asset.path,
@@ -279,7 +279,7 @@ class Downloader(trio.abc.AsyncResource):
                         self.check_unannexed_hash,
                         dl.path,
                         dl.sha256_digest,
-                        name=f"check_unanned_hash:{dl.path}",
+                        name=f"check_unannexed_hash:{dl.path}",
                     )
             log.debug("Done with download post-processing")
 
@@ -346,6 +346,7 @@ async def aiterassets(dandiset: RemoteDandiset) -> AsyncIterator[RemoteAsset]:
 
 
 async def asha256(path: Path) -> str:
+    log.debug("Starting to compute sha256 digest of %s", path)
     tp = trio.Path(path)
     digester = hashlib.sha256()
     async with await tp.open("rb") as fp:
@@ -354,4 +355,5 @@ async def asha256(path: Path) -> str:
             if blob == b"":
                 break
             digester.update(blob)
+    log.debug("Finished computing sha256 digest of %s", path)
     return digester.hexdigest()
