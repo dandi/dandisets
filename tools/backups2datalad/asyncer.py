@@ -45,21 +45,21 @@ class ToDownload:
 
 @dataclass
 class Downloader(trio.abc.AsyncResource):
-    nursery: trio.Nursery
     addurl: TextProcess
     repo: Path
     config: Config
     tracker: AssetTracker
     s3client: httpx.AsyncClient
+    nursery: Optional[trio.Nursery] = None
     report: Report = field(init=False, default_factory=Report)
     in_progress: Dict[str, ToDownload] = field(init=False, default_factory=dict)
     annex: AsyncAnnex = field(init=False)
-    download_sender: trio.abc.SendChannel[ToDownload] = field(init=False)
-    download_receiver: trio.abc.ReceiveChannel[ToDownload] = field(init=False)
-    post_sender: trio.abc.SendChannel[Tuple[ToDownload, Optional[str]]] = field(
+    download_sender: trio.MemorySendChannel[ToDownload] = field(init=False)
+    download_receiver: trio.MemoryReceiveChannel[ToDownload] = field(init=False)
+    post_sender: trio.MemorySendChannel[Tuple[ToDownload, Optional[str]]] = field(
         init=False
     )
-    post_receiver: trio.abc.ReceiveChannel[Tuple[ToDownload, Optional[str]]] = field(
+    post_receiver: trio.MemoryReceiveChannel[Tuple[ToDownload, Optional[str]]] = field(
         init=False
     )
 
@@ -75,39 +75,47 @@ class Downloader(trio.abc.AsyncResource):
     async def asset_loop(self, dandiset: RemoteDandiset) -> None:
         now = datetime.now(timezone.utc)
         downloading = True
-        async with aclosing(aiterassets(dandiset)) as aia:  # type: ignore[type-var]
-            async for asset in aia:
-                if downloading:
-                    try:
-                        sha256_digest = asset.get_digest(DigestType.sha2_256)
-                    except NotFoundError:
-                        log.info(
-                            "%s: SHA256 has not been computed yet;"
-                            " not downloading any more assets",
-                            asset.path,
-                        )
-                        downloading = False
-                    else:
-                        self.nursery.start_soon(
-                            self.process_asset,
-                            asset,
-                            sha256_digest,
-                            name=f"process_asset:{asset.path}",
-                        )
-                # Not `else`, as we want to "fall through" if `downloading` is
-                # negated above.
-                if not downloading:
-                    log.info("%s: Will download in a future run", asset.path)
-                    self.tracker.mark_future(asset)
-                    if now - asset.created > timedelta(days=1):
-                        log.error(
-                            "%s: Asset created more than a day ago"
-                            " but SHA256 digest has not yet been computed",
-                            asset.path,
-                        )
-                        self.report.old_unhashed += 1
+        async with self.download_sender:
+            async with aclosing(aiterassets(dandiset)) as aia:  # type: ignore[type-var]
+                async for asset in aia:
+                    if downloading:
+                        try:
+                            sha256_digest = asset.get_digest(DigestType.sha2_256)
+                        except NotFoundError:
+                            log.info(
+                                "%s: SHA256 has not been computed yet;"
+                                " not downloading any more assets",
+                                asset.path,
+                            )
+                            downloading = False
+                        else:
+                            assert self.nursery is not None
+                            self.nursery.start_soon(
+                                self.process_asset,
+                                asset,
+                                sha256_digest,
+                                self.download_sender.clone(),
+                                name=f"process_asset:{asset.path}",
+                            )
+                    # Not `else`, as we want to "fall through" if `downloading`
+                    # is negated above.
+                    if not downloading:
+                        log.info("%s: Will download in a future run", asset.path)
+                        self.tracker.mark_future(asset)
+                        if now - asset.created > timedelta(days=1):
+                            log.error(
+                                "%s: Asset created more than a day ago"
+                                " but SHA256 digest has not yet been computed",
+                                asset.path,
+                            )
+                            self.report.old_unhashed += 1
 
-    async def process_asset(self, asset: RemoteAsset, sha256_digest: str) -> None:
+    async def process_asset(
+        self,
+        asset: RemoteAsset,
+        sha256_digest: str,
+        sender: trio.MemorySendChannel[ToDownload],
+    ) -> None:
         dest = self.repo / asset.path
         if self.tracker.register_asset(asset, force=self.config.force):
             log.debug(
@@ -165,14 +173,15 @@ class Downloader(trio.abc.AsyncResource):
                     )
             else:
                 log.info("%s: Sending off for download from %s", asset.path, bucket_url)
-                self.download_sender.send(
-                    ToDownload(
-                        path=asset.path,
-                        url=bucket_url,
-                        extra_urls=[asset.base_download_url],
-                        sha256_digest=sha256_digest,
+                async with sender:
+                    await sender.send(
+                        ToDownload(
+                            path=asset.path,
+                            url=bucket_url,
+                            extra_urls=[asset.base_download_url],
+                            sha256_digest=sha256_digest,
+                        )
                     )
-                )
 
     async def get_file_bucket_url(self, asset: RemoteAsset) -> str:
         log.debug("%s: Fetching bucket URL", asset.path)
@@ -265,6 +274,7 @@ class Downloader(trio.abc.AsyncResource):
                         self.report.hash_mismatches += 1
                 else:
                     log.info("%s: Not managed by git annex; not adding URLs", dl.path)
+                    assert self.nursery is not None
                     self.nursery.start_soon(
                         self.check_unannexed_hash,
                         dl.path,
@@ -305,10 +315,9 @@ async def async_assets(
         path=repo,
     ) as p:
         async with httpx.AsyncClient() as s3client:
-            async with trio.open_nursery() as nursery:
-                async with Downloader(
-                    nursery, p, repo, config, tracker, s3client
-                ) as dm:
+            async with Downloader(p, repo, config, tracker, s3client) as dm:
+                async with trio.open_nursery() as nursery:
+                    dm.nursery = nursery
                     nursery.start_soon(dm.asset_loop, dandiset)
                     nursery.start_soon(dm.feed_addurl)
                     nursery.start_soon(dm.read_addurl)
@@ -327,7 +336,7 @@ async def aiterassets(dandiset: RemoteDandiset) -> AsyncIterator[RemoteAsset]:
             data = r.json()
             for item in data["results"]:
                 r = await client.get(
-                    f"{dandiset.client.api_url}/assets/{data['asset_id']}/"
+                    f"{dandiset.client.api_url}/assets/{item['asset_id']}/"
                 )
                 r.raise_for_status()
                 metadata = r.json()

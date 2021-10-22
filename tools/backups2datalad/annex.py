@@ -33,9 +33,10 @@ class AsyncAnnex(trio.abc.AsyncResource):
                 "--json-error-messages",
                 path=self.repo,
             )
-        await self.pfromkey.send(f"{key} {path}\n")
-        ### TODO: Do something if readline() returns "" (signalling EOF)
-        r = json.loads(await self.pfromkey.readline())
+        async with self.pfromkey.lock:
+            await self.pfromkey.send(f"{key} {path}\n")
+            ### TODO: Do something if readline() returns "" (signalling EOF)
+            r = json.loads(await self.pfromkey.readline())
         if not r["success"]:
             log.error(
                 "`git annex fromkey %s %s` call failed!  Error messages:\n\n%s",
@@ -50,9 +51,10 @@ class AsyncAnnex(trio.abc.AsyncResource):
             self.pexaminekey = await open_git_annex(
                 "examinekey", "--batch", "--migrate-to-backend=SHA256E", path=self.repo
             )
-        await self.pexaminekey.send(f"SHA256-s{size}--{sha256_digest} {filename}\n")
-        ### TODO: Do something if readline() returns "" (signalling EOF)
-        return (await self.pexaminekey.readline()).strip()
+        async with self.pexaminekey.lock:
+            await self.pexaminekey.send(f"SHA256-s{size}--{sha256_digest} {filename}\n")
+            ### TODO: Do something if readline() returns "" (signalling EOF)
+            return (await self.pexaminekey.readline()).strip()
 
     async def get_key_remotes(self, key: str) -> Optional[List[str]]:
         # Returns None if key is not known to git-annex
@@ -64,9 +66,10 @@ class AsyncAnnex(trio.abc.AsyncResource):
                 "--json-error-messages",
                 path=self.repo,
             )
-        await self.pwhereis.send(f"{key}\n")
-        ### TODO: Do something if readline() returns "" (signalling EOF)
-        whereis = json.loads(await self.pwhereis.readline())
+        async with self.pwhereis.lock:
+            await self.pwhereis.send(f"{key}\n")
+            ### TODO: Do something if readline() returns "" (signalling EOF)
+            whereis = json.loads(await self.pwhereis.readline())
         if whereis["success"]:
             return [
                 w["description"].strip("[]")

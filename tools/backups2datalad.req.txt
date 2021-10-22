@@ -4,7 +4,7 @@ async_generator ~= 1.10; python_version < '3.10'
 click >= 8.0.1
 click-loglevel ~= 0.2
 #dandi >= 0.29.0
-dandi @ git+https://github.com/dandi/dandi-cli@make
+dandi @ git+https://github.com/dandi/dandi-cli
 dandischema
 datalad
 httpx ~= 0.20.0

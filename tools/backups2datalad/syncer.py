@@ -34,14 +34,14 @@ class Syncer:
 
     def sync_assets(self) -> None:
         log.info("Syncing assets...")
-        report = trio.run(
+        self.report = trio.run(
             async_assets, self.dandiset, self.ds.pathobj, self.config, self.tracker
         )
         log.info("Asset sync complete!")
-        log.info("%s added", quantify(report.added, "asset"))
-        log.info("%s updated", quantify(report.updated, "asset"))
-        log.info("%s sucessfully downloaded", quantify(report.downloaded, "asset"))
-        report.check()
+        log.info("%s added", quantify(self.report.added, "asset"))
+        log.info("%s updated", quantify(self.report.updated, "asset"))
+        log.info("%s sucessfully downloaded", quantify(self.report.downloaded, "asset"))
+        self.report.check()
 
     def prune_deleted(self) -> None:
         for asset_path in self.tracker.get_deleted(self.config):

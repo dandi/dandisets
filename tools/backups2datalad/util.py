@@ -22,7 +22,6 @@ from typing import (
     List,
     Optional,
     Set,
-    Tuple,
     Type,
     TypeVar,
     Union,
@@ -42,10 +41,7 @@ from . import log
 if sys.version_info[:2] >= (3, 10):
     # So aiter() can be re-exported without mypy complaining:
     from builtins import aiter as aiter
-    from contextlib import aclosing
 else:
-    from async_generator import aclosing
-
     T = TypeVar("T")
 
     def aiter(obj: AsyncIterable[T]) -> AsyncIterator[T]:
@@ -104,11 +100,10 @@ class TextProcess(trio.abc.AsyncResource):
     p: trio.Process
     name: str
     encoding: str = "utf-8"
-    lineiter: Optional[AsyncIterator[str]] = field(init=False, default=None)
+    buff: bytes = b""
+    lock: trio.Lock = field(init=False, default_factory=trio.Lock)
 
     async def aclose(self) -> None:
-        if self.lineiter is not None:
-            await self.lineiter.aclose()  # type: ignore[attr-defined]
         await self.p.aclose()
         if self.p.returncode not in (None, 0):
             log.warning(
@@ -123,33 +118,36 @@ class TextProcess(trio.abc.AsyncResource):
         await self.p.stdin.send_all(s.encode(self.encoding))
 
     async def readline(self) -> str:
-        if self.lineiter is None:
-            self.lineiter = aiter(self)
-        try:
-            return await anext(self.lineiter)
-        except StopAsyncIteration:
-            return ""
+        assert self.p.stdout is not None
+        while True:
+            try:
+                i = self.buff.index(b"\n")
+            except ValueError:
+                blob = await self.p.stdout.receive_some()
+                if blob == b"":
+                    # EOF
+                    log.log(DEEP_DEBUG, "%s command reached EOF", self.name)
+                    line = self.buff.decode(self.encoding)
+                    self.buff = b""
+                    log.log(
+                        DEEP_DEBUG, "Decoded line from %s command: %r", self.name, line
+                    )
+                    return line
+                else:
+                    self.buff += blob
+            else:
+                line = self.buff[: i + 1].decode(self.encoding)
+                self.buff = self.buff[i + 1 :]
+                log.log(DEEP_DEBUG, "Decoded line from %s command: %r", self.name, line)
+                return line
 
     async def __aiter__(self) -> AsyncIterator[str]:
-        def decode(bs: bytes) -> str:
-            s = bs.decode(self.encoding)
-            log.log(DEEP_DEBUG, "Decoded line from %s command: %r", self.name, s)
-            return s
-
-        buff = b""
-        assert self.p.stdout is not None
-        async with aclosing(aiter(self.p.stdout)) as blobiter:  # type: ignore[type-var]
-            async for blob in blobiter:
-                log.log(DEEP_DEBUG, "Read from %s command: %r", self.name, blob)
-                lines, buff = split_unix_lines(buff + blob)
-                for ln in lines:
-                    yield decode(ln)
-        if buff:
-            lines, buff = split_unix_lines(buff)
-            for ln in lines:
-                yield decode(ln)
-            if buff:
-                yield decode(buff)
+        while True:
+            line = await self.readline()
+            if line == "":
+                break
+            else:
+                yield line
 
 
 @dataclass
@@ -330,17 +328,3 @@ async def open_git_annex(*args: str, path: Optional[Path] = None) -> TextProcess
         cwd=str(path),  # trio-typing says this has to be a string.
     )
     return TextProcess(p, name=args[0])
-
-
-# We can't use splitlines() because it splits on \r, but we only want to split
-# on \n.
-def split_unix_lines(bs: bytes) -> Tuple[List[bytes], bytes]:
-    lines: List[bytes] = []
-    while True:
-        try:
-            i = bs.index(b"\n")
-        except ValueError:
-            break
-        lines.append(bs[: i + 1])
-        bs = bs[i + 1 :]
-    return lines, bs
