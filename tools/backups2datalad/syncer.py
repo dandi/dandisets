@@ -46,7 +46,7 @@ class Syncer:
     def prune_deleted(self) -> None:
         for asset_path in self.tracker.get_deleted(self.config):
             log.info(
-                "Asset %s is in dataset but not in Dandiarchive; deleting", asset_path
+                "%s: Asset is in dataset but not in Dandiarchive; deleting", asset_path
             )
             self.ds.repo.remove([asset_path])
             self.deleted += 1

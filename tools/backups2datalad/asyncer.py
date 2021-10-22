@@ -82,23 +82,26 @@ class Downloader(trio.abc.AsyncResource):
                         sha256_digest = asset.get_digest(DigestType.sha2_256)
                     except NotFoundError:
                         log.info(
-                            "SHA256 for %s has not been computed yet;"
+                            "%s: SHA256 has not been computed yet;"
                             " not downloading any more assets",
                             asset.path,
                         )
                         downloading = False
                     else:
                         self.nursery.start_soon(
-                            self.process_asset, asset, sha256_digest
+                            self.process_asset,
+                            asset,
+                            sha256_digest,
+                            name=f"process_asset:{asset.path}",
                         )
                 # Not `else`, as we want to "fall through" if `downloading` is
                 # negated above.
                 if not downloading:
-                    log.info("Will download %s in a future run", asset.path)
+                    log.info("%s: Will download in a future run", asset.path)
                     self.tracker.mark_future(asset)
                     if now - asset.created > timedelta(days=1):
                         log.error(
-                            "Asset %s created more than a day ago"
+                            "%s: Asset created more than a day ago"
                             " but SHA256 digest has not yet been computed",
                             asset.path,
                         )
@@ -108,29 +111,33 @@ class Downloader(trio.abc.AsyncResource):
         dest = self.repo / asset.path
         if self.tracker.register_asset(asset, force=self.config.force):
             log.debug(
-                "Asset %s metadata unchanged; not taking any further action",
+                "%s: metadata unchanged; not taking any further action",
                 asset.path,
             )
             return
         if not self.config.match_asset(asset.path):
-            log.debug("Skipping asset %s", asset.path)
+            log.debug("%s: Skipping asset", asset.path)
             return
-        log.info("Syncing asset %s", asset.path)
+        log.info("%s: Syncing", asset.path)
         dest.parent.mkdir(parents=True, exist_ok=True)
         to_update = False
         if not (dest.exists() or dest.is_symlink()):
-            log.info("Asset not in dataset; will add")
+            log.info("%s: Not in dataset; will add", asset.path)
             to_update = True
             self.report.added += 1
         else:
-            log.debug("About to fetch hash from annex")
+            log.debug("%s: About to fetch hash from annex", asset.path)
             if sha256_digest == await self.get_annex_hash(dest):
                 log.info(
-                    "Asset in dataset, and hash shows no modification;"
-                    " will not update"
+                    "%s: Asset in dataset, and hash shows no modification;"
+                    " will not update",
+                    asset.path,
                 )
             else:
-                log.info("Asset in dataset, and hash shows modification; will update")
+                log.info(
+                    "%s: Asset in dataset, and hash shows modification; will update",
+                    asset.path,
+                )
                 to_update = True
                 self.report.updated += 1
         if to_update:
@@ -152,14 +159,12 @@ class Downloader(trio.abc.AsyncResource):
                     and self.config.backup_remote not in remotes
                 ):
                     log.warn(
-                        "Asset %s is not in backup remote %s",
+                        "%s: Not in backup remote %s",
                         asset.path,
                         self.config.backup_remote,
                     )
             else:
-                log.info(
-                    "Sending asset %s off for download from %s", asset.path, bucket_url
-                )
+                log.info("%s: Sending off for download from %s", asset.path, bucket_url)
                 self.download_sender.send(
                     ToDownload(
                         path=asset.path,
@@ -170,11 +175,11 @@ class Downloader(trio.abc.AsyncResource):
                 )
 
     async def get_file_bucket_url(self, asset: RemoteAsset) -> str:
-        log.debug("Fetching bucket URL for asset")
+        log.debug("%s: Fetching bucket URL", asset.path)
         aws_url = asset.get_content_url(self.config.content_url_regex)
         urlbits = urlparse(aws_url)
         key = urlbits.path.lstrip("/")
-        log.debug("About to query S3")
+        log.debug("%s: About to query S3", asset.path)
         # aiobotocore doesn't work with trio, so we have to make the request
         # directly.  Fortunately, it's very simple.
         r = await self.s3client.head(
@@ -182,7 +187,7 @@ class Downloader(trio.abc.AsyncResource):
         )
         r.raise_for_status()
         version_id = r.headers["x-amz-version-id"]
-        log.debug("Got bucket URL for asset")
+        log.debug("%s: Got bucket URL", asset.path)
         return urlunparse(urlbits._replace(query=f"versionId={version_id}"))
 
     async def get_annex_hash(self, filepath: Path) -> str:
@@ -195,7 +200,7 @@ class Downloader(trio.abc.AsyncResource):
             return key2hash(os.path.basename(realpath))
         else:
             log.debug(
-                "%s not under annex; calculating sha256 digest ourselves", filepath
+                "%s: Not under annex; calculating sha256 digest ourselves", filepath
             )
             return await asha256(filepath)
 
@@ -205,7 +210,7 @@ class Downloader(trio.abc.AsyncResource):
             async with self.download_receiver:
                 async for td in self.download_receiver:
                     self.in_progress[td.path] = td
-                    log.info("Downloading %s to %s", td.url, td.path)
+                    log.info("%s: Downloading from %s", td.path, td.url)
                     await self.addurl.send(f"{td.url} {td.path}\n")
                 log.debug("Done feeding URLs to addurl")
 
@@ -236,7 +241,7 @@ class Downloader(trio.abc.AsyncResource):
                     else:
                         path = data["file"]
                         key = data.get("key")
-                        log.info("Finished downloading %s (key = %s)", path, key)
+                        log.info("%s: Finished downloading (key = %s)", path, key)
                         self.report.downloaded += 1
                         dl = self.in_progress.pop(path)
                         await self.post_sender.send((dl, key))
@@ -251,7 +256,7 @@ class Downloader(trio.abc.AsyncResource):
                     annex_hash = key2hash(key)
                     if dl.sha256_digest != annex_hash:
                         log.error(
-                            "Hash mismatch for %s!  Dandiarchive reports %s,"
+                            "%s: Hash mismatch!  Dandiarchive reports %s,"
                             " local file has %s",
                             dl.path,
                             dl.sha256_digest,
@@ -259,21 +264,24 @@ class Downloader(trio.abc.AsyncResource):
                         )
                         self.report.hash_mismatches += 1
                 else:
-                    log.info("%s is not managed by git annex; not adding URLs", dl.path)
+                    log.info("%s: Not managed by git annex; not adding URLs", dl.path)
                     self.nursery.start_soon(
-                        self.check_unannexed_hash, dl.path, dl.sha256_digest
+                        self.check_unannexed_hash,
+                        dl.path,
+                        dl.sha256_digest,
+                        name=f"check_unanned_hash:{dl.path}",
                     )
             log.debug("Done with download post-processing")
 
     async def register_url(self, path: str, key: str, url: str) -> None:
-        log.info("Adding URL %s to asset %s", url, path)
+        log.info("%s: Registering URL %s", path, url)
         await self.annex.register_url(key, url)
 
     async def check_unannexed_hash(self, asset_path: str, sha256_digest: str) -> None:
         annex_hash = await asha256(self.repo / asset_path)
         if sha256_digest != annex_hash:
             log.error(
-                "Hash mismatch for %s!  Dandiarchive reports %s," " local file has %s",
+                "%s: Hash mismatch!  Dandiarchive reports %s, local file has %s",
                 asset_path,
                 sha256_digest,
                 annex_hash,
