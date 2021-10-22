@@ -108,6 +108,7 @@ def test_1(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
     )
 
     with pytest.raises(Exception):
+        log.info("test_1: Testing sync of nonexistent Dandiset")
         di.update_from_backup(["999999"])
     assert not (target_path / "999999").exists()
 
@@ -118,6 +119,7 @@ def test_1(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
     # assert ret is None, "nothing is returned ATM, if added -- test should be extended"
 
     dandiset_id = text_dandiset["dandiset_id"]
+    log.info("test_1: Syncing test dandiset")
     di.update_from_backup([dandiset_id])
 
     ds = Dataset(
@@ -127,8 +129,10 @@ def test_1(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
     ok_file_under_git(ds.path, "file.txt")
 
     (text_dandiset["dspath"] / "new.txt").write_text("This is a new file.\n")
+    log.info("test_1: Updating test dandiset on server")
     text_dandiset["reupload"]()
     assert_repo_status(ds.path)  # no side-effects somehow
+    log.info("test_1: Syncing test dandiset")
     di.update_from_backup([dandiset_id])
     assert_repo_status(ds.path)  # that all is clean etc
     assert (ds.pathobj / "new.txt").read_text() == "This is a new file.\n"
@@ -174,9 +178,12 @@ def test_1(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
         metadata = yaml_load(readgit("show", f"{vid}:{dandiset_metadata_file}"))
         assert metadata.get("doi")
 
+    log.info("test_1: Waiting for Dandiset to become valid")
     text_dandiset["dandiset"].wait_until_valid(65)
+    log.info("test_1: Publishing Dandiset")
     v1 = text_dandiset["dandiset"].publish().version
     version1 = v1.identifier
+    log.info("test_1: Syncing test dandiset")
     di.update_from_backup([dandiset_id])
     assert_repo_status(ds.path)  # that all is clean etc
     tags = {t["name"]: t["hexsha"] for t in ds.repo.get_tags()}
@@ -187,16 +194,21 @@ def test_1(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
     (text_dandiset["dspath"] / "new.txt").write_text(
         "This file's contents were changed.\n"
     )
+    log.info("test_1: Updating test dandiset on server")
     text_dandiset["reupload"]()
+    log.info("test_1: Syncing test dandiset")
     di.update_from_backup([dandiset_id])
     assert_repo_status(ds.path)  # that all is clean etc
     assert (
         ds.pathobj / "new.txt"
     ).read_text() == "This file's contents were changed.\n"
 
+    log.info("test_1: Waiting for Dandiset to become valid")
     text_dandiset["dandiset"].wait_until_valid(65)
+    log.info("test_1: Publishing Dandiset")
     v2 = text_dandiset["dandiset"].publish().version
     version2 = v2.identifier
+    log.info("test_1: Syncing test dandiset")
     di.update_from_backup([dandiset_id])
     assert_repo_status(ds.path)  # that all is clean etc
     tags = {t["name"]: t["hexsha"] for t in ds.repo.get_tags()}
