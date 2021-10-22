@@ -129,7 +129,7 @@ class DandiDatasetter:
         with Syncer(config=self.config, dandiset=dandiset, ds=ds) as syncer:
             with dandi_logging(ds.pathobj) as logfile:
                 update_dandiset_metadata(dandiset, ds)
-                syncer.sync_assets(dandiset.get_assets())
+                syncer.sync_assets()
                 syncer.prune_deleted()
                 syncer.dump_asset_metadata()
             if any(r["state"] != "clean" for r in ds.status()):

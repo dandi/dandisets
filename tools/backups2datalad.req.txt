@@ -1,13 +1,15 @@
 # Python ~= 3.8
 # git-annex >= 8.20210903
-boto3
+async_generator ~= 1.10; python_version < '3.10'
 click >= 8.0.1
 click-loglevel ~= 0.2
-dandi >= 0.29.0
+#dandi >= 0.29.0
+dandi @ git+https://github.com/dandi/dandi-cli@make
 dandischema
 datalad
-#fscacher
+httpx ~= 0.20.0
 humanize
 morecontext ~= 0.1
 packaging
 PyGithub ~= 1.53
+trio ~= 0.19.0

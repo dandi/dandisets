@@ -8,7 +8,7 @@ nox.options.stop_on_first_error = True
 def typing(session):
     session.install("-r", "backups2datalad.req.txt")
     session.install("-r", "get-upload-stats.req.txt")
-    session.install("mypy", "boto3-stubs[s3]", "types-python-dateutil")
+    session.install("mypy", "trio-typing[mypy]", "types-python-dateutil")
     session.run(
         "mypy", "backups2datalad", "test_backups2datalad.py", "get-upload-stats.py"
     )
