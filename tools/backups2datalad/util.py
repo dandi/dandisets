@@ -60,7 +60,6 @@ DEEP_DEBUG = 5
 
 @dataclass
 class Config:
-    ignore_errors: bool = False
     asset_filter: Optional[re.Pattern[str]] = None
     jobs: int = 10
     force: Optional[str] = None

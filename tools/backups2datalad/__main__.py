@@ -41,7 +41,6 @@ from .util import Config, pdb_excepthook
     show_default=True,
 )
 @click.option("-f", "--force", type=click.Choice(["check"]))
-@click.option("--ignore-errors", is_flag=True)
 @click.option(
     "-l",
     "--log-level",
@@ -70,7 +69,6 @@ def main(
     asset_filter: Optional[re.Pattern[str]],
     dandi_instance: str,
     force: Optional[str],
-    ignore_errors: bool,
     jobs: int,
     log_level: int,
     pdb: bool,
@@ -84,7 +82,6 @@ def main(
         ),
         target_path=target,
         config=Config(
-            ignore_errors=ignore_errors,
             asset_filter=asset_filter,
             jobs=jobs,
             force=force,

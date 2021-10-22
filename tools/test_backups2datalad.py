@@ -97,7 +97,6 @@ def test_1(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
         dandi_client=text_dandiset["client"],
         target_path=target_path,
         config=Config(
-            ignore_errors=False,
             # gh_org=None,
             # re_filter=None,
             # backup_remote=None,
@@ -218,7 +217,6 @@ def test_2(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
         dandi_client=text_dandiset["client"],
         target_path=target_path,
         config=Config(
-            ignore_errors=False,
             content_url_regex=r".*/blobs/",
             s3bucket="dandi-api-staging-dandisets",
             enable_tags=False,
