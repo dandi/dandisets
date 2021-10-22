@@ -144,7 +144,8 @@ class Downloader(trio.abc.AsyncResource):
                     )
                 else:
                     log.info(
-                        "%s: Asset in dataset, and hash shows modification; will update",
+                        "%s: Asset in dataset, and hash shows modification;"
+                        " will update",
                         asset.path,
                     )
                     to_update = True
@@ -158,7 +159,8 @@ class Downloader(trio.abc.AsyncResource):
                 remotes = await self.annex.get_key_remotes(key)
                 if remotes is not None:
                     log.info(
-                        "%s: Key is known to git-annex; registering new path", asset.path
+                        "%s: Key is known to git-annex; registering new path",
+                        asset.path,
                     )
                     await self.annex.from_key(key, asset.path)
                     await self.register_url(asset.path, key, bucket_url)
@@ -173,7 +175,9 @@ class Downloader(trio.abc.AsyncResource):
                             self.config.backup_remote,
                         )
                 else:
-                    log.info("%s: Sending off for download from %s", asset.path, bucket_url)
+                    log.info(
+                        "%s: Sending off for download from %s", asset.path, bucket_url
+                    )
                     await sender.send(
                         ToDownload(
                             path=asset.path,

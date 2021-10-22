@@ -101,7 +101,6 @@ class TextProcess(trio.abc.AsyncResource):
     name: str
     encoding: str = "utf-8"
     buff: bytes = b""
-    lock: trio.Lock = field(init=False, default_factory=trio.Lock)
 
     async def aclose(self) -> None:
         await self.p.aclose()

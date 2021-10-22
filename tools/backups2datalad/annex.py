@@ -1,8 +1,9 @@
+from collections import defaultdict
 from dataclasses import dataclass, field
 import json
 from pathlib import Path
 import textwrap
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import trio
 
@@ -17,7 +18,9 @@ class AsyncAnnex(trio.abc.AsyncResource):
     pexaminekey: Optional[TextProcess] = None
     pwhereis: Optional[TextProcess] = None
     pregisterurl: Optional[TextProcess] = None
-    attrlock: trio.Lock = field(init=False, default_factory=trio.Lock)
+    locks: Dict[str, trio.Lock] = field(
+        init=False, default_factory=lambda: defaultdict(trio.Lock)
+    )
 
     async def aclose(self) -> None:
         for p in [self.pfromkey, self.pexaminekey, self.pwhereis, self.pregisterurl]:
@@ -25,8 +28,8 @@ class AsyncAnnex(trio.abc.AsyncResource):
                 await p.aclose()
 
     async def from_key(self, key: str, path: str) -> None:
-        if self.pfromkey is None:
-            async with self.attrlock:
+        async with self.locks["fromkey"]:
+            if self.pfromkey is None:
                 self.pfromkey = await open_git_annex(
                     "fromkey",
                     "--force",
@@ -35,7 +38,6 @@ class AsyncAnnex(trio.abc.AsyncResource):
                     "--json-error-messages",
                     path=self.repo,
                 )
-        async with self.pfromkey.lock:
             await self.pfromkey.send(f"{key} {path}\n")
             ### TODO: Do something if readline() returns "" (signalling EOF)
             r = json.loads(await self.pfromkey.readline())
@@ -49,23 +51,22 @@ class AsyncAnnex(trio.abc.AsyncResource):
             ### TODO: Raise an exception?
 
     async def mkkey(self, filename: str, size: int, sha256_digest: str) -> str:
-        if self.pexaminekey is None:
-            async with self.attrlock:
+        async with self.locks["examinekey"]:
+            if self.pexaminekey is None:
                 self.pexaminekey = await open_git_annex(
                     "examinekey",
                     "--batch",
                     "--migrate-to-backend=SHA256E",
                     path=self.repo,
                 )
-        async with self.pexaminekey.lock:
             await self.pexaminekey.send(f"SHA256-s{size}--{sha256_digest} {filename}\n")
             ### TODO: Do something if readline() returns "" (signalling EOF)
             return (await self.pexaminekey.readline()).strip()
 
     async def get_key_remotes(self, key: str) -> Optional[List[str]]:
         # Returns None if key is not known to git-annex
-        if self.pwhereis is None:
-            async with self.attrlock:
+        async with self.locks["whereis"]:
+            if self.pwhereis is None:
                 self.pwhereis = await open_git_annex(
                     "whereis",
                     "--batch-keys",
@@ -73,7 +74,6 @@ class AsyncAnnex(trio.abc.AsyncResource):
                     "--json-error-messages",
                     path=self.repo,
                 )
-        async with self.pwhereis.lock:
             await self.pwhereis.send(f"{key}\n")
             ### TODO: Do something if readline() returns "" (signalling EOF)
             whereis = json.loads(await self.pwhereis.readline())
@@ -86,9 +86,9 @@ class AsyncAnnex(trio.abc.AsyncResource):
             return None
 
     async def register_url(self, key: str, url: str) -> None:
-        if self.pregisterurl is None:
-            async with self.attrlock:
+        async with self.locks["registerurl"]:
+            if self.pregisterurl is None:
                 self.pregisterurl = await open_git_annex(
                     "registerurl", "--batch", path=self.repo
                 )
-        await self.pregisterurl.send(f"{key} {url}\n")
+            await self.pregisterurl.send(f"{key} {url}\n")
