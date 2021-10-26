@@ -58,6 +58,7 @@ def text_dandiset(
     dspath = tmp_path_factory.mktemp("text_dandiset")
     (dspath / dandiset_metadata_file).write_text(f"identifier: '{dandiset_id}'\n")
     (dspath / "file.txt").write_text("This is test text.\n")
+    (dspath / "v0.txt").write_text("Version 0\n")
     (dspath / "subdir1").mkdir()
     (dspath / "subdir1" / "apple.txt").write_text("Apple\n")
     (dspath / "subdir2").mkdir()
@@ -236,27 +237,38 @@ def test_2(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
     )
 
     dandiset_id = text_dandiset["dandiset_id"]
+    dspath = text_dandiset["dspath"]
+    dandiset = text_dandiset["dandiset"]
     log.info("test_2: Creating new backup of Dandiset")
     di.update_from_backup([dandiset_id])
-    ds = Dataset(target_path / text_dandiset["dandiset_id"])
+    ds = Dataset(target_path / dandiset_id)
 
     def readgit(*args: str) -> str:
         return readcmd("git", *args, cwd=ds.path)
 
     versions = []
     for i in range(1, 4):
-        (text_dandiset["dspath"] / "counter.txt").write_text(f"{i}\n")
+        (dspath / "counter.txt").write_text(f"{i}\n")
+        for vn in dspath.glob("v*.txt"):
+            vn.unlink()
+            dandiset.get_asset_by_path(vn.name).delete()
+        (dspath / f"v{i}.txt").write_text(f"Version {i}\n")
         text_dandiset["reupload"]()
         log.info("test_2: Publishing version #%s", i)
-        text_dandiset["dandiset"].wait_until_valid(65)
-        v = text_dandiset["dandiset"].publish().version
+        dandiset.wait_until_valid(65)
+        v = dandiset.publish().version
         log.info(
             "test_2: Updating backup (release-tagging disabled) for version #%s", i
         )
         di.update_from_backup([dandiset_id])
         assert readgit("tag") == ""
         assert (ds.pathobj / "counter.txt").read_text() == f"{i}\n"
+        assert list(dspath.glob("v*.txt")) == [dspath / f"v{i}.txt"]
+        assert (dspath / f"v{i}.txt").read_text() == f"Version {i}\n"
         base = readgit("show", "-s", "--format=%H", "HEAD")
+        log.info(
+            "test_2: Expecting %s tag to be based off commit %s", v.identifier, base
+        )
         versions.append((v, base))
 
     di.config.enable_tags = True

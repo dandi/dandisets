@@ -136,11 +136,11 @@ class DandiDatasetter:
                 log.info("Commiting changes")
                 with custom_commit_date(dandiset.version.modified):
                     ds.save(message=syncer.get_commit_message())
-                return True
-            else:
+                syncer.commits += 1
+            elif syncer.commits == 0:
                 log.info("No changes made to repository; deleting logfile")
                 logfile.unlink()
-                return False
+            return syncer.commits > 0
 
     def update_github_metadata(
         self,

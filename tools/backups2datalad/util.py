@@ -70,12 +70,32 @@ class Config:
 
 @dataclass
 class Report:
+    commits: int = 0
     added: int = 0
     updated: int = 0
     downloaded: int = 0
     failed: int = 0
     hash_mismatches: int = 0
     old_unhashed: int = 0
+
+    def update(self, other: Report) -> None:
+        self.commits += other.commits
+        self.added += other.added
+        self.updated += other.updated
+        self.downloaded += other.downloaded
+        self.failed += other.failed
+        self.hash_mismatches += other.hash_mismatches
+        self.old_unhashed += other.old_unhashed
+
+    def get_commit_message(self) -> str:
+        msgparts = []
+        if self.added:
+            msgparts.append(f"{quantify(self.added, 'file')} added")
+        if self.updated:
+            msgparts.append(f"{quantify(self.updated, 'file')} updated")
+        if not msgparts:
+            msgparts.append("Only some metadata updates")
+        return f"[backups2datalad] {', '.join(msgparts)}"
 
     def check(self) -> None:
         errors: List[str] = []

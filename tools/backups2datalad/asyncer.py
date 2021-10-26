@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+from operator import attrgetter
 import os.path
 from pathlib import Path, PurePosixPath
 import sys
@@ -14,6 +16,7 @@ from urllib.parse import urlparse, urlunparse
 from dandi.dandiapi import RemoteAsset, RemoteDandiset
 from dandi.exceptions import NotFoundError
 from dandischema.models import DigestType
+from datalad.api import Dataset
 import httpx
 import trio
 
@@ -25,8 +28,10 @@ from .util import (
     Report,
     TextProcess,
     aiter,
+    custom_commit_date,
     key2hash,
     open_git_annex,
+    quantify,
 )
 
 if sys.version_info[:2] >= (3, 10):
@@ -70,45 +75,45 @@ class Downloader(trio.abc.AsyncResource):
 
     async def aclose(self) -> None:
         await self.annex.aclose()
-        await self.download_sender.aclose()
 
-    async def asset_loop(self, dandiset: RemoteDandiset) -> None:
+    async def asset_loop(self, aia: AsyncIterator[Optional[RemoteAsset]]) -> None:
         now = datetime.now(timezone.utc)
         downloading = True
         async with self.download_sender:
-            async with aclosing(aiterassets(dandiset)) as aia:  # type: ignore[type-var]
-                async for asset in aia:
-                    if downloading:
-                        try:
-                            sha256_digest = asset.get_digest(DigestType.sha2_256)
-                        except NotFoundError:
-                            log.info(
-                                "%s: SHA256 has not been computed yet;"
-                                " not downloading any more assets",
-                                asset.path,
-                            )
-                            downloading = False
-                        else:
-                            assert self.nursery is not None
-                            self.nursery.start_soon(
-                                self.process_asset,
-                                asset,
-                                sha256_digest,
-                                self.download_sender.clone(),
-                                name=f"process_asset:{asset.path}",
-                            )
-                    # Not `else`, as we want to "fall through" if `downloading`
-                    # is negated above.
-                    if not downloading:
-                        log.info("%s: Will download in a future run", asset.path)
-                        self.tracker.mark_future(asset)
-                        if now - asset.created > timedelta(days=1):
-                            log.error(
-                                "%s: Asset created more than a day ago"
-                                " but SHA256 digest has not yet been computed",
-                                asset.path,
-                            )
-                            self.report.old_unhashed += 1
+            async for asset in aia:
+                if asset is None:
+                    break
+                if downloading:
+                    try:
+                        sha256_digest = asset.get_digest(DigestType.sha2_256)
+                    except NotFoundError:
+                        log.info(
+                            "%s: SHA256 has not been computed yet;"
+                            " not downloading any more assets",
+                            asset.path,
+                        )
+                        downloading = False
+                    else:
+                        assert self.nursery is not None
+                        self.nursery.start_soon(
+                            self.process_asset,
+                            asset,
+                            sha256_digest,
+                            self.download_sender.clone(),
+                            name=f"process_asset:{asset.path}",
+                        )
+                # Not `else`, as we want to "fall through" if `downloading`
+                # is negated above.
+                if not downloading:
+                    log.info("%s: Will download in a future run", asset.path)
+                    self.tracker.mark_future(asset)
+                    if now - asset.created > timedelta(days=1):
+                        log.error(
+                            "%s: Asset created more than a day ago"
+                            " but SHA256 digest has not yet been computed",
+                            asset.path,
+                        )
+                        self.report.old_unhashed += 1
 
     async def process_asset(
         self,
@@ -304,33 +309,65 @@ class Downloader(trio.abc.AsyncResource):
 
 
 async def async_assets(
-    dandiset: RemoteDandiset, repo: Path, config: Config, tracker: AssetTracker
+    dandiset: RemoteDandiset, ds: Dataset, config: Config, tracker: AssetTracker
 ) -> Report:
-    async with await open_git_annex(
-        "addurl",
-        "--batch",
-        "--with-files",
-        "--jobs",
-        str(config.jobs),
-        "--json",
-        "--json-error-messages",
-        "--json-progress",
-        "--raw",
-        path=repo,
-    ) as p:
-        async with httpx.AsyncClient() as s3client:
-            async with Downloader(p, repo, config, tracker, s3client) as dm:
-                async with trio.open_nursery() as nursery:
-                    dm.nursery = nursery
-                    nursery.start_soon(dm.asset_loop, dandiset)
-                    nursery.start_soon(dm.feed_addurl)
-                    nursery.start_soon(dm.read_addurl)
-                    nursery.start_soon(dm.postprocess)
-    return dm.report
+    done_flag = trio.Event()
+    total_report = Report()
+    async with aclosing(  # type: ignore[type-var]
+        aiterassets(dandiset, done_flag)
+    ) as aia:
+        while not done_flag.is_set():
+            async with await open_git_annex(
+                "addurl",
+                "--batch",
+                "--with-files",
+                "--jobs",
+                str(config.jobs),
+                "--json",
+                "--json-error-messages",
+                "--json-progress",
+                "--raw",
+                path=ds.pathobj,
+            ) as p:
+                async with httpx.AsyncClient() as s3client:
+                    async with Downloader(
+                        p, ds.pathobj, config, tracker, s3client
+                    ) as dm:
+                        async with trio.open_nursery() as nursery:
+                            dm.nursery = nursery
+                            nursery.start_soon(dm.asset_loop, aia)
+                            nursery.start_soon(dm.feed_addurl)
+                            nursery.start_soon(dm.read_addurl)
+                            nursery.start_soon(dm.postprocess)
+            if dm.report.downloaded:
+                log.info(
+                    "%s downloaded for this version segment; committing",
+                    quantify(dm.report.downloaded, "asset"),
+                )
+                tracker.dump(ds.pathobj)
+                if any(r["state"] != "clean" for r in ds.status()):
+                    log.info("Commiting changes")
+                    with custom_commit_date(dandiset.version.modified):
+                        ds.save(message=dm.report.get_commit_message())
+                    total_report.commits += 1
+            else:
+                log.info(
+                    "No assets downloaded for this version segment; not committing"
+                )
+            total_report.update(dm.report)
+    return total_report
 
 
-async def aiterassets(dandiset: RemoteDandiset) -> AsyncIterator[RemoteAsset]:
+async def aiterassets(
+    dandiset: RemoteDandiset, done_flag: trio.Event
+) -> AsyncIterator[Optional[RemoteAsset]]:
     last_ts: Optional[datetime] = None
+    if dandiset.version_id == "draft":
+        vs = [v for v in dandiset.get_versions() if v.identifier != "draft"]
+        vs.sort(key=attrgetter("created"))
+        versions = deque(vs)
+    else:
+        versions = deque()
     async with httpx.AsyncClient() as client:
         url: Optional[
             str
@@ -351,9 +388,22 @@ async def aiterassets(dandiset: RemoteDandiset) -> AsyncIterator[RemoteAsset]:
                     f" returned after an asset created at {last_ts}!"
                 )
                 last_ts = asset.created
+                if (
+                    versions
+                    and (last_ts is None or last_ts < versions[0].created)
+                    and asset.created >= versions[0].created
+                ):
+                    log.info(
+                        "All assets up to creation of version %s found;"
+                        " will commit soon",
+                        versions[0].identifier,
+                    )
+                    versions.popleft()
+                    yield None
                 yield asset
             url = data.get("next")
     log.info("Finished getting assets from API")
+    done_flag.set()
 
 
 async def asha256(path: Path) -> str:
