@@ -132,15 +132,16 @@ class DandiDatasetter:
                 syncer.sync_assets()
                 syncer.prune_deleted()
                 syncer.dump_asset_metadata()
+            assert syncer.report is not None
             if any(r["state"] != "clean" for r in ds.status()):
                 log.info("Commiting changes")
                 with custom_commit_date(dandiset.version.modified):
                     ds.save(message=syncer.get_commit_message())
-                syncer.commits += 1
-            elif syncer.commits == 0:
+                syncer.report.commits += 1
+            elif syncer.report.commits == 0:
                 log.info("No changes made to repository; deleting logfile")
                 logfile.unlink()
-            return syncer.commits > 0
+            return syncer.report.commits > 0
 
     def update_github_metadata(
         self,

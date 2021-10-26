@@ -342,22 +342,23 @@ async def async_assets(
                             nursery.start_soon(dm.feed_addurl)
                             nursery.start_soon(dm.read_addurl)
                             nursery.start_soon(dm.postprocess)
-            if dm.report.downloaded:
-                log.info(
-                    "%s downloaded for this version segment; committing",
-                    quantify(dm.report.downloaded, "asset"),
-                )
-                tracker.dump(ds.pathobj)
-                if any(r["state"] != "clean" for r in ds.status()):
-                    log.info("Commiting changes")
-                    assert dm.last_timestamp is not None
-                    with custom_commit_date(dm.last_timestamp):
-                        ds.save(message=dm.report.get_commit_message())
-                    total_report.commits += 1
-            else:
-                log.info(
-                    "No assets downloaded for this version segment; not committing"
-                )
+            if dandiset.version_id == "draft":
+                if dm.report.downloaded:
+                    log.info(
+                        "%s downloaded for this version segment; committing",
+                        quantify(dm.report.downloaded, "asset"),
+                    )
+                    tracker.dump(ds.pathobj)
+                    if any(r["state"] != "clean" for r in ds.status()):
+                        log.info("Commiting changes")
+                        assert dm.last_timestamp is not None
+                        with custom_commit_date(dm.last_timestamp):
+                            ds.save(message=dm.report.get_commit_message())
+                        total_report.commits += 1
+                else:
+                    log.info(
+                        "No assets downloaded for this version segment; not committing"
+                    )
             total_report.update(dm.report)
     return total_report
 
