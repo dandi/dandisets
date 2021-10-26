@@ -3,6 +3,7 @@ import logging
 import os
 from pathlib import Path
 import subprocess
+from time import sleep
 from typing import Any, Dict, Iterator, List, Optional
 
 from dandi.consts import dandiset_metadata_file
@@ -250,6 +251,8 @@ def test_2(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
         for vn in dspath.glob("v*.txt"):
             vn.unlink()
             dandiset.get_asset_by_path(vn.name).delete()
+        if i > 1:
+            sleep(2)  # Ensure v{i}.txt has a timestamp after the last version
         (dspath / f"v{i}.txt").write_text(f"Version {i}\n")
         text_dandiset["reupload"]()
         log.info("test_2: Publishing version #%s", i)
@@ -275,6 +278,45 @@ def test_2(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
 
     for v, base in versions:
         assert readgit("rev-parse", f"{v.identifier}^") == base
+
+
+def test_3(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
+    di = DandiDatasetter(
+        dandi_client=text_dandiset["client"],
+        target_path=tmp_path,
+        config=Config(
+            content_url_regex=r".*/blobs/",
+            s3bucket="dandi-api-staging-dandisets",
+            enable_tags=True,
+        ),
+    )
+
+    dandiset_id = text_dandiset["dandiset_id"]
+    dspath = text_dandiset["dspath"]
+    dandiset = text_dandiset["dandiset"]
+
+    def readgit(*args: str) -> str:
+        return readcmd("git", *args, cwd=ds.path)
+
+    for i in range(1, 4):
+        (dspath / "counter.txt").write_text(f"{i}\n")
+        # for vn in dspath.glob("v*.txt"):
+        #    vn.unlink()
+        #    dandiset.get_asset_by_path(vn.name).delete()
+        if i > 1:
+            sleep(2)  # Ensure v{i}.txt has a timestamp after the last version
+        (dspath / f"v{i}.txt").write_text(f"Version {i}\n")
+        text_dandiset["reupload"]()
+        log.info("test_3: Publishing version #%s", i)
+        dandiset.wait_until_valid(65)
+        dandiset.publish().version
+
+    log.info("test_3: Creating backup of Dandiset")
+    di.update_from_backup([dandiset_id])
+    ds = Dataset(tmp_path / dandiset_id)
+
+    # for v, base in versions:
+    #    assert readgit("rev-parse", f"{v.identifier}^") == base
 
 
 def test_custom_commit_date(tmp_path: Path) -> None:

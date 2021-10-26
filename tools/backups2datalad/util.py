@@ -184,11 +184,9 @@ class AssetTracker:
     #: Paths of files found when the syncing started, minus the paths for any
     #: assets downloaded during syncing
     local_assets: Set[str]
-    #: Metadata of assets downloaded during the sync
-    asset_metadata: List[dict] = field(init=False, default_factory=list)
-    #: Asset metadata from previous sync, as a mapping from asset paths to
-    #: metadata
-    saved_metadata: Dict[str, dict]
+    #: Asset metadata from previous sync, plus metadata for any assets
+    #: downloaded during the sync, as a mapping from asset paths to metadata
+    asset_metadata: Dict[str, dict]
     #: Paths of assets that are not being downloaded this run due to a lack of
     #: SHA256 digests
     future_assets: Set[str] = field(init=False, default_factory=set)
@@ -196,7 +194,7 @@ class AssetTracker:
     @classmethod
     def from_dataset(cls, dspath: Path) -> AssetTracker:
         local_assets = set(dataset_files(dspath))
-        saved_metadata: Dict[str, dict] = {}
+        asset_metadata: Dict[str, dict] = {}
         try:
             with (dspath / ".dandi" / "assets.json").open() as fp:
                 for md in json.load(fp):
@@ -204,39 +202,36 @@ class AssetTracker:
                         # Old version of assets.json; ignore
                         pass
                     else:
-                        saved_metadata[md["path"].lstrip("/")] = md
+                        asset_metadata[md["path"].lstrip("/")] = md
         except FileNotFoundError:
             pass
-        return cls(local_assets=local_assets, saved_metadata=saved_metadata)
+        return cls(local_assets=local_assets, asset_metadata=asset_metadata)
 
     def register_asset(self, asset: RemoteAsset, force: Optional[str]) -> bool:
         # Returns True if the asset's metadata is unchanged since the last sync
         self.local_assets.discard(asset.path)
         adict = asset2dict(asset)
-        self.asset_metadata.append(adict)
-        return force != "check" and adict == self.saved_metadata.get(asset.path)
+        if adict == self.asset_metadata.get(asset.path):
+            return force != "check"
+        else:
+            self.asset_metadata[asset.path] = adict
+            return False
 
     def mark_future(self, asset: RemoteAsset) -> None:
         self.future_assets.add(asset.path)
 
     def get_deleted(self, config: Config) -> Iterator[str]:
         """
-        Yields paths of deleted assets while also adding saved metadata for
-        future assets to the tracked asset metadata
+        Yields paths of deleted assets and removes their metadata from
+        `asset_metadata`
         """
         for apath in self.local_assets:
-            if not config.match_asset(apath):
-                pass
-            elif apath in self.future_assets:
-                try:
-                    self.asset_metadata.append(self.saved_metadata[apath])
-                except KeyError:
-                    pass
-            else:
+            if config.match_asset(apath):
+                del self.asset_metadata[apath]
                 yield apath
 
     def dump(self, dspath: Path) -> None:
-        dump(self.asset_metadata, dspath / ".dandi" / "assets.json")
+        dump(list(self.asset_metadata.values()), dspath / ".dandi" / "assets.json")
 
     @property
     def future_qty(self) -> int:

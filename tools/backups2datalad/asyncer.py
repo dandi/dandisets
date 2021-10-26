@@ -55,6 +55,7 @@ class Downloader(trio.abc.AsyncResource):
     config: Config
     tracker: AssetTracker
     s3client: httpx.AsyncClient
+    last_timestamp: Optional[datetime] = None
     nursery: Optional[trio.Nursery] = None
     report: Report = field(init=False, default_factory=Report)
     in_progress: Dict[str, ToDownload] = field(init=False, default_factory=dict)
@@ -122,6 +123,8 @@ class Downloader(trio.abc.AsyncResource):
         sender: trio.MemorySendChannel[ToDownload],
     ) -> None:
         async with sender:
+            if self.last_timestamp is None or self.last_timestamp < asset.created:
+                self.last_timestamp = asset.created
             dest = self.repo / asset.path
             if self.tracker.register_asset(asset, force=self.config.force):
                 log.debug(
@@ -347,7 +350,8 @@ async def async_assets(
                 tracker.dump(ds.pathobj)
                 if any(r["state"] != "clean" for r in ds.status()):
                     log.info("Commiting changes")
-                    with custom_commit_date(dandiset.version.modified):
+                    assert dm.last_timestamp is not None
+                    with custom_commit_date(dm.last_timestamp):
                         ds.save(message=dm.report.get_commit_message())
                     total_report.commits += 1
             else:
@@ -387,7 +391,6 @@ async def aiterassets(
                     f"Asset {asset.path} created at {asset.created} but"
                     f" returned after an asset created at {last_ts}!"
                 )
-                last_ts = asset.created
                 if (
                     versions
                     and (last_ts is None or last_ts < versions[0].created)
@@ -400,6 +403,7 @@ async def aiterassets(
                     )
                     versions.popleft()
                     yield None
+                last_ts = asset.created
                 yield asset
             url = data.get("next")
     log.info("Finished getting assets from API")
