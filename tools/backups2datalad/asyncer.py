@@ -330,6 +330,7 @@ async def async_assets(
 
 
 async def aiterassets(dandiset: RemoteDandiset) -> AsyncIterator[RemoteAsset]:
+    last_ts: Optional[datetime] = None
     async with httpx.AsyncClient() as client:
         url: Optional[
             str
@@ -344,7 +345,13 @@ async def aiterassets(dandiset: RemoteDandiset) -> AsyncIterator[RemoteAsset]:
                 )
                 r.raise_for_status()
                 metadata = r.json()
-                yield RemoteAsset.from_data(dandiset, item, metadata)
+                asset = RemoteAsset.from_data(dandiset, item, metadata)
+                assert last_ts is None or last_ts <= asset.created, (
+                    f"Asset {asset.path} created at {asset.created} but"
+                    f" returned after an asset created at {last_ts}!"
+                )
+                last_ts = asset.created
+                yield asset
             url = data.get("next")
     log.info("Finished getting assets from API")
 
