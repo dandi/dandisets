@@ -169,7 +169,7 @@ def release(
     push: bool,
 ) -> None:
     dandiset_obj = datasetter.dandi_client.get_dandiset(dandiset, version)
-    dataset = Dataset(str(datasetter.target_path / dandiset))
+    dataset = Dataset(datasetter.target_path / dandiset)
     datasetter.mkrelease(dandiset_obj, dataset, commitish=commitish, push=push)
     if push:
         dataset.push(to="github", jobs=datasetter.config.jobs)

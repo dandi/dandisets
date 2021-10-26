@@ -93,10 +93,9 @@ def text_dandiset(
 
 def test_1(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
     # TODO: move pre-setup into a fixture, e.g. local_setup1 or make code work without?
-    target_path = tmp_path / "target"
     di = DandiDatasetter(
         dandi_client=text_dandiset["client"],
-        target_path=target_path,
+        target_path=tmp_path,
         config=Config(
             # gh_org=None,
             # re_filter=None,
@@ -111,7 +110,7 @@ def test_1(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
     with pytest.raises(Exception):
         log.info("test_1: Testing sync of nonexistent Dandiset")
         di.update_from_backup(["999999"])
-    assert not (target_path / "999999").exists()
+    assert not (tmp_path / "999999").exists()
 
     # Since we are using text_dandiset, that immediately creates us a dandiset
     # TODO: may be separate it out, so we could start "clean" and still work ok
@@ -124,7 +123,7 @@ def test_1(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
     di.update_from_backup([dandiset_id])
 
     ds = Dataset(
-        target_path / text_dandiset["dandiset_id"]
+        tmp_path / text_dandiset["dandiset_id"]
     )  # but we should get the super-dataset?
     assert_repo_status(ds.path)  # that all is clean etc
     ok_file_under_git(ds.path, "file.txt")
@@ -225,10 +224,9 @@ def test_1(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
 
 
 def test_2(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
-    target_path = tmp_path / "target"
     di = DandiDatasetter(
         dandi_client=text_dandiset["client"],
-        target_path=target_path,
+        target_path=tmp_path,
         config=Config(
             content_url_regex=r".*/blobs/",
             s3bucket="dandi-api-staging-dandisets",
@@ -241,7 +239,7 @@ def test_2(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
     dandiset = text_dandiset["dandiset"]
     log.info("test_2: Creating new backup of Dandiset")
     di.update_from_backup([dandiset_id])
-    ds = Dataset(target_path / dandiset_id)
+    ds = Dataset(tmp_path / dandiset_id)
 
     def readgit(*args: str) -> str:
         return readcmd("git", *args, cwd=ds.path)
@@ -280,7 +278,7 @@ def test_2(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
 
 
 def test_custom_commit_date(tmp_path: Path) -> None:
-    ds = Dataset(str(tmp_path))
+    ds = Dataset(tmp_path)
     ds.create(cfg_proc="text2git")
     (tmp_path / "file.txt").write_text("This is test text.\n")
     with custom_commit_date(datetime(2021, 6, 1, 12, 34, 56, tzinfo=timezone.utc)):
