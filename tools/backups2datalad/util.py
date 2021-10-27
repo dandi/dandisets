@@ -112,11 +112,21 @@ class TextProcess(trio.abc.AsyncResource):
             )
 
     async def send(self, s: str) -> None:
+        if self.p.returncode is not None:
+            raise RuntimeError(
+                f"git-annex {self.name} command suddenly exited with return"
+                f" code {self.p.returncode}!"
+            )
         assert self.p.stdin is not None
         log.log(DEEP_DEBUG, "Sending to %s command: %r", self.name, s)
         await self.p.stdin.send_all(s.encode(self.encoding))
 
     async def readline(self) -> str:
+        if self.p.returncode is not None:
+            raise RuntimeError(
+                f"git-annex {self.name} command suddenly exited with return"
+                f" code {self.p.returncode}!"
+            )
         assert self.p.stdout is not None
         while True:
             try:
