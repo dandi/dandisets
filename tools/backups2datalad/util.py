@@ -101,15 +101,15 @@ class Report:
     def check(self) -> None:
         errors: List[str] = []
         if self.failed:
-            errors.append(f"{quantify(self.failed, 'assets')} failed to download")
+            errors.append(f"{quantify(self.failed, 'asset')} failed to download")
         if self.hash_mismatches:
             errors.append(
-                f"{quantify(self.hash_mismatches, 'assets')} had the wrong hash"
+                f"{quantify(self.hash_mismatches, 'asset')} had the wrong hash"
                 " after downloading"
             )
         if self.old_unhashed:
             errors.append(
-                f"{quantify(self.old_unhashed, 'assets')} on server had no"
+                f"{quantify(self.old_unhashed, 'asset')} on server had no"
                 " SHA256 hash despite advanced age"
             )
         if errors:
