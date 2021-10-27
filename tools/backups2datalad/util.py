@@ -12,6 +12,7 @@ import re
 import shlex
 import subprocess
 import sys
+import textwrap
 from types import TracebackType
 from typing import (
     Any,
@@ -112,7 +113,9 @@ class Report:
                 " SHA256 hash despite advanced age"
             )
         if errors:
-            raise RuntimeError("Errors occured while downloading: {'; '.join(errors)}")
+            raise RuntimeError(
+                f"Errors occurred while downloading: {'; '.join(errors)}"
+            )
 
 
 @dataclass
@@ -352,3 +355,12 @@ async def open_git_annex(*args: str, path: Optional[Path] = None) -> TextProcess
         cwd=str(path),  # trio-typing says this has to be a string.
     )
     return TextProcess(p, name=args[0])
+
+
+def format_errors(messages: List[str]) -> str:
+    if not messages:
+        return " <no error message>"
+    elif len(messages) == 1:
+        return " " + messages[0]
+    else:
+        return "\n\n" + textwrap.indent("".join(messages), " " * 4) + "\n"

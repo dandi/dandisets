@@ -2,13 +2,12 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 import json
 from pathlib import Path
-import textwrap
 from typing import Dict, List, Optional
 
 import trio
 
 from . import log
-from .util import TextProcess, open_git_annex
+from .util import TextProcess, format_errors, open_git_annex
 
 
 @dataclass
@@ -43,10 +42,10 @@ class AsyncAnnex(trio.abc.AsyncResource):
             r = json.loads(await self.pfromkey.readline())
         if not r["success"]:
             log.error(
-                "`git annex fromkey %s %s` call failed!  Error messages:\n\n%s",
+                "`git annex fromkey %s %s` call failed:%s",
                 key,
                 path,
-                textwrap.indent("".join(r["error-messages"]), " " * 4),
+                format_errors(r["error-messages"]),
             )
             ### TODO: Raise an exception?
 

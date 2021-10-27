@@ -9,7 +9,6 @@ from operator import attrgetter
 import os.path
 from pathlib import Path, PurePosixPath
 import sys
-import textwrap
 from typing import AsyncIterator, Dict, List, Optional, Tuple
 from urllib.parse import urlparse, urlunparse
 
@@ -29,6 +28,7 @@ from .util import (
     TextProcess,
     aiter,
     custom_commit_date,
+    format_errors,
     key2hash,
     open_git_annex,
     quantify,
@@ -253,9 +253,9 @@ class Downloader(trio.abc.AsyncResource):
                         )
                     elif not data["success"]:
                         log.error(
-                            "%s: download failed; error messages:\n\n%s",
+                            "%s: download failed:%s",
                             data["file"],
-                            textwrap.indent("".join(data["error-messages"]), " " * 4),
+                            format_errors(data["error-messages"]),
                         )
                         self.in_progress.pop(data["file"])
                         self.report.failed += 1
