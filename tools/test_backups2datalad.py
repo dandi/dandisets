@@ -225,6 +225,12 @@ def test_1(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
 
 
 def test_2(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
+    """
+    Test of adding in version-tagging after backups have already been taken.
+
+    This test creates several versions, takes a backup after each one with
+    tagging disabled, and then takes another backup with tagging re-enabled.
+    """
     di = DandiDatasetter(
         dandi_client=text_dandiset["client"],
         target_path=tmp_path,
@@ -254,6 +260,7 @@ def test_2(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
         if i > 1:
             sleep(2)  # Ensure v{i}.txt has a timestamp after the last version
         (dspath / f"v{i}.txt").write_text(f"Version {i}\n")
+        # (dspath / f"w{i}.txt").write_text(f"Version {i}\n")
         text_dandiset["reupload"]()
         log.info("test_2: Publishing version #%s", i)
         dandiset.wait_until_valid(65)
@@ -281,6 +288,11 @@ def test_2(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
 
 
 def test_3(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
+    """
+    Test of "debouncing" (GH-89, GH-97).
+
+    This test creates several versions and takes a backup afterwards.
+    """
     di = DandiDatasetter(
         dandi_client=text_dandiset["client"],
         target_path=tmp_path,
@@ -290,33 +302,73 @@ def test_3(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
             enable_tags=True,
         ),
     )
-
     dandiset_id = text_dandiset["dandiset_id"]
     dspath = text_dandiset["dspath"]
     dandiset = text_dandiset["dandiset"]
-
-    def readgit(*args: str) -> str:
-        return readcmd("git", *args, cwd=ds.path)
-
+    versions = []
     for i in range(1, 4):
         (dspath / "counter.txt").write_text(f"{i}\n")
-        # for vn in dspath.glob("v*.txt"):
-        #    vn.unlink()
-        #    dandiset.get_asset_by_path(vn.name).delete()
+        for vn in dspath.glob("v*.txt"):
+            vn.unlink()
+            dandiset.get_asset_by_path(vn.name).delete()
         if i > 1:
             sleep(2)  # Ensure v{i}.txt has a timestamp after the last version
         (dspath / f"v{i}.txt").write_text(f"Version {i}\n")
+        # (dspath / f"w{i}.txt").write_text(f"Version {i}\n")
         text_dandiset["reupload"]()
         log.info("test_3: Publishing version #%s", i)
         dandiset.wait_until_valid(65)
-        dandiset.publish().version
-
+        versions.append(dandiset.publish().version)
     log.info("test_3: Creating backup of Dandiset")
     di.update_from_backup([dandiset_id])
-    ds = Dataset(tmp_path / dandiset_id)
+    for v in versions:
+        r = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", f"{v.identifier}^", DEFAULT_BRANCH],
+            cwd=tmp_path / dandiset_id,
+        )
+        assert (
+            r.returncode == 0
+        ), f"Tag is more than one commit off of {DEFAULT_BRANCH} branch"
 
-    # for v, base in versions:
-    #    assert readgit("rev-parse", f"{v.identifier}^") == base
+
+def test_4(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
+    """
+    This test creates several versions and takes a backup after each one.
+    """
+    di = DandiDatasetter(
+        dandi_client=text_dandiset["client"],
+        target_path=tmp_path,
+        config=Config(
+            content_url_regex=r".*/blobs/",
+            s3bucket="dandi-api-staging-dandisets",
+            enable_tags=True,
+        ),
+    )
+    dandiset_id = text_dandiset["dandiset_id"]
+    dspath = text_dandiset["dspath"]
+    dandiset = text_dandiset["dandiset"]
+    for i in range(1, 4):
+        (dspath / "counter.txt").write_text(f"{i}\n")
+        for vn in dspath.glob("v*.txt"):
+            vn.unlink()
+            dandiset.get_asset_by_path(vn.name).delete()
+        if i > 1:
+            sleep(2)  # Ensure v{i}.txt has a timestamp after the last version
+        (dspath / f"v{i}.txt").write_text(f"Version {i}\n")
+        # (dspath / f"w{i}.txt").write_text(f"Version {i}\n")
+        text_dandiset["reupload"]()
+        log.info("test_4: Publishing version #%s", i)
+        dandiset.wait_until_valid(65)
+        v = dandiset.publish().version
+        log.info("test_4: Creating backup of Dandiset")
+        di.update_from_backup([dandiset_id])
+        r = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", f"{v.identifier}^", DEFAULT_BRANCH],
+            cwd=tmp_path / dandiset_id,
+        )
+        assert (
+            r.returncode == 0
+        ), f"Tag is more than one commit off of {DEFAULT_BRANCH} branch"
 
 
 def test_custom_commit_date(tmp_path: Path) -> None:

@@ -311,7 +311,7 @@ class DandiDatasetter:
                 " syncing",
                 dandiset.version_id,
             )
-            git("checkout", "-b", f"release-{dandiset.version_id}", candidates[-1])
+            git("checkout", "-b", f"release-{dandiset.version_id}", candidates[0])
             self.sync_dataset(dandiset, ds)
         with envset("GIT_COMMITTER_NAME", "DANDI User"):
             with envset("GIT_COMMITTER_EMAIL", "info@dandiarchive.org"):
