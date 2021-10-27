@@ -268,12 +268,16 @@ def test_2(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
     log.info("test_2: Updating backup, now with release-tagging enabled")
     di.update_from_backup([dandiset_id])
 
-    for v, base in versions:
+    for i, (v, base) in enumerate(versions, start=1):
         assert (
             repo.get_commit_subject(v.identifier)
             == "[backups2datalad] dandiset.yaml updated"
         )
         assert repo.get_commitish_hash(f"{v.identifier}^") == base
+        if i < len(versions):
+            assert not repo.is_ancestor(v.identifier, DEFAULT_BRANCH)
+        else:
+            assert repo.is_ancestor(v.identifier, DEFAULT_BRANCH)
 
 
 def test_3(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
@@ -309,14 +313,46 @@ def test_3(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
         text_dandiset["reupload"]()
         log.info("test_3: Publishing version #%s", i)
         dandiset.wait_until_valid(65)
-        versions.append(dandiset.publish().version)
+        if i < 3:
+            status = {
+                ".dandi/assets.json": "M",
+                "counter.txt": "A",
+                "dandiset.yaml": "M",
+                f"v{i}.txt": "A",
+            }
+        else:
+            status = {"dandiset.yaml": "M"}
+        versions.append((dandiset.publish().version, status))
     log.info("test_3: Creating backup of Dandiset")
     di.update_from_backup([dandiset_id])
     repo = GitRepo(tmp_path / dandiset_id)
-    for v in versions:
+    for i, (v, status) in enumerate(versions, start=1):
         assert repo.parent_is_ancestor(
             v.identifier, DEFAULT_BRANCH
         ), f"Tag is more than one commit off of {DEFAULT_BRANCH} branch"
+        if i < len(versions):
+            assert (
+                repo.get_commit_subject(v.identifier)
+                == "[backups2datalad] 2 files added"
+            )
+            assert not repo.is_ancestor(v.identifier, DEFAULT_BRANCH)
+        else:
+            assert (
+                repo.get_commit_subject(v.identifier)
+                == "[backups2datalad] dandiset.yaml updated"
+            )
+            assert repo.is_ancestor(v.identifier, DEFAULT_BRANCH)
+        assert repo.get_diff_tree(v.identifier) == status
+
+    # Assert each (non-merge) backup commit on the default branch is a parent
+    # of a tag (except the last one, which *is* a tag).
+    our_commits = repo.readcmd(
+        "log", r"--grep=\[backups2datalad\]", "--format=%H"
+    ).splitlines()
+    assert len(our_commits) == len(versions) + 1
+    for c, (v, _) in zip(reversed(our_commits), versions):
+        assert repo.get_commitish_hash(f"{v.identifier}^") == c
+    assert our_commits[0] == repo.get_commitish_hash(versions[-1][0].identifier)
 
 
 def test_4(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
@@ -336,7 +372,6 @@ def test_4(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
     dspath = text_dandiset["dspath"]
     dandiset = text_dandiset["dandiset"]
     repo = GitRepo(tmp_path / dandiset_id)
-
     for i in range(1, 4):
         (dspath / "counter.txt").write_text(f"{i}\n")
         for vn in dspath.glob("v*.txt"):
@@ -361,6 +396,7 @@ def test_4(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
         assert repo.parent_is_ancestor(
             v.identifier, DEFAULT_BRANCH
         ), f"Tag is more than one commit off of {DEFAULT_BRANCH} branch"
+        assert repo.is_ancestor(v.identifier, DEFAULT_BRANCH)
 
 
 def test_custom_commit_date(tmp_path: Path) -> None:

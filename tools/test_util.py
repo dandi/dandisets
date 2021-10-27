@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 import subprocess
-from typing import Any, List, Union
+from typing import Any, Dict, List, Union
 
 
 @dataclass
@@ -61,4 +61,14 @@ class GitRepo:
         return self.readcmd("show", f"{treeish}:{path}")
 
     def get_tags(self) -> List[str]:
-        return self.readcmd("tag", "-l").splitlines()
+        return self.readcmd("tag", "-l", "--sort=creatordate").splitlines()
+
+    def get_diff_tree(self, commitish: str) -> Dict[str, str]:
+        stat = self.readcmd(
+            "diff-tree", "--no-commit-id", "--name-status", "-r", commitish
+        )
+        status: Dict[str, str] = {}
+        for line in stat.splitlines():
+            sym, _, path = line.partition("\t")
+            status[path] = sym
+        return status
