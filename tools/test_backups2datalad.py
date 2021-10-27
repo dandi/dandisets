@@ -260,7 +260,9 @@ def test_2(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
         if i > 1:
             sleep(2)  # Ensure v{i}.txt has a timestamp after the last version
         (dspath / f"v{i}.txt").write_text(f"Version {i}\n")
-        # (dspath / f"w{i}.txt").write_text(f"Version {i}\n")
+        # Something goes wrong with the download if v{i} and w{i} have the same
+        # content.
+        (dspath / f"w{i}.txt").write_text(f"Wersion {i}\n")
         text_dandiset["reupload"]()
         log.info("test_2: Publishing version #%s", i)
         dandiset.wait_until_valid(65)
@@ -284,6 +286,10 @@ def test_2(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
     di.update_from_backup([dandiset_id])
 
     for v, base in versions:
+        assert (
+            readgit("show", "-s", "--format=%s", f"{v.identifier}^{{commit}}")
+            == "[backups2datalad] dandiset.yaml updated"
+        )
         assert readgit("rev-parse", f"{v.identifier}^") == base
 
 
@@ -314,7 +320,9 @@ def test_3(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
         if i > 1:
             sleep(2)  # Ensure v{i}.txt has a timestamp after the last version
         (dspath / f"v{i}.txt").write_text(f"Version {i}\n")
-        # (dspath / f"w{i}.txt").write_text(f"Version {i}\n")
+        # Something goes wrong with the download if v{i} and w{i} have the same
+        # content.
+        (dspath / f"w{i}.txt").write_text(f"Wersion {i}\n")
         text_dandiset["reupload"]()
         log.info("test_3: Publishing version #%s", i)
         dandiset.wait_until_valid(65)
@@ -347,6 +355,10 @@ def test_4(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
     dandiset_id = text_dandiset["dandiset_id"]
     dspath = text_dandiset["dspath"]
     dandiset = text_dandiset["dandiset"]
+
+    def readgit(*args: str) -> str:
+        return readcmd("git", *args, cwd=tmp_path / dandiset_id)
+
     for i in range(1, 4):
         (dspath / "counter.txt").write_text(f"{i}\n")
         for vn in dspath.glob("v*.txt"):
@@ -355,13 +367,19 @@ def test_4(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
         if i > 1:
             sleep(2)  # Ensure v{i}.txt has a timestamp after the last version
         (dspath / f"v{i}.txt").write_text(f"Version {i}\n")
-        # (dspath / f"w{i}.txt").write_text(f"Version {i}\n")
+        # Something goes wrong with the download if v{i} and w{i} have the same
+        # content.
+        (dspath / f"w{i}.txt").write_text(f"Wersion {i}\n")
         text_dandiset["reupload"]()
         log.info("test_4: Publishing version #%s", i)
         dandiset.wait_until_valid(65)
         v = dandiset.publish().version
         log.info("test_4: Creating backup of Dandiset")
         di.update_from_backup([dandiset_id])
+        assert (
+            readgit("show", "-s", "--format=%s", f"{v.identifier}^{{commit}}")
+            == "[backups2datalad] dandiset.yaml updated"
+        )
         r = subprocess.run(
             ["git", "merge-base", "--is-ancestor", f"{v.identifier}^", DEFAULT_BRANCH],
             cwd=tmp_path / dandiset_id,
