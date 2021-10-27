@@ -2,7 +2,6 @@ from datetime import datetime, timezone
 import logging
 import os
 from pathlib import Path
-import subprocess
 from time import sleep
 from typing import Any, Dict, Iterator, List, Optional
 
@@ -13,10 +12,11 @@ from dandi.utils import yaml_load
 from datalad.api import Dataset
 from datalad.tests.utils import assert_repo_status, ok_file_under_git
 import pytest
+from test_util import GitRepo
 
 from backups2datalad import DEFAULT_BRANCH
 from backups2datalad.datasetter import DandiDatasetter
-from backups2datalad.util import Config, custom_commit_date, readcmd
+from backups2datalad.util import Config, custom_commit_date
 
 log = logging.getLogger("test_backups2datalad")
 
@@ -138,45 +138,28 @@ def test_1(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
     assert_repo_status(ds.path)  # that all is clean etc
     assert (ds.pathobj / "new.txt").read_text() == "This is a new file.\n"
 
-    def readgit(*args: str) -> str:
-        return readcmd("git", *args, cwd=ds.path)
+    repo = GitRepo(ds.path)
 
     def check_version_tag(v: Version) -> None:
         vid = v.identifier
 
         # Assert tag has correct timestamp
-        tag_ts = readgit(
-            "for-each-ref", "--format=%(creatordate:iso-strict)", f"refs/tags/{vid}"
-        )
-        assert tag_ts == v.created.isoformat(timespec="seconds")
+        assert repo.get_tag_date(vid) == v.created.isoformat(timespec="seconds")
 
         # Assert tag has correct committer
-        tag_creator = readgit("for-each-ref", "--format=%(creator)", f"refs/tags/{vid}")
-        assert tag_creator.startswith("DANDI User <info@dandiarchive.org>")
+        assert repo.get_tag_creator(vid) == "DANDI User <info@dandiarchive.org>"
 
         # Assert tagged commit has correct timestamp
-        cmd_ts = readgit("show", "-s", "--format=%aI", f"{vid}^{{commit}}")
-        assert cmd_ts == v.created.isoformat(timespec="seconds")
+        assert repo.get_commit_date(vid) == v.created.isoformat(timespec="seconds")
 
         # Assert that tag was merged into default branch
-        assert (
-            subprocess.run(
-                ["git", "merge-base", "--is-ancestor", vid, DEFAULT_BRANCH], cwd=ds.path
-            ).returncode
-            == 0
-        )
+        assert repo.is_ancestor(vid, DEFAULT_BRANCH)
 
         # Assert tag branches from default branch
-        assert (
-            subprocess.run(
-                ["git", "merge-base", "--is-ancestor", f"{DEFAULT_BRANCH}^", vid],
-                cwd=ds.path,
-            ).returncode
-            == 0
-        )
+        assert repo.parent_is_ancestor(DEFAULT_BRANCH, vid)
 
         # Assert dandiset.yaml in tagged commit has doi
-        metadata = yaml_load(readgit("show", f"{vid}:{dandiset_metadata_file}"))
+        metadata = yaml_load(repo.get_blob(vid, dandiset_metadata_file))
         assert metadata.get("doi")
 
     log.info("test_1: Waiting for Dandiset to become valid")
@@ -218,7 +201,9 @@ def test_1(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
     assert version2 in tags
     check_version_tag(v2)
 
-    commit_authors = readgit("log", "--no-merges", "--format=%an <%ae>").splitlines()
+    commit_authors = repo.readcmd(
+        "log", "--no-merges", "--format=%an <%ae>"
+    ).splitlines()
     assert commit_authors == ["DANDI User <info@dandiarchive.org>"] * len(
         commit_authors
     )
@@ -246,10 +231,8 @@ def test_2(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
     dandiset = text_dandiset["dandiset"]
     log.info("test_2: Creating new backup of Dandiset")
     di.update_from_backup([dandiset_id])
-    ds = Dataset(tmp_path / dandiset_id)
-
-    def readgit(*args: str) -> str:
-        return readcmd("git", *args, cwd=ds.path)
+    backupdir = tmp_path / dandiset_id
+    repo = GitRepo(backupdir)
 
     versions = []
     for i in range(1, 4):
@@ -271,11 +254,11 @@ def test_2(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
             "test_2: Updating backup (release-tagging disabled) for version #%s", i
         )
         di.update_from_backup([dandiset_id])
-        assert readgit("tag") == ""
-        assert (ds.pathobj / "counter.txt").read_text() == f"{i}\n"
-        assert list(dspath.glob("v*.txt")) == [dspath / f"v{i}.txt"]
-        assert (dspath / f"v{i}.txt").read_text() == f"Version {i}\n"
-        base = readgit("show", "-s", "--format=%H", "HEAD")
+        assert repo.get_tags() == []
+        assert (backupdir / "counter.txt").read_text() == f"{i}\n"
+        assert list(backupdir.glob("v*.txt")) == [backupdir / f"v{i}.txt"]
+        assert (backupdir / f"v{i}.txt").read_text() == f"Version {i}\n"
+        base = repo.get_commitish_hash("HEAD")
         log.info(
             "test_2: Expecting %s tag to be based off commit %s", v.identifier, base
         )
@@ -287,10 +270,10 @@ def test_2(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
 
     for v, base in versions:
         assert (
-            readgit("show", "-s", "--format=%s", f"{v.identifier}^{{commit}}")
+            repo.get_commit_subject(v.identifier)
             == "[backups2datalad] dandiset.yaml updated"
         )
-        assert readgit("rev-parse", f"{v.identifier}^") == base
+        assert repo.get_commitish_hash(f"{v.identifier}^") == base
 
 
 def test_3(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
@@ -329,13 +312,10 @@ def test_3(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
         versions.append(dandiset.publish().version)
     log.info("test_3: Creating backup of Dandiset")
     di.update_from_backup([dandiset_id])
+    repo = GitRepo(tmp_path / dandiset_id)
     for v in versions:
-        r = subprocess.run(
-            ["git", "merge-base", "--is-ancestor", f"{v.identifier}^", DEFAULT_BRANCH],
-            cwd=tmp_path / dandiset_id,
-        )
-        assert (
-            r.returncode == 0
+        assert repo.parent_is_ancestor(
+            v.identifier, DEFAULT_BRANCH
         ), f"Tag is more than one commit off of {DEFAULT_BRANCH} branch"
 
 
@@ -355,9 +335,7 @@ def test_4(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
     dandiset_id = text_dandiset["dandiset_id"]
     dspath = text_dandiset["dspath"]
     dandiset = text_dandiset["dandiset"]
-
-    def readgit(*args: str) -> str:
-        return readcmd("git", *args, cwd=tmp_path / dandiset_id)
+    repo = GitRepo(tmp_path / dandiset_id)
 
     for i in range(1, 4):
         (dspath / "counter.txt").write_text(f"{i}\n")
@@ -377,15 +355,11 @@ def test_4(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
         log.info("test_4: Creating backup of Dandiset")
         di.update_from_backup([dandiset_id])
         assert (
-            readgit("show", "-s", "--format=%s", f"{v.identifier}^{{commit}}")
+            repo.get_commit_subject(v.identifier)
             == "[backups2datalad] dandiset.yaml updated"
         )
-        r = subprocess.run(
-            ["git", "merge-base", "--is-ancestor", f"{v.identifier}^", DEFAULT_BRANCH],
-            cwd=tmp_path / dandiset_id,
-        )
-        assert (
-            r.returncode == 0
+        assert repo.parent_is_ancestor(
+            v.identifier, DEFAULT_BRANCH
         ), f"Tag is more than one commit off of {DEFAULT_BRANCH} branch"
 
 
@@ -395,9 +369,6 @@ def test_custom_commit_date(tmp_path: Path) -> None:
     (tmp_path / "file.txt").write_text("This is test text.\n")
     with custom_commit_date(datetime(2021, 6, 1, 12, 34, 56, tzinfo=timezone.utc)):
         ds.save(message="Add a file")
-    about = readcmd("git", "show", "-s", "--format=%aI%n%an%n%ae", "HEAD", cwd=tmp_path)
-    assert about.splitlines() == [
-        "2021-06-01T12:34:56+00:00",
-        "DANDI User",
-        "info@dandiarchive.org",
-    ]
+    repo = GitRepo(tmp_path)
+    assert repo.get_commit_date("HEAD") == "2021-06-01T12:34:56+00:00"
+    assert repo.get_commit_author("HEAD") == "DANDI User <info@dandiarchive.org>"
