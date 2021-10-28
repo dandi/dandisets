@@ -50,10 +50,23 @@ jobs:
         if: matrix.python-version == '3.9'
         run: sudo apt-get update && sudo apt-get install -y libhdf5-dev
 
-      - name: Run tests
-        run: nox -e ${{ matrix.noxenv }}
+      - name: Run tests with coverage
+        if: matrix.noxenv == 'test'
+        run: nox -e test -- --cov-report=xml
         working-directory: tools
         env:
           DANDI_API_KEY: ${{ secrets.DANDI_API_KEY }}
+
+      - name: Run generic tests
+        if: matrix.noxenv != 'test'
+        run: nox -e ${{ matrix.noxenv }}
+        working-directory: tools
+
+      - name: Upload coverage to Codecov
+        if: matrix.noxenv == 'test'
+        uses: codecov/codecov-action@v2
+        with:
+          fail_ci_if_error: false
+          files: tools/coverage.xml
 
 # vim:set et sts=2:

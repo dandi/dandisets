@@ -17,6 +17,6 @@ def typing(session):
 @nox.session
 def test(session):
     session.install("-r", "backups2datalad.req.txt")
-    session.install("pytest")
+    session.install("pytest", "pytest-cov")
     session.install("datalad[tests]")
     session.run("pytest", *session.posargs, "test_backups2datalad.py")
