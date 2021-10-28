@@ -40,7 +40,12 @@ from .util import Config, pdb_excepthook
     help="How many parallel jobs to use when downloading and pushing",
     show_default=True,
 )
-@click.option("-f", "--force", type=click.Choice(["check"]))
+@click.option(
+    "-f",
+    "--force",
+    type=click.Choice(["check"]),
+    help="Force all assets to be updated, even those whose metadata hasn't changed",
+)
 @click.option(
     "-l",
     "--log-level",
