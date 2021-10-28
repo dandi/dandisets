@@ -202,8 +202,7 @@ class AssetTracker:
             with (dspath / ".dandi" / "assets.json").open() as fp:
                 for md in json.load(fp):
                     if isinstance(md, str):
-                        # Old version of assets.json; ignore
-                        pass
+                        raise RuntimeError(f"Old assets.json format found in {dspath}")
                     else:
                         asset_metadata[md["path"].lstrip("/")] = md
         except FileNotFoundError:
