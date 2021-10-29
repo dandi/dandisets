@@ -1,8 +1,9 @@
 *.pyc
 *.pyo
 *.swp
-__pycache__/
-.idea
-venvs/
-venv/
+.coverage*
 .hypothesis
+.idea
+__pycache__/
+venv/
+venvs/
