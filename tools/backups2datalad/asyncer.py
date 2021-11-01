@@ -28,6 +28,7 @@ from .util import (
     TextProcess,
     aiter,
     custom_commit_date,
+    exp_wait,
     format_errors,
     key2hash,
     open_git_annex,
@@ -203,8 +204,10 @@ class Downloader(trio.abc.AsyncResource):
         log.debug("%s: About to query S3", asset.path)
         # aiobotocore doesn't work with trio, so we have to make the request
         # directly.  Fortunately, it's very simple.
-        r = await self.s3client.head(
-            f"https://{self.config.s3bucket}.s3.amazonaws.com/{key}"
+        r = await arequest(
+            self.s3client,
+            "HEAD",
+            f"https://{self.config.s3bucket}.s3.amazonaws.com/{key}",
         )
         r.raise_for_status()
         version_id = r.headers["x-amz-version-id"]
@@ -378,14 +381,14 @@ async def aiterassets(
             str
         ] = f"{dandiset.client.api_url}{dandiset.version_api_path}assets/?order=created"
         while url is not None:
-            r = await client.get(url)
-            r.raise_for_status()
+            r = await arequest(client, "GET", url)
             data = r.json()
             for item in data["results"]:
-                r = await client.get(
-                    f"{dandiset.client.api_url}/assets/{item['asset_id']}/"
+                r = await arequest(
+                    client,
+                    "GET",
+                    f"{dandiset.client.api_url}/assets/{item['asset_id']}/",
                 )
-                r.raise_for_status()
                 metadata = r.json()
                 asset = RemoteAsset.from_data(dandiset, item, metadata)
                 assert last_ts is None or last_ts <= asset.created, (
@@ -409,6 +412,35 @@ async def aiterassets(
             url = data.get("next")
     log.info("Finished getting assets from API")
     done_flag.set()
+
+
+async def arequest(client: httpx.AsyncClient, method: str, url: str) -> httpx.Response:
+    waits = exp_wait(attempts=5, base=1.25, multiplier=1.25)
+    while True:
+        try:
+            r = await client.request(method, url)
+            r.raise_for_status()
+        except httpx.HTTPError as e:
+            if isinstance(e, httpx.RequestError) or (
+                isinstance(e, httpx.HTTPStatusError) and e.response.status_code >= 500
+            ):
+                try:
+                    delay = next(waits)
+                except StopIteration:
+                    raise e
+                log.warning(
+                    "Retrying %s request to %s in %f seconds as it raised %s: %s",
+                    method.upper(),
+                    url,
+                    delay,
+                    type(e).__name__,
+                    str(e),
+                )
+                await trio.sleep(delay)
+                continue
+            else:
+                raise
+        return r
 
 
 async def asha256(path: Path) -> str:
