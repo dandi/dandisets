@@ -1,7 +1,10 @@
 from dataclasses import dataclass
+import json
 from pathlib import Path
 import subprocess
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Set, Union, cast
+
+from dandi.consts import dandiset_metadata_file
 
 
 @dataclass
@@ -72,3 +75,23 @@ class GitRepo:
             sym, _, path = line.partition("\t")
             status[path] = sym
         return status
+
+    def get_backup_commits(self) -> List[str]:
+        return self.readcmd(
+            "rev-list", "--tags", r"--grep=\[backups2datalad\]", "HEAD"
+        ).splitlines()
+
+    def get_asset_files(self, commitish: str) -> Set[str]:
+        return {
+            fname
+            for fname in self.readcmd(
+                "ls-tree", "-r", "--name-only", commitish
+            ).splitlines()
+            if fname not in (".gitattributes", dandiset_metadata_file)
+            and not fname.startswith((".dandi/", ".datalad/"))
+        }
+
+    def get_assets_json(self, commitish: str) -> List[dict]:
+        return cast(
+            List[dict], json.loads(self.get_blob(commitish, ".dandi/assets.json"))
+        )

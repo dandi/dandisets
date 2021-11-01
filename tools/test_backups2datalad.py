@@ -208,6 +208,11 @@ def test_1(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
         commit_authors
     )
 
+    for c in repo.get_backup_commits():
+        assert repo.get_asset_files(c) == {
+            asset["path"] for asset in repo.get_assets_json(c)
+        }
+
 
 def test_2(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
     """
@@ -279,6 +284,11 @@ def test_2(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
         else:
             assert repo.is_ancestor(v.identifier, DEFAULT_BRANCH)
 
+    for c in repo.get_backup_commits():
+        assert repo.get_asset_files(c) == {
+            asset["path"] for asset in repo.get_assets_json(c)
+        }
+
 
 def test_3(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
     """
@@ -347,12 +357,17 @@ def test_3(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
     # Assert each (non-merge) backup commit on the default branch is a parent
     # of a tag (except the last one, which *is* a tag).
     our_commits = repo.readcmd(
-        "log", r"--grep=\[backups2datalad\]", "--format=%H"
+        "rev-list", r"--grep=\[backups2datalad\]", "HEAD"
     ).splitlines()
     assert len(our_commits) == len(versions) + 1
     for c, (v, _) in zip(reversed(our_commits), versions):
         assert repo.get_commitish_hash(f"{v.identifier}^") == c
     assert our_commits[0] == repo.get_commitish_hash(versions[-1][0].identifier)
+
+    for c in repo.get_backup_commits():
+        assert repo.get_asset_files(c) == {
+            asset["path"] for asset in repo.get_assets_json(c)
+        }
 
 
 def test_4(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
@@ -397,6 +412,10 @@ def test_4(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
             v.identifier, DEFAULT_BRANCH
         ), f"Tag is more than one commit off of {DEFAULT_BRANCH} branch"
         assert repo.is_ancestor(v.identifier, DEFAULT_BRANCH)
+    for c in repo.get_backup_commits():
+        assert repo.get_asset_files(c) == {
+            asset["path"] for asset in repo.get_assets_json(c)
+        }
 
 
 def test_custom_commit_date(tmp_path: Path) -> None:
