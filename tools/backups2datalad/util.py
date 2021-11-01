@@ -210,14 +210,15 @@ class AssetTracker:
         return cls(local_assets=local_assets, asset_metadata=asset_metadata)
 
     def register_asset(self, asset: RemoteAsset, force: Optional[str]) -> bool:
-        # Returns True if the asset's metadata is unchanged since the last sync
+        # Returns True if the asset's metadata has changed (or if we should act
+        # like it's changed) since the last sync
         self.local_assets.discard(asset.path)
         adict = asset2dict(asset)
         if adict == self.asset_metadata.get(asset.path):
-            return force != "assets-update"
+            return force == "assets-update"
         else:
             self.asset_metadata[asset.path] = adict
-            return False
+            return True
 
     def mark_future(self, asset: RemoteAsset) -> None:
         self.future_assets.add(asset.path)

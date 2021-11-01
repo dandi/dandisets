@@ -126,7 +126,7 @@ class Downloader(trio.abc.AsyncResource):
             if self.last_timestamp is None or self.last_timestamp < asset.created:
                 self.last_timestamp = asset.created
             dest = self.repo / asset.path
-            if self.tracker.register_asset(asset, force=self.config.force):
+            if not self.tracker.register_asset(asset, force=self.config.force):
                 log.debug(
                     "%s: metadata unchanged; not taking any further action",
                     asset.path,
