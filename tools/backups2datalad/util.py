@@ -214,7 +214,7 @@ class AssetTracker:
         self.local_assets.discard(asset.path)
         adict = asset2dict(asset)
         if adict == self.asset_metadata.get(asset.path):
-            return force != "check"
+            return force != "assets-update"
         else:
             self.asset_metadata[asset.path] = adict
             return False

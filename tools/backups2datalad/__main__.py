@@ -43,7 +43,7 @@ from .util import Config, pdb_excepthook
 @click.option(
     "-f",
     "--force",
-    type=click.Choice(["check"]),
+    type=click.Choice(["assets-update"]),
     help="Force all assets to be updated, even those whose metadata hasn't changed",
 )
 @click.option(
