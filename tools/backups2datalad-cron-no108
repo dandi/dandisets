@@ -1,0 +1,41 @@
+#!/bin/bash
+
+set -eu
+
+export PS1='$ '
+PS4='> '
+#set -x
+
+girderdir=/mnt/backup/dandi/dandiarchive-s3-backup/
+ds=$(dirname "$0")
+ds=$(dirname "$ds")
+
+source ~/.bashrc-miniconda
+conda activate dandisets
+
+cd "$ds"
+chronic pip install -r tools/backups2datalad.req.txt
+
+export DATALAD_LOG_LEVEL=WARNING  # otherwise too much of noise
+
+set -o pipefail
+set -x
+eval tools/backups2datalad.py \
+   -l WARNING \
+   -J 5 \
+   --assetstore "$girderdir" \
+   --target "$ds" \
+   update-from-backup \
+   --backup-remote dandi-dandisets-dropbox  \
+   --gh-org dandisets \
+   --exclude 000108 \
+   "$*" 2>&1 | grep -v 'nothing to save, working tree clean'
+
+# TODO - save only the ones which were updated
+#  probably should be done by backups2datalad.py itself!
+datalad save -m "CRON update" -d . 00*
+git pull  # so we possibly merge changes on the server
+datalad push -J 5
+
+# we must be clean
+git diff --exit-code
