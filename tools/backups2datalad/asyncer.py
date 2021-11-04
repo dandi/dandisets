@@ -132,9 +132,11 @@ class Downloader(trio.abc.AsyncResource):
                     "%s: metadata unchanged; not taking any further action",
                     asset.path,
                 )
+                self.tracker.finish_asset(asset.path)
                 return
             if not self.config.match_asset(asset.path):
                 log.debug("%s: Skipping asset", asset.path)
+                self.tracker.finish_asset(asset.path)
                 return
             log.info("%s: Syncing", asset.path)
             dest.parent.mkdir(parents=True, exist_ok=True)
@@ -151,6 +153,7 @@ class Downloader(trio.abc.AsyncResource):
                         " will not update",
                         asset.path,
                     )
+                    self.tracker.finish_asset(asset.path)
                 else:
                     log.info(
                         "%s: Asset in dataset, and hash shows modification;"
@@ -183,6 +186,7 @@ class Downloader(trio.abc.AsyncResource):
                             asset.path,
                             self.config.backup_remote,
                         )
+                    self.tracker.finish_asset(asset.path)
                 else:
                     log.info(
                         "%s: Sending off for download from %s", asset.path, bucket_url
