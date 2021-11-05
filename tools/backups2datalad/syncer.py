@@ -52,7 +52,7 @@ class Syncer:
             self.deleted += 1
 
     def dump_asset_metadata(self) -> None:
-        self.tracker.dump(self.ds.pathobj)
+        self.tracker.dump()
 
     def get_commit_message(self) -> str:
         msgparts = []

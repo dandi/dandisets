@@ -132,9 +132,11 @@ class Downloader(trio.abc.AsyncResource):
                     "%s: metadata unchanged; not taking any further action",
                     asset.path,
                 )
+                self.tracker.finish_asset(asset.path)
                 return
             if not self.config.match_asset(asset.path):
                 log.debug("%s: Skipping asset", asset.path)
+                self.tracker.finish_asset(asset.path)
                 return
             log.info("%s: Syncing", asset.path)
             dest.parent.mkdir(parents=True, exist_ok=True)
@@ -151,6 +153,7 @@ class Downloader(trio.abc.AsyncResource):
                         " will not update",
                         asset.path,
                     )
+                    self.tracker.finish_asset(asset.path)
                 else:
                     log.info(
                         "%s: Asset in dataset, and hash shows modification;"
@@ -183,6 +186,7 @@ class Downloader(trio.abc.AsyncResource):
                             asset.path,
                             self.config.backup_remote,
                         )
+                    self.tracker.finish_asset(asset.path)
                 else:
                     log.info(
                         "%s: Sending off for download from %s", asset.path, bucket_url
@@ -274,6 +278,7 @@ class Downloader(trio.abc.AsyncResource):
     async def postprocess(self) -> None:
         async with self.post_receiver:
             async for dl, key in self.post_receiver:
+                self.tracker.finish_asset(dl.path)
                 if key is not None:
                     for u in dl.extra_urls or []:
                         await self.register_url(dl.path, key, u)
@@ -351,7 +356,6 @@ async def async_assets(
                         "%s downloaded for this version segment; committing",
                         quantify(dm.report.downloaded, "asset"),
                     )
-                    tracker.dump(ds.pathobj)
                     if any(r["state"] != "clean" for r in ds.status()):
                         log.info("Commiting changes")
                         assert dm.last_timestamp is not None

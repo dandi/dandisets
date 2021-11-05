@@ -184,11 +184,17 @@ class TextProcess(trio.abc.AsyncResource):
 
 @dataclass
 class AssetTracker:
+    #: The path to the .dandi/assets.json file that this instance manages
+    filepath: Path
     #: Paths of files found when the syncing started, minus the paths for any
     #: assets downloaded during syncing
     local_assets: Set[str]
+    #: Metadata for assets currently being downloaded, as a mapping from asset
+    #: paths to metadata
+    in_progress: Dict[str, dict] = field(init=False, default_factory=dict)
     #: Asset metadata from previous sync, plus metadata for any assets
-    #: downloaded during the sync, as a mapping from asset paths to metadata
+    #: completely downloaded during the sync, as a mapping from asset paths to
+    #: metadata
     asset_metadata: Dict[str, dict]
     #: Paths of assets that are not being downloaded this run due to a lack of
     #: SHA256 digests
@@ -196,10 +202,11 @@ class AssetTracker:
 
     @classmethod
     def from_dataset(cls, dspath: Path) -> AssetTracker:
+        filepath = dspath / ".dandi" / "assets.json"
         local_assets = set(dataset_files(dspath))
         asset_metadata: Dict[str, dict] = {}
         try:
-            with (dspath / ".dandi" / "assets.json").open() as fp:
+            with filepath.open() as fp:
                 for md in json.load(fp):
                     if isinstance(md, str):
                         raise RuntimeError(f"Old assets.json format found in {dspath}")
@@ -207,18 +214,21 @@ class AssetTracker:
                         asset_metadata[md["path"].lstrip("/")] = md
         except FileNotFoundError:
             pass
-        return cls(local_assets=local_assets, asset_metadata=asset_metadata)
+        return cls(
+            filepath=filepath, local_assets=local_assets, asset_metadata=asset_metadata
+        )
 
     def register_asset(self, asset: RemoteAsset, force: Optional[str]) -> bool:
         # Returns True if the asset's metadata has changed (or if we should act
         # like it's changed) since the last sync
         self.local_assets.discard(asset.path)
         adict = asset2dict(asset)
-        if adict == self.asset_metadata.get(asset.path):
-            return force == "assets-update"
-        else:
-            self.asset_metadata[asset.path] = adict
-            return True
+        self.in_progress[asset.path] = adict
+        return adict != self.asset_metadata.get(asset.path) or force == "assets-update"
+
+    def finish_asset(self, asset_path: str) -> None:
+        self.asset_metadata[asset_path] = self.in_progress.pop(asset_path)
+        self.dump()
 
     def mark_future(self, asset: RemoteAsset) -> None:
         self.future_assets.add(asset.path)
@@ -233,8 +243,9 @@ class AssetTracker:
                 del self.asset_metadata[apath]
                 yield apath
 
-    def dump(self, dspath: Path) -> None:
-        dump(list(self.asset_metadata.values()), dspath / ".dandi" / "assets.json")
+    def dump(self) -> None:
+        self.filepath.parent.mkdir(exist_ok=True, parents=True)
+        dump([md for _, md in sorted(self.asset_metadata.items())], self.filepath)
 
     @property
     def future_qty(self) -> int:
