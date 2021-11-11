@@ -344,12 +344,15 @@ async def async_assets(
                     async with Downloader(
                         p, ds.pathobj, config, tracker, s3client
                     ) as dm:
-                        async with trio.open_nursery() as nursery:
-                            dm.nursery = nursery
-                            nursery.start_soon(dm.asset_loop, aia)
-                            nursery.start_soon(dm.feed_addurl)
-                            nursery.start_soon(dm.read_addurl)
-                            nursery.start_soon(dm.postprocess)
+                        try:
+                            async with trio.open_nursery() as nursery:
+                                dm.nursery = nursery
+                                nursery.start_soon(dm.asset_loop, aia)
+                                nursery.start_soon(dm.feed_addurl)
+                                nursery.start_soon(dm.read_addurl)
+                                nursery.start_soon(dm.postprocess)
+                        finally:
+                            tracker.dump()
             if dandiset.version_id == "draft":
                 if dm.report.downloaded:
                     log.info(
