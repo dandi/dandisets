@@ -228,7 +228,6 @@ class AssetTracker:
 
     def finish_asset(self, asset_path: str) -> None:
         self.asset_metadata[asset_path] = self.in_progress.pop(asset_path)
-        self.dump()
 
     def mark_future(self, asset: RemoteAsset) -> None:
         self.future_assets.add(asset.path)
