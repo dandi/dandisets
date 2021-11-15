@@ -3,12 +3,13 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 import re
+import subprocess
 import sys
 from typing import Optional, Sequence
 
 import click
 from click_loglevel import LogLevel
-from dandi.consts import known_instances
+from dandi.consts import DANDISET_ID_REGEX, known_instances
 from dandi.dandiapi import DandiAPIClient
 from datalad.api import Dataset
 
@@ -184,6 +185,71 @@ def release(
     datasetter.mkrelease(dandiset_obj, dataset, commitish=commitish, push=push)
     if push:
         dataset.push(to="github", jobs=datasetter.config.jobs)
+
+
+@main.command()
+@click.option("--backup-remote", help="Name of the rclone remote to push to")
+@click.option(
+    "-e",
+    "--exclude",
+    help="Skip dandisets matching the given regex",
+    metavar="REGEX",
+    type=re.compile,
+)
+@click.argument("backup_remote")
+@click.argument("dandisets", nargs=-1)
+@click.pass_obj
+def populate(
+    datasetter: DandiDatasetter,
+    dandisets: Sequence[str],
+    backup_remote: str,
+    exclude: Optional[re.Pattern[str]],
+) -> None:
+    if dandisets:
+        dirs = [datasetter.target_path / d for d in dandisets]
+    else:
+        dirs = list(datasetter.target_path.iterdir())
+    for p in dirs:
+        if p.is_dir() and re.fullmatch(DANDISET_ID_REGEX, p.name):
+            if exclude is not None and exclude.search(p.name):
+                log.debug("Skipping dandiset %s", p.name)
+            elif not Dataset(p).is_installed():
+                log.info("Dataset %s is not installed; skipping", p.name)
+            else:
+                log.info("Downloading assets for Dandiset %s", p.name)
+                subprocess.run(
+                    [
+                        "git-annex",
+                        "get",
+                        "-c",
+                        "annex.retry=3",
+                        "--jobs",
+                        str(datasetter.jobs),
+                        "--from=web",
+                        "--not",
+                        "--in",
+                        backup_remote,
+                        "--and",
+                        "--not",
+                        "--in",
+                        "here",
+                    ],
+                    check=True,
+                )
+                log.info("Moving assets for Dandiset %s to backup remote", p.name)
+                subprocess.run(
+                    [
+                        "git-annex",
+                        "move",
+                        "-c",
+                        "annex.retry=3",
+                        "--jobs",
+                        str(datasetter.jobs),
+                        "--to",
+                        backup_remote,
+                    ],
+                    check=True,
+                )
 
 
 if __name__ == "__main__":
