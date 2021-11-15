@@ -184,7 +184,7 @@ class DandiDatasetter:
             desc = f"{contact}, {desc}"
         versions = sum(1 for v in dandiset.get_versions() if v.identifier != "draft")
         if versions:
-            desc = f"{versions} {quantify(versions, 'release')}, {desc}"
+            desc = f"{quantify(versions, 'release')}, {desc}"
         num_files = dandiset.version.asset_count
         size = naturalsize(dandiset.version.size)
         return f"{quantify(num_files, 'file')}, {size}, {desc}"
