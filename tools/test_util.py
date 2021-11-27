@@ -16,8 +16,7 @@ class GitRepo:
     ) -> subprocess.CompletedProcess:
         return subprocess.run(["git", *args], cwd=self.path, **kwargs)
 
-    def readcmd(self, *args: Union[str, Path], **kwargs: Any) -> str:
-        kwargs["check"] = True
+    def readcmd(self, *args: Union[str, Path]) -> str:
         r = self.runcmd(*args, stdout=subprocess.PIPE, text=True, check=True)
         assert isinstance(r.stdout, str)
         return r.stdout.strip()
