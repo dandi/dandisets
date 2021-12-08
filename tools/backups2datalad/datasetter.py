@@ -45,12 +45,20 @@ class DandiDatasetter:
         exclude: Optional[re.Pattern[str]] = None,
         gh_org: Optional[str] = None,
     ) -> None:
-        self.target_path.mkdir(parents=True, exist_ok=True)
         datalad.cfg.set("datalad.repo.backend", "SHA256E", where="override")
+        superds = Dataset(self.target_path)
+        if not superds.is_installed():
+            log.info("Creating Datalad superdataset")
+            with envset(
+                "GIT_CONFIG_PARAMETERS", f"'init.defaultBranch={DEFAULT_BRANCH}'"
+            ):
+                superds.create(cfg_proc="text2git")
+        to_save: List[str] = []
         for d in self.get_dandisets(dandiset_ids, exclude=exclude):
             dsdir = self.target_path / d.identifier
             ds = self.init_dataset(dsdir, create_time=d.version.created)
             changed = self.sync_dataset(d, ds)
+            to_save.append(d.identifier)
             if gh_org is not None:
                 self.ensure_github_remote(ds, d.identifier, gh_org=gh_org)
             self.tag_releases(d, ds, push=gh_org is not None)
@@ -60,6 +68,7 @@ class DandiDatasetter:
                 self.gh.get_repo(f"{gh_org}/{d.identifier}").edit(
                     description=self.describe_dandiset(d)
                 )
+        superds.save(message="CRON update", path=to_save)
 
     def init_dataset(self, dsdir: Path, create_time: datetime) -> Dataset:
         ds = Dataset(str(dsdir))
