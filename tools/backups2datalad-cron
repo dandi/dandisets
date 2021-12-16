@@ -17,8 +17,12 @@ chronic pip install -r tools/backups2datalad.req.txt
 
 export DATALAD_LOG_LEVEL=WARNING  # otherwise too much of noise
 
+mkdir -p .git/tmp
+
 set -o pipefail
 set -x
+
+(
 eval python -m tools.backups2datalad \
    -l WARNING \
    -J 5 \
@@ -30,6 +34,12 @@ eval python -m tools.backups2datalad \
 
 git pull  # so we possibly merge changes on the server
 datalad push -J 5
+) 2>|.git/tmp/stderr
+
+if [ -s .git/tmp/stderr ]; then
+	echo "There was stderr from backup/datalad invocations:"
+	cat .git/tmp/stderr
+fi
 
 # we must be clean
 git diff --exit-code
