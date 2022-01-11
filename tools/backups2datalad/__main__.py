@@ -66,7 +66,10 @@ from .util import Config, pdb_excepthook
     show_default=True,
 )
 @click.option(
-    "-T", "--target", type=click.Path(file_okay=False, path_type=Path), required=True
+    "-T",
+    "--target",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=Path(),
 )
 @click.pass_context
 def main(
