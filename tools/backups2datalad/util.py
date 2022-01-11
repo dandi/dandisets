@@ -306,7 +306,7 @@ def is_interactive() -> bool:
 
 
 def pdb_excepthook(
-    exc_type: Type[BaseException], exc_value: BaseException, tb: TracebackType
+    exc_type: Type[BaseException], exc_value: BaseException, tb: Optional[TracebackType]
 ) -> None:
     import traceback
 
