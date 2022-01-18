@@ -15,6 +15,7 @@ from dandi.consts import dandiset_metadata_file
 from dandi.dandiapi import DandiAPIClient, RemoteDandiset
 import datalad
 from datalad.api import Dataset
+from ghrepo import GHRepo
 from github import Github
 from humanize import naturalsize
 from morecontext import envset
@@ -54,6 +55,7 @@ class DandiDatasetter:
             ):
                 superds.create(cfg_proc="text2git")
         to_save: List[str] = []
+        ds_stats: List[DandisetStats] = []
         for d in self.get_dandisets(dandiset_ids, exclude=exclude):
             dsdir = self.target_path / d.identifier
             ds = self.init_dataset(dsdir, create_time=d.version.created)
@@ -65,10 +67,14 @@ class DandiDatasetter:
             if changed and gh_org is not None:
                 log.info("Pushing to sibling")
                 ds.push(to="github", jobs=self.config.jobs)
+                stats = self.get_dandiset_stats(ds)
                 self.gh.get_repo(f"{gh_org}/{d.identifier}").edit(
-                    description=self.describe_dandiset(d)
+                    description=self.describe_dandiset(d, stats)
                 )
+                ds_stats.append(stats)
         superds.save(message="CRON update", path=to_save)
+        if gh_org is not None and not dandiset_ids and exclude is None:
+            self.set_superds_description(superds, ds_stats)
 
     def init_dataset(self, dsdir: Path, create_time: datetime) -> Dataset:
         ds = Dataset(str(dsdir))
@@ -158,12 +164,19 @@ class DandiDatasetter:
         gh_org: str,
         exclude: Optional[re.Pattern[str]],
     ) -> None:
+        ds_stats: List[DandisetStats] = []
         for d in self.get_dandisets(dandiset_ids, exclude=exclude):
             log.info("Setting metadata for %s/%s ...", gh_org, d.identifier)
+            ds = Dataset(self.target_path / d.identifier)
+            stats = self.get_dandiset_stats(ds)
             self.gh.get_repo(f"{gh_org}/{d.identifier}").edit(
                 homepage=f"https://identifiers.org/DANDI:{d.identifier}",
-                description=self.describe_dandiset(d),
+                description=self.describe_dandiset(d, stats),
             )
+            ds_stats.append(stats)
+        if not dandiset_ids and exclude is None:
+            superds = Dataset(self.target_path)
+            self.set_superds_description(superds, ds_stats)
 
     def get_dandisets(
         self, dandiset_ids: Sequence[str], exclude: Optional[re.Pattern[str]]
@@ -181,7 +194,17 @@ class DandiDatasetter:
             else:
                 yield d
 
-    def describe_dandiset(self, dandiset: RemoteDandiset) -> str:
+    def get_dandiset_stats(self, ds: Dataset) -> DandisetStats:
+        files = 0
+        size = 0
+        for filestat in ds.status(annex="basic"):
+            path = Path(filestat["path"]).relative_to(ds.pathobj)
+            if path.parts[0] not in (".dandi", ".gitattributes"):
+                files += 1
+                size += filestat["bytesize"]
+        return DandisetStats(files=files, size=size)
+
+    def describe_dandiset(self, dandiset: RemoteDandiset, stats: DandisetStats) -> str:
         metadata = dandiset.get_raw_metadata()
         desc = dandiset.version.name
         contact = ", ".join(
@@ -194,9 +217,23 @@ class DandiDatasetter:
         versions = sum(1 for v in dandiset.get_versions() if v.identifier != "draft")
         if versions:
             desc = f"{quantify(versions, 'release')}, {desc}"
-        num_files = dandiset.version.asset_count
-        size = naturalsize(dandiset.version.size)
-        return f"{quantify(num_files, 'file')}, {size}, {desc}"
+        size = naturalsize(stats.size)
+        return f"{quantify(stats.files, 'file')}, {size}, {desc}"
+
+    def set_superds_description(
+        self, superds: Dataset, ds_stats: List[DandisetStats]
+    ) -> None:
+        log.info("Setting repository description for superdataset")
+        origin_url = superds.repo.config.get("remote.origin.url")
+        if origin_url is None:
+            raise ValueError("origin remote URL not set for superdataset")
+        r = GHRepo.parse_url(origin_url)
+        total_size = naturalsize(sum(s.size for s in ds_stats))
+        desc = (
+            f"{quantify(len(ds_stats), 'Dandiset')}, {total_size} total."
+            "  DataLad super-dataset of all Dandisets from https://github.com/dandisets"
+        )
+        self.gh.get_repo(str(r)).edit(description=desc)
 
     def tag_releases(self, dandiset: RemoteDandiset, ds: Dataset, push: bool) -> None:
         if not self.config.enable_tags:
@@ -341,3 +378,9 @@ class DandiDatasetter:
     def gh(self) -> Github:
         token = readcmd("git", "config", "hub.oauthtoken")
         return Github(token)
+
+
+@dataclass
+class DandisetStats:
+    files: int
+    size: int
