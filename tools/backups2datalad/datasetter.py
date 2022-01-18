@@ -68,6 +68,7 @@ class DandiDatasetter:
             if changed and gh_org is not None:
                 log.info("Pushing to sibling")
                 ds.push(to="github", jobs=self.config.jobs)
+            if gh_org is not None:
                 stats = self.get_dandiset_stats(ds)
                 self.gh.get_repo(f"{gh_org}/{d.identifier}").edit(
                     description=self.describe_dandiset(d, stats)
