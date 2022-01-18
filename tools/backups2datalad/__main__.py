@@ -157,6 +157,14 @@ def update_github_metadata(
     exclude: Optional[re.Pattern[str]],
     gh_org: str,
 ) -> None:
+    """
+    Update the homepages and descriptions for the GitHub repositories for the
+    given Dandisets.  If all Dandisets are updated, the description for the
+    superdataset is set afterwards as well.
+
+    `--target` must point to a clone of the superdataset in which every
+    Dandiset subdataset is installed.
+    """
     datasetter.update_github_metadata(dandisets, exclude=exclude, gh_org=gh_org)
 
 
