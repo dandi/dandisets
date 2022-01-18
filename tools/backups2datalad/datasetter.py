@@ -17,6 +17,7 @@ import datalad
 from datalad.api import Dataset
 from ghrepo import GHRepo
 from github import Github
+from github.Repository import Repository
 from humanize import naturalsize
 from morecontext import envset
 from packaging.version import Version
@@ -158,18 +159,30 @@ class DandiDatasetter:
                 logfile.unlink()
             return syncer.report.commits > 0
 
+    def get_github_repo(self, ds: Dataset) -> Repository:
+        upstream = ds.repo.config.get(f"branch.{DEFAULT_BRANCH}.remote")
+        if upstream is None:
+            raise ValueError(
+                f"Upstream branch not set for {DEFAULT_BRANCH} in {ds.path}"
+            )
+        url = ds.repo.config.get(f"remote.{upstream}.url")
+        if url is None:
+            raise ValueError(f"{upstream!r} remote URL not set for {ds.path}")
+        r = GHRepo.parse_url(url)
+        return self.gh.get_repo(str(r))
+
     def update_github_metadata(
         self,
         dandiset_ids: Sequence[str],
-        gh_org: str,
         exclude: Optional[re.Pattern[str]],
     ) -> None:
         ds_stats: List[DandisetStats] = []
         for d in self.get_dandisets(dandiset_ids, exclude=exclude):
-            log.info("Setting metadata for %s/%s ...", gh_org, d.identifier)
             ds = Dataset(self.target_path / d.identifier)
+            repo = self.get_github_repo(ds)
+            log.info("Setting metadata for %s ...", repo.full_name)
             stats = self.get_dandiset_stats(ds)
-            self.gh.get_repo(f"{gh_org}/{d.identifier}").edit(
+            repo.edit(
                 homepage=f"https://identifiers.org/DANDI:{d.identifier}",
                 description=self.describe_dandiset(d, stats),
             )
@@ -224,16 +237,13 @@ class DandiDatasetter:
         self, superds: Dataset, ds_stats: List[DandisetStats]
     ) -> None:
         log.info("Setting repository description for superdataset")
-        origin_url = superds.repo.config.get("remote.origin.url")
-        if origin_url is None:
-            raise ValueError("origin remote URL not set for superdataset")
-        r = GHRepo.parse_url(origin_url)
+        repo = self.get_github_repo(superds)
         total_size = naturalsize(sum(s.size for s in ds_stats))
         desc = (
             f"{quantify(len(ds_stats), 'Dandiset')}, {total_size} total."
             "  DataLad super-dataset of all Dandisets from https://github.com/dandisets"
         )
-        self.gh.get_repo(str(r)).edit(description=desc)
+        repo.edit(description=desc)
 
     def tag_releases(self, dandiset: RemoteDandiset, ds: Dataset, push: bool) -> None:
         if not self.config.enable_tags:
