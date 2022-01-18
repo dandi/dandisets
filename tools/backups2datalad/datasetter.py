@@ -212,7 +212,12 @@ class DandiDatasetter:
         size = 0
         for filestat in ds.status(annex="basic"):
             path = Path(filestat["path"]).relative_to(ds.pathobj)
-            if path.parts[0] not in (".dandi", ".gitattributes"):
+            if path.parts[0] not in (
+                ".dandi",
+                ".datalad",
+                ".gitattributes",
+                dandiset_metadata_file,
+            ):
                 files += 1
                 size += filestat["bytesize"]
         return DandisetStats(files=files, size=size)
