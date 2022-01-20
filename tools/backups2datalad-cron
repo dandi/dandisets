@@ -24,7 +24,7 @@ set -x
 
 (
 eval python -m tools.backups2datalad \
-   -l WARNING \
+   -l DEBUG \
    -J 5 \
    --target "$ds" \
    update-from-backup \
