@@ -39,10 +39,10 @@ def text_dandiset(
     dandi_client: DandiAPIClient, tmp_path_factory: pytest.TempPathFactory
 ) -> Iterator[Dict[str, Any]]:
     d = dandi_client.create_dandiset(
-        "Text Dandiset",
+        "Dandiset for testing backups2datalad",
         {
             "schemaKey": "Dandiset",
-            "name": "Text Dandiset",
+            "name": "Dandiset for testing backups2datalad",
             "description": "A test text Dandiset",
             "contributor": [
                 {
@@ -77,19 +77,20 @@ def text_dandiset(
             **kwargs,
         )
 
-    upload_dandiset()
-    yield {
-        "client": dandi_client,
-        "dspath": dspath,
-        "dandiset": d,
-        "dandiset_id": dandiset_id,
-        "reupload": upload_dandiset,
-    }
-
-    for v in d.get_versions():
-        if v.identifier != "draft":
-            dandi_client.delete(f"{d.api_path}versions/{v.identifier}/")
-    d.delete()
+    try:
+        upload_dandiset()
+        yield {
+            "client": dandi_client,
+            "dspath": dspath,
+            "dandiset": d,
+            "dandiset_id": dandiset_id,
+            "reupload": upload_dandiset,
+        }
+    finally:
+        for v in d.get_versions():
+            if v.identifier != "draft":
+                dandi_client.delete(f"{d.api_path}versions/{v.identifier}/")
+        d.delete()
 
 
 def test_1(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
