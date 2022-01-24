@@ -87,7 +87,7 @@ class Downloader(trio.abc.AsyncResource):
                     break
                 if downloading:
                     try:
-                        sha256_digest = asset.get_digest(DigestType.sha2_256)
+                        sha256_digest = asset.get_raw_digest(DigestType.sha2_256)
                     except NotFoundError:
                         log.info(
                             "%s: SHA256 has not been computed yet;"
