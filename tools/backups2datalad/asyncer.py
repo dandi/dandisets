@@ -359,7 +359,9 @@ async def async_assets(
                         "%s downloaded for this version segment; committing",
                         quantify(dm.report.downloaded, "asset"),
                     )
-                    if any(r["state"] != "clean" for r in ds.status()):
+                    if any(
+                        r["state"] != "clean" for r in ds.status(result_renderer=None)
+                    ):
                         log.info("Commiting changes")
                         assert dm.last_timestamp is not None
                         with custom_commit_date(dm.last_timestamp):
