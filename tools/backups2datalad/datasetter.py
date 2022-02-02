@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 import shlex
 import subprocess
+from time import sleep
 from typing import Any, Iterator, List, Optional, Sequence
 
 from dandi.consts import dandiset_metadata_file
@@ -70,7 +71,7 @@ class DandiDatasetter:
                 ds.push(to="github", jobs=self.config.jobs)
             if gh_org is not None:
                 stats = self.get_dandiset_stats(ds)
-                self.gh.get_repo(f"{gh_org}/{d.identifier}").edit(
+                self.get_github_repo(f"{gh_org}/{d.identifier}").edit(
                     description=self.describe_dandiset(d, stats)
                 )
                 ds_stats.append(stats)
@@ -132,7 +133,7 @@ class DandiDatasetter:
                 f"refs/heads/{DEFAULT_BRANCH}",
                 where="local",
             )
-            self.gh.get_repo(f"{gh_org}/{dandiset_id}").edit(
+            self.get_github_repo(f"{gh_org}/{dandiset_id}").edit(
                 homepage=f"https://identifiers.org/DANDI:{dandiset_id}"
             )
         else:
@@ -160,7 +161,7 @@ class DandiDatasetter:
                 logfile.unlink()
             return syncer.report.commits > 0
 
-    def get_github_repo(self, ds: Dataset) -> Repository:
+    def get_github_repo_for_dataset(self, ds: Dataset) -> Repository:
         upstream = ds.repo.config.get(f"branch.{DEFAULT_BRANCH}.remote")
         if upstream is None:
             raise ValueError(
@@ -170,7 +171,7 @@ class DandiDatasetter:
         if url is None:
             raise ValueError(f"{upstream!r} remote URL not set for {ds.path}")
         r = GHRepo.parse_url(url)
-        return self.gh.get_repo(str(r))
+        return self.get_github_repo(str(r))
 
     def update_github_metadata(
         self,
@@ -180,7 +181,7 @@ class DandiDatasetter:
         ds_stats: List[DandisetStats] = []
         for d in self.get_dandisets(dandiset_ids, exclude=exclude):
             ds = Dataset(self.target_path / d.identifier)
-            repo = self.get_github_repo(ds)
+            repo = self.get_github_repo_for_dataset(ds)
             log.info("Setting metadata for %s ...", repo.full_name)
             stats = self.get_dandiset_stats(ds)
             repo.edit(
@@ -243,7 +244,7 @@ class DandiDatasetter:
         self, superds: Dataset, ds_stats: List[DandisetStats]
     ) -> None:
         log.info("Setting repository description for superdataset")
-        repo = self.get_github_repo(superds)
+        repo = self.get_github_repo_for_dataset(superds)
         total_size = naturalsize(sum(s.size for s in ds_stats))
         desc = (
             f"{quantify(len(ds_stats), 'Dandiset')}, {total_size} total."
@@ -394,6 +395,20 @@ class DandiDatasetter:
     def gh(self) -> Github:
         token = readcmd("git", "config", "hub.oauthtoken")
         return Github(token)
+
+    def get_github_repo(self, repo_fullname: str) -> Repository:
+        i = 0
+        while True:
+            try:
+                return self.gh.get_repo(repo_fullname)
+            except ConnectionError:
+                log.warning(
+                    "Request to fetch %s GitHub repository details resulted in"
+                    " connection error; waiting & retrying",
+                    repo_fullname,
+                )
+                i += 1
+                sleep(i * i)
 
 
 @dataclass
