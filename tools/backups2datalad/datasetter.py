@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from functools import cached_property
 import json
+import logging
 from operator import attrgetter
 from pathlib import Path
 import re
@@ -42,13 +43,7 @@ class DandiDatasetter:
     target_path: Path
     config: Config
 
-    def update_from_backup(
-        self,
-        dandiset_ids: Sequence[str] = (),
-        exclude: Optional[re.Pattern[str]] = None,
-        gh_org: Optional[str] = None,
-    ) -> None:
-        datalad.cfg.set("datalad.repo.backend", "SHA256E", where="override")
+    def ensure_superdataset(self) -> Dataset:
         superds = Dataset(self.target_path)
         if not superds.is_installed():
             log.info("Creating Datalad superdataset")
@@ -56,6 +51,16 @@ class DandiDatasetter:
                 "GIT_CONFIG_PARAMETERS", f"'init.defaultBranch={DEFAULT_BRANCH}'"
             ):
                 superds.create(cfg_proc="text2git")
+        return superds
+
+    def update_from_backup(
+        self,
+        dandiset_ids: Sequence[str] = (),
+        exclude: Optional[re.Pattern[str]] = None,
+        gh_org: Optional[str] = None,
+    ) -> None:
+        datalad.cfg.set("datalad.repo.backend", "SHA256E", where="override")
+        superds = self.ensure_superdataset()
         to_save: List[str] = []
         ds_stats: List[DandisetStats] = []
         for d in self.get_dandisets(dandiset_ids, exclude=exclude):
@@ -409,6 +414,32 @@ class DandiDatasetter:
                 )
                 i += 1
                 sleep(i * i)
+
+    def debug_logfile(self) -> None:
+        """
+        Log all log messages at DEBUG or higher to a file without disrupting or
+        altering the logging to the screen
+        """
+        root = logging.getLogger()
+        screen_level = root.getEffectiveLevel()
+        root.setLevel(logging.NOTSET)
+        for h in root.handlers:
+            h.setLevel(screen_level)
+        # Superdataset must exist before creating anything in the directory:
+        self.ensure_superdataset()
+        logdir = self.target_path / ".git" / "dandi" / "backups2datalad"
+        logdir.mkdir(exist_ok=True, parents=True)
+        filename = "{:%Y.%m.%d.%H.%M.%SZ}.log".format(datetime.utcnow())
+        logfile = logdir / filename
+        handler = logging.FileHandler(logfile, encoding="utf-8")
+        handler.setLevel(logging.DEBUG)
+        fmter = logging.Formatter(
+            fmt="%(asctime)s [%(levelname)-8s] %(name)s %(message)s",
+            datefmt="%Y-%m-%dT%H:%M:%S%z",
+        )
+        handler.setFormatter(fmter)
+        root.addHandler(handler)
+        log.info("Saving logs to %s", logfile)
 
 
 @dataclass
