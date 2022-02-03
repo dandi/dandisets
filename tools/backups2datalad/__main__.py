@@ -107,6 +107,7 @@ def main(
         level=log_level,
         force=True,  # Override dandi's settings
     )
+    ctx.obj.debug_logfile()
 
 
 @main.command()
