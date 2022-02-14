@@ -168,7 +168,7 @@ class Downloader(trio.abc.AsyncResource):
                     PurePosixPath(asset.path).name, asset.size, sha256_digest
                 )
                 remotes = await self.annex.get_key_remotes(key)
-                if "binary" in tags_from_filename(asset.path):
+                if "text" not in tags_from_filename(asset.path):
                     log.info(
                         "%s: File is binary; registering key with git-annex", asset.path
                     )
