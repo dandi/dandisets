@@ -68,8 +68,7 @@ def text_dandiset(
 
     def upload_dandiset(paths: Optional[List[str]] = None, **kwargs: Any) -> None:
         upload(
-            paths=paths or [],
-            dandiset_path=dspath,
+            paths=paths or [dspath],
             dandi_instance="dandi-staging",
             devel_debug=True,
             allow_any_path=True,
