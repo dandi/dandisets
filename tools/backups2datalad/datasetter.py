@@ -10,7 +10,6 @@ from pathlib import Path
 import re
 import shlex
 import subprocess
-from time import sleep
 from typing import Any, Iterator, List, Optional, Sequence
 
 from dandi.consts import dandiset_metadata_file
@@ -23,6 +22,7 @@ from github.Repository import Repository
 from humanize import naturalsize
 from morecontext import envset
 from packaging.version import Version
+from urllib3.util.retry import Retry
 
 from . import DEFAULT_BRANCH, log
 from .syncer import Syncer
@@ -399,21 +399,17 @@ class DandiDatasetter:
     @cached_property
     def gh(self) -> Github:
         token = readcmd("git", "config", "hub.oauthtoken")
-        return Github(token)
+        return Github(
+            token,
+            retry=Retry(
+                total=12,
+                backoff_factor=1.25,
+                status_forcelist=[500, 502, 503, 504],
+            ),
+        )
 
     def get_github_repo(self, repo_fullname: str) -> Repository:
-        i = 0
-        while True:
-            try:
-                return self.gh.get_repo(repo_fullname)
-            except ConnectionError:
-                log.warning(
-                    "Request to fetch %s GitHub repository details resulted in"
-                    " connection error; waiting & retrying",
-                    repo_fullname,
-                )
-                i += 1
-                sleep(i * i)
+        return self.gh.get_repo(repo_fullname)
 
     def debug_logfile(self) -> None:
         """
