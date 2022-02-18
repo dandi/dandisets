@@ -12,7 +12,7 @@ import sys
 from typing import AsyncIterator, Dict, List, Optional, Tuple
 from urllib.parse import urlparse, urlunparse
 
-from dandi.dandiapi import RemoteAsset, RemoteDandiset
+from dandi.dandiapi import AssetType, RemoteAsset, RemoteDandiset
 from dandi.exceptions import NotFoundError
 from dandischema.models import DigestType
 from datalad.api import Dataset
@@ -85,9 +85,14 @@ class Downloader(trio.abc.AsyncResource):
             async for asset in aia:
                 if asset is None:
                     break
+                if asset.asset_type == AssetType.ZARR:
+                    log.warning(
+                        "%s: Asset is a Zarr; abandoning this Dandiset", asset.path
+                    )
+                    downloading = False
                 if downloading:
                     try:
-                        sha256_digest = asset.get_digest(DigestType.sha2_256)
+                        sha256_digest = asset.get_raw_digest(DigestType.sha2_256)
                     except NotFoundError:
                         log.info(
                             "%s: SHA256 has not been computed yet;"
