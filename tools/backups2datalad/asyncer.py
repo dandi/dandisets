@@ -186,6 +186,10 @@ class Downloader(trio.abc.AsyncResource):
                             self.config.backup_remote,
                         )
                     self.tracker.finish_asset(asset.path)
+                elif asset.size > (10 << 20):
+                    raise RuntimeError(
+                        f"{asset.path} identified as text but is {asset.size} bytes!"
+                    )
                 else:
                     log.info(
                         "%s: File is text; sending off for download from %s",
