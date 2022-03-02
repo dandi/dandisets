@@ -247,7 +247,7 @@ class Downloader(trio.abc.AsyncResource):
         async with aclosing(aiter(self.addurl)) as lineiter:  # type: ignore[type-var]
             async for line in lineiter:
                 data = json.loads(line)
-                if "success" not in data:
+                if "byte-progress" in data:
                     # Progress message
                     log.info(
                         "%s: Downloaded %d / %s bytes (%s)",
