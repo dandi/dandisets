@@ -10,6 +10,7 @@ from dandi.dandiapi import DandiAPIClient, Version
 from dandi.upload import upload
 from dandi.utils import yaml_load
 from datalad.api import Dataset
+from datalad.support.annexrepo import AnnexRepo
 from datalad.tests.utils import assert_repo_status, ok_file_under_git
 import pytest
 from test_util import GitRepo
@@ -416,6 +417,29 @@ def test_4(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
         assert repo.get_asset_files(c) == {
             asset["path"] for asset in repo.get_assets_json(c)
         }
+
+
+def test_binary(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
+    di = DandiDatasetter(
+        dandi_client=text_dandiset["client"],
+        target_path=tmp_path,
+        config=Config(
+            content_url_regex=r".*/blobs/",
+            s3bucket="dandi-api-staging-dandisets",
+            enable_tags=True,
+        ),
+    )
+    dandiset_id = text_dandiset["dandiset_id"]
+    dspath = text_dandiset["dspath"]
+    (dspath / "data.dat").write_bytes(b"\0\1\2\3\4\5")
+    text_dandiset["reupload"]()
+    log.info("test_binary: Syncing test dandiset")
+    di.update_from_backup([dandiset_id])
+    backup = tmp_path / dandiset_id
+    annex = AnnexRepo(backup)
+    data_backup = backup / "data.dat"
+    assert data_backup.is_symlink() and not data_backup.is_file()
+    assert annex.is_under_annex([data_backup]) == [True]
 
 
 def test_custom_commit_date(tmp_path: Path) -> None:
