@@ -188,7 +188,6 @@ def release(
 
 
 @main.command()
-@click.option("--backup-remote", help="Name of the rclone remote to push to")
 @click.option(
     "-e",
     "--exclude",
