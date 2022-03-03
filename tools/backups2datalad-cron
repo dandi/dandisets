@@ -30,6 +30,7 @@ eval python -m tools.backups2datalad \
    update-from-backup \
    --backup-remote dandi-dandisets-dropbox  \
    --gh-org dandisets \
+   -e '000108$' \
    "$*" 2>&1 | grep -v 'nothing to save, working tree clean'
 
 python -m tools.backups2datalad \
