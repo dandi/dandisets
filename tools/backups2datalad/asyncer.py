@@ -9,7 +9,7 @@ from operator import attrgetter
 import os.path
 from pathlib import Path, PurePosixPath
 import sys
-from typing import AsyncIterator, Dict, List, Optional, Tuple
+from typing import AsyncIterator, Dict, List, Optional
 from urllib.parse import urlparse, urlunparse
 
 from dandi.dandiapi import AssetType, RemoteAsset, RemoteDandiset
@@ -17,6 +17,7 @@ from dandi.exceptions import NotFoundError
 from dandischema.models import DigestType
 from datalad.api import Dataset
 import httpx
+from identify.identify import tags_from_filename
 import trio
 
 from . import log
@@ -63,17 +64,10 @@ class Downloader(trio.abc.AsyncResource):
     annex: AsyncAnnex = field(init=False)
     download_sender: trio.MemorySendChannel[ToDownload] = field(init=False)
     download_receiver: trio.MemoryReceiveChannel[ToDownload] = field(init=False)
-    post_sender: trio.MemorySendChannel[Tuple[ToDownload, Optional[str]]] = field(
-        init=False
-    )
-    post_receiver: trio.MemoryReceiveChannel[Tuple[ToDownload, Optional[str]]] = field(
-        init=False
-    )
 
     def __post_init__(self) -> None:
         self.annex = AsyncAnnex(self.repo)
         self.download_sender, self.download_receiver = trio.open_memory_channel(0)
-        self.post_sender, self.post_receiver = trio.open_memory_channel(0)
 
     async def aclose(self) -> None:
         await self.annex.aclose()
@@ -174,16 +168,16 @@ class Downloader(trio.abc.AsyncResource):
                     PurePosixPath(asset.path).name, asset.size, sha256_digest
                 )
                 remotes = await self.annex.get_key_remotes(key)
-                if remotes is not None:
+                if "text" not in tags_from_filename(asset.path):
                     log.info(
-                        "%s: Key is known to git-annex; registering new path",
-                        asset.path,
+                        "%s: File is binary; registering key with git-annex", asset.path
                     )
                     await self.annex.from_key(key, asset.path)
                     await self.register_url(asset.path, key, bucket_url)
                     await self.register_url(asset.path, key, asset.base_download_url)
                     if (
-                        self.config.backup_remote is not None
+                        remotes is not None
+                        and self.config.backup_remote is not None
                         and self.config.backup_remote not in remotes
                     ):
                         log.warn(
@@ -192,9 +186,15 @@ class Downloader(trio.abc.AsyncResource):
                             self.config.backup_remote,
                         )
                     self.tracker.finish_asset(asset.path)
+                elif asset.size > (10 << 20):
+                    raise RuntimeError(
+                        f"{asset.path} identified as text but is {asset.size} bytes!"
+                    )
                 else:
                     log.info(
-                        "%s: Sending off for download from %s", asset.path, bucket_url
+                        "%s: File is text; sending off for download from %s",
+                        asset.path,
+                        bucket_url,
                     )
                     await sender.send(
                         ToDownload(
@@ -248,57 +248,33 @@ class Downloader(trio.abc.AsyncResource):
                 log.debug("Done feeding URLs to addurl")
 
     async def read_addurl(self) -> None:
-        async with self.post_sender:
-            async with aclosing(
-                aiter(self.addurl)
-            ) as lineiter:  # type: ignore[type-var]
-                async for line in lineiter:
-                    data = json.loads(line)
-                    if "success" not in data:
-                        # Progress message
-                        log.info(
-                            "%s: Downloaded %d / %s bytes (%s)",
-                            data["action"]["file"],
-                            data["byte-progress"],
-                            data.get("total-size", "???"),
-                            data.get("percent-progress", "??.??%"),
-                        )
-                    elif not data["success"]:
-                        log.error(
-                            "%s: download failed:%s",
-                            data["file"],
-                            format_errors(data["error-messages"]),
-                        )
-                        self.in_progress.pop(data["file"])
-                        self.report.failed += 1
-                    else:
-                        path = data["file"]
-                        key = data.get("key")
-                        log.info("%s: Finished downloading (key = %s)", path, key)
-                        self.report.downloaded += 1
-                        dl = self.in_progress.pop(path)
-                        await self.post_sender.send((dl, key))
-            log.debug("Done reading from addurl")
-
-    async def postprocess(self) -> None:
-        async with self.post_receiver:
-            async for dl, key in self.post_receiver:
-                self.tracker.finish_asset(dl.path)
-                if key is not None:
-                    for u in dl.extra_urls or []:
-                        await self.register_url(dl.path, key, u)
-                    annex_hash = key2hash(key)
-                    if dl.sha256_digest != annex_hash:
-                        log.error(
-                            "%s: Hash mismatch!  Dandiarchive reports %s,"
-                            " local file has %s",
-                            dl.path,
-                            dl.sha256_digest,
-                            annex_hash,
-                        )
-                        self.report.hash_mismatches += 1
+        async with aclosing(aiter(self.addurl)) as lineiter:  # type: ignore[type-var]
+            async for line in lineiter:
+                data = json.loads(line)
+                if "byte-progress" in data:
+                    # Progress message
+                    log.info(
+                        "%s: Downloaded %d / %s bytes (%s)",
+                        data["action"]["file"],
+                        data["byte-progress"],
+                        data.get("total-size", "???"),
+                        data.get("percent-progress", "??.??%"),
+                    )
+                elif not data["success"]:
+                    log.error(
+                        "%s: download failed:%s",
+                        data["file"],
+                        format_errors(data["error-messages"]),
+                    )
+                    self.in_progress.pop(data["file"])
+                    self.report.failed += 1
                 else:
-                    log.info("%s: Not managed by git annex; not adding URLs", dl.path)
+                    path = data["file"]
+                    key = data.get("key")
+                    log.info("%s: Finished downloading (key = %s)", path, key)
+                    self.report.downloaded += 1
+                    dl = self.in_progress.pop(path)
+                    self.tracker.finish_asset(dl.path)
                     assert self.nursery is not None
                     self.nursery.start_soon(
                         self.check_unannexed_hash,
@@ -306,7 +282,7 @@ class Downloader(trio.abc.AsyncResource):
                         dl.sha256_digest,
                         name=f"check_unannexed_hash:{dl.path}",
                     )
-            log.debug("Done with download post-processing")
+        log.debug("Done reading from addurl")
 
     async def register_url(self, path: str, key: str, url: str) -> None:
         log.info("%s: Registering URL %s", path, url)
@@ -355,13 +331,14 @@ async def async_assets(
                                 nursery.start_soon(dm.asset_loop, aia)
                                 nursery.start_soon(dm.feed_addurl)
                                 nursery.start_soon(dm.read_addurl)
-                                nursery.start_soon(dm.postprocess)
                         finally:
                             tracker.dump()
             if dandiset.version_id == "draft":
-                if dm.report.downloaded:
+                if dm.report.registered or dm.report.downloaded:
                     log.info(
-                        "%s downloaded for this version segment; committing",
+                        "%s registered, %s downloaded for this version segment;"
+                        " committing",
+                        quantify(dm.report.registered, "asset"),
                         quantify(dm.report.downloaded, "asset"),
                     )
                     if any(

@@ -40,6 +40,7 @@ class Syncer:
         log.info("Asset sync complete!")
         log.info("%s added", quantify(self.report.added, "asset"))
         log.info("%s updated", quantify(self.report.updated, "asset"))
+        log.info("%s registered", quantify(self.report.registered, "asset"))
         log.info("%s sucessfully downloaded", quantify(self.report.downloaded, "asset"))
         self.report.check()
 

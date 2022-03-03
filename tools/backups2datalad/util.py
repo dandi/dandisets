@@ -74,6 +74,7 @@ class Report:
     commits: int = 0
     added: int = 0
     updated: int = 0
+    registered: int = 0
     downloaded: int = 0
     failed: int = 0
     hash_mismatches: int = 0
@@ -83,6 +84,7 @@ class Report:
         self.commits += other.commits
         self.added += other.added
         self.updated += other.updated
+        self.registered += other.registered
         self.downloaded += other.downloaded
         self.failed += other.failed
         self.hash_mismatches += other.hash_mismatches

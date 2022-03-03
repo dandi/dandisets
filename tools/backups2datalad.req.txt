@@ -9,6 +9,7 @@ datalad
 ghrepo ~= 0.1
 httpx ~= 0.20.0
 humanize
+identify ~= 2.0
 morecontext ~= 0.1
 packaging
 PyGithub ~= 1.53
