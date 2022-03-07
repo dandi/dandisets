@@ -52,6 +52,7 @@ class ToDownload:
 
 @dataclass
 class Downloader(trio.abc.AsyncResource):
+    dandiset_id: str
     addurl: TextProcess
     repo: Path
     config: Config
@@ -81,7 +82,9 @@ class Downloader(trio.abc.AsyncResource):
                     break
                 if asset.asset_type == AssetType.ZARR:
                     log.warning(
-                        "%s: Asset is a Zarr; abandoning this Dandiset", asset.path
+                        "%s: Asset is a Zarr; abandoning Dandiset %s",
+                        asset.path,
+                        self.dandiset_id,
                     )
                     downloading = False
                 if downloading:
@@ -323,7 +326,7 @@ async def async_assets(
             ) as p:
                 async with httpx.AsyncClient() as s3client:
                     async with Downloader(
-                        p, ds.pathobj, config, tracker, s3client
+                        dandiset.identifier, p, ds.pathobj, config, tracker, s3client
                     ) as dm:
                         try:
                             async with trio.open_nursery() as nursery:
