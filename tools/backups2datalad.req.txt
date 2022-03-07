@@ -13,4 +13,4 @@ identify ~= 2.0
 morecontext ~= 0.1
 packaging
 PyGithub ~= 1.53
-trio ~= 0.19.0
+trio ~= 0.20.0

@@ -13,6 +13,7 @@ from .util import TextProcess, format_errors, open_git_annex
 @dataclass
 class AsyncAnnex(trio.abc.AsyncResource):
     repo: Path
+    nursery: trio.Nursery
     pfromkey: Optional[TextProcess] = None
     pexaminekey: Optional[TextProcess] = None
     pwhereis: Optional[TextProcess] = None
@@ -30,6 +31,7 @@ class AsyncAnnex(trio.abc.AsyncResource):
         async with self.locks["fromkey"]:
             if self.pfromkey is None:
                 self.pfromkey = await open_git_annex(
+                    self.nursery,
                     "fromkey",
                     "--force",
                     "--batch",
@@ -53,6 +55,7 @@ class AsyncAnnex(trio.abc.AsyncResource):
         async with self.locks["examinekey"]:
             if self.pexaminekey is None:
                 self.pexaminekey = await open_git_annex(
+                    self.nursery,
                     "examinekey",
                     "--batch",
                     "--migrate-to-backend=SHA256E",
@@ -67,6 +70,7 @@ class AsyncAnnex(trio.abc.AsyncResource):
         async with self.locks["whereis"]:
             if self.pwhereis is None:
                 self.pwhereis = await open_git_annex(
+                    self.nursery,
                     "whereis",
                     "--batch-keys",
                     "--json",
@@ -88,6 +92,6 @@ class AsyncAnnex(trio.abc.AsyncResource):
         async with self.locks["registerurl"]:
             if self.pregisterurl is None:
                 self.pregisterurl = await open_git_annex(
-                    "registerurl", "--batch", path=self.repo
+                    self.nursery, "registerurl", "--batch", path=self.repo
                 )
             await self.pregisterurl.send(f"{key} {url}\n")

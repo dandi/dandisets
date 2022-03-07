@@ -51,27 +51,23 @@ class ToDownload:
 
 
 @dataclass
-class Downloader(trio.abc.AsyncResource):
+class Downloader:
     dandiset_id: str
     addurl: TextProcess
     repo: Path
     config: Config
     tracker: AssetTracker
     s3client: httpx.AsyncClient
+    annex: AsyncAnnex
+    nursery: trio.Nursery
     last_timestamp: Optional[datetime] = None
-    nursery: Optional[trio.Nursery] = None
     report: Report = field(init=False, default_factory=Report)
     in_progress: Dict[str, ToDownload] = field(init=False, default_factory=dict)
-    annex: AsyncAnnex = field(init=False)
     download_sender: trio.MemorySendChannel[ToDownload] = field(init=False)
     download_receiver: trio.MemoryReceiveChannel[ToDownload] = field(init=False)
 
     def __post_init__(self) -> None:
-        self.annex = AsyncAnnex(self.repo)
         self.download_sender, self.download_receiver = trio.open_memory_channel(0)
-
-    async def aclose(self) -> None:
-        await self.annex.aclose()
 
     async def asset_loop(self, aia: AsyncIterator[Optional[RemoteAsset]]) -> None:
         now = datetime.now(timezone.utc)
@@ -98,7 +94,6 @@ class Downloader(trio.abc.AsyncResource):
                         )
                         downloading = False
                     else:
-                        assert self.nursery is not None
                         self.nursery.start_soon(
                             self.process_asset,
                             asset,
@@ -279,7 +274,6 @@ class Downloader(trio.abc.AsyncResource):
                     self.report.downloaded += 1
                     dl = self.in_progress.pop(path)
                     self.tracker.finish_asset(dl.path)
-                    assert self.nursery is not None
                     self.nursery.start_soon(
                         self.check_unannexed_hash,
                         dl.path,
@@ -313,30 +307,45 @@ async def async_assets(
         aiterassets(dandiset, done_flag)
     ) as aia:
         while not done_flag.is_set():
-            async with await open_git_annex(
-                "addurl",
-                "--batch",
-                "--with-files",
-                "--jobs",
-                str(config.jobs),
-                "--json",
-                "--json-error-messages",
-                "--json-progress",
-                "--raw",
-                path=ds.pathobj,
-            ) as p:
-                async with httpx.AsyncClient() as s3client:
-                    async with Downloader(
-                        dandiset.identifier, p, ds.pathobj, config, tracker, s3client
-                    ) as dm:
-                        try:
-                            async with trio.open_nursery() as nursery:
-                                dm.nursery = nursery
-                                nursery.start_soon(dm.asset_loop, aia)
-                                nursery.start_soon(dm.feed_addurl)
-                                nursery.start_soon(dm.read_addurl)
-                        finally:
-                            tracker.dump()
+            # We need an outer nursery to use for creating git-annex processes,
+            # and we need an inner nursery for waiting for tasks to complete.
+            # We can't combine the two, because the processes need to outlive
+            # the `start_soon()` calls, so their scopes need to be outside the
+            # inner nursery, which means we have to have an outer nursery as
+            # well.
+            async with trio.open_nursery() as annex_nursery:
+                async with await open_git_annex(
+                    annex_nursery,
+                    "addurl",
+                    "--batch",
+                    "--with-files",
+                    "--jobs",
+                    str(config.jobs),
+                    "--json",
+                    "--json-error-messages",
+                    "--json-progress",
+                    "--raw",
+                    path=ds.pathobj,
+                ) as p, AsyncAnnex(
+                    ds.pathobj, annex_nursery
+                ) as annex, httpx.AsyncClient() as s3client:
+                    try:
+                        async with trio.open_nursery() as nursery:
+                            dm = Downloader(
+                                dandiset_id=dandiset.identifier,
+                                addurl=p,
+                                repo=ds.pathobj,
+                                config=config,
+                                tracker=tracker,
+                                s3client=s3client,
+                                annex=annex,
+                                nursery=nursery,
+                            )
+                            nursery.start_soon(dm.asset_loop, aia)
+                            nursery.start_soon(dm.feed_addurl)
+                            nursery.start_soon(dm.read_addurl)
+                    finally:
+                        tracker.dump()
             if dandiset.version_id == "draft":
                 if dm.report.registered or dm.report.downloaded:
                     log.info(

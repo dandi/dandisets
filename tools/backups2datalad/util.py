@@ -4,6 +4,7 @@ from collections import deque
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
+from functools import partial
 import json
 import logging
 import os
@@ -128,12 +129,12 @@ class TextProcess(trio.abc.AsyncResource):
     buff: bytes = b""
 
     async def aclose(self) -> None:
-        await self.p.aclose()
-        if self.p.returncode not in (None, 0):
+        assert self.p.stdin is not None
+        await self.p.stdin.aclose()
+        rc = await self.p.wait()
+        if rc != 0:
             log.warning(
-                "git-annex %s command exited with return code %d",
-                self.name,
-                self.p.returncode,
+                "git-annex %s command exited with return code %d", self.name, rc
             )
 
     async def send(self, s: str) -> None:
@@ -356,15 +357,19 @@ def key2hash(key: str) -> str:
     return key.split("-")[-1].partition(".")[0]
 
 
-async def open_git_annex(*args: str, path: Optional[Path] = None) -> TextProcess:
-    # Note: The syntax for starting an interactable process will change in trio
-    # 0.20.0.
+async def open_git_annex(
+    nursery: trio.Nursery, *args: str, path: Optional[Path] = None
+) -> TextProcess:
     log.debug("Running git-annex %s", shlex.join(args))
-    p = await trio.open_process(
+    p = await nursery.start(
+        partial(
+            trio.run_process,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            cwd=str(path),  # trio-typing says this has to be a string.
+            check=False,
+        ),
         ["git-annex", *args],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        cwd=str(path),  # trio-typing says this has to be a string.
     )
     return TextProcess(p, name=args[0])
 
