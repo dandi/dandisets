@@ -7,7 +7,7 @@ dandi >= 0.36.0
 dandischema
 datalad
 ghrepo ~= 0.1
-httpx ~= 0.20.0
+httpx ~= 0.22.0
 humanize
 identify ~= 2.0
 morecontext ~= 0.1
