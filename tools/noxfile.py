@@ -10,7 +10,7 @@ def typing(session):
     session.install("-r", "get-upload-stats.req.txt")
     session.install("mypy", "trio-typing[mypy]", "types-python-dateutil")
     session.run(
-        "mypy", "backups2datalad", "test_backups2datalad.py", "get-upload-stats.py"
+        "mypy", "backups2datalad", "test_backups2datalad", "get-upload-stats.py"
     )
 
 
@@ -19,4 +19,4 @@ def test(session):
     session.install("-r", "backups2datalad.req.txt")
     session.install("pytest", "pytest-cov")
     session.install("datalad[tests]")
-    session.run("pytest", *session.posargs, "test_backups2datalad.py")
+    session.run("python", "-m", "pytest", *session.posargs, "test_backups2datalad")
