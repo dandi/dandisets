@@ -183,7 +183,7 @@ class Downloader(trio.abc.AsyncResource):
                         and self.config.backup_remote is not None
                         and self.config.backup_remote not in remotes
                     ):
-                        log.warn(
+                        log.info(
                             "%s: Not in backup remote %s",
                             asset.path,
                             self.config.backup_remote,
