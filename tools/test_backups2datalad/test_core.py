@@ -13,7 +13,7 @@ from datalad.tests.utils import assert_repo_status, ok_file_under_git
 import pytest
 from test_util import GitRepo
 
-from backups2datalad import DEFAULT_BRANCH
+from backups2datalad.consts import DEFAULT_BRANCH
 from backups2datalad.datasetter import DandiDatasetter
 from backups2datalad.util import Config, custom_commit_date
 

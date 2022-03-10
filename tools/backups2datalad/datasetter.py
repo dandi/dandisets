@@ -26,13 +26,17 @@ from morecontext import envset
 from packaging.version import Version
 from urllib3.util.retry import Retry
 
-from . import DEFAULT_BRANCH, log
+from .consts import DANDISETS_REMOTE_PREFIX, DANDISETS_REMOTE_UUID, DEFAULT_BRANCH
 from .syncer import Syncer
 from .util import (
     Config,
+    Remote,
     assets_eq,
+    create_github_sibling,
     custom_commit_date,
     dandi_logging,
+    init_dataset,
+    log,
     quantify,
     readcmd,
     update_dandiset_metadata,
@@ -59,7 +63,6 @@ class DandiDatasetter:
         self,
         dandiset_ids: Sequence[str] = (),
         exclude: Optional[re.Pattern[str]] = None,
-        gh_org: Optional[str] = None,
     ) -> None:
         datalad.cfg.set("datalad.repo.backend", "SHA256E", where="override")
         superds = self.ensure_superdataset()
@@ -67,93 +70,69 @@ class DandiDatasetter:
         ds_stats: List[DandisetStats] = []
         for d in self.get_dandisets(dandiset_ids, exclude=exclude):
             dsdir = self.target_path / d.identifier
-            ds = self.init_dataset(dsdir, create_time=d.version.created)
+            ds = self.init_dataset(
+                dsdir, dandiset_id=d.identifier, create_time=d.version.created
+            )
             changed = self.sync_dataset(d, ds)
             to_save.append(d.identifier)
-            if gh_org is not None:
-                self.ensure_github_remote(ds, d.identifier, gh_org=gh_org)
-            self.tag_releases(d, ds, push=gh_org is not None)
-            if changed and gh_org is not None:
+            self.ensure_github_remote(ds, d.identifier)
+            self.tag_releases(d, ds, push=self.config.gh_org is not None)
+            if changed and self.config.gh_org is not None:
                 log.info("Pushing to sibling")
                 ds.push(to="github", jobs=self.config.jobs)
-            if gh_org is not None:
+            if self.config.gh_org is not None:
                 stats = self.get_dandiset_stats(ds)
-                self.get_github_repo(f"{gh_org}/{d.identifier}").edit(
+                self.get_github_repo(f"{self.config.gh_org}/{d.identifier}").edit(
                     description=self.describe_dandiset(d, stats)
                 )
                 ds_stats.append(stats)
         superds.save(message="CRON update", path=to_save)
-        if gh_org is not None and not dandiset_ids and exclude is None:
+        if self.config.gh_org is not None and not dandiset_ids and exclude is None:
             self.set_superds_description(superds, ds_stats)
 
-    def init_dataset(self, dsdir: Path, create_time: datetime) -> Dataset:
-        ds = Dataset(str(dsdir))
+    def init_dataset(
+        self, dsdir: Path, dandiset_id: str, create_time: datetime
+    ) -> Dataset:
+        ds = Dataset(dsdir)
         if not ds.is_installed():
-            log.info("Creating Datalad dataset")
-            with custom_commit_date(create_time):
-                with envset(
-                    "GIT_CONFIG_PARAMETERS", f"'init.defaultBranch={DEFAULT_BRANCH}'"
-                ):
-                    ds.create(cfg_proc="text2git")
+            remote: Optional[Remote]
             if self.config.backup_remote is not None:
-                ds.repo.init_remote(
-                    self.config.backup_remote,
-                    [
-                        "type=external",
-                        "externaltype=rclone",
-                        "chunk=1GB",
-                        f"target={self.config.backup_remote}",  # I made them matching
-                        "prefix=dandi-dandisets/annexstore",
-                        "embedcreds=no",
-                        "uuid=727f466f-60c3-4778-90b2-b2332856c2f8",
-                        "encryption=none",
-                        # shared, initialized in 000003
-                    ],
+                remote = Remote(
+                    name=self.config.backup_remote,
+                    prefix=DANDISETS_REMOTE_PREFIX,
+                    uuid=DANDISETS_REMOTE_UUID,
                 )
-                ds.repo.call_annex(["untrust", self.config.backup_remote])
-                ds.repo.set_preferred_content(
-                    "wanted",
-                    "(not metadata=distribution-restrictions=*)",
-                    remote=self.config.backup_remote,
-                )
+            else:
+                remote = None
+            init_dataset(
+                ds,
+                desc=f"Dandiset {dandiset_id}",
+                commit_date=create_time,
+                backup_remote=remote,
+            )
         return ds
 
-    def ensure_github_remote(self, ds: Dataset, dandiset_id: str, gh_org: str) -> None:
-        if "github" not in ds.repo.get_remotes():
-            log.info("Creating GitHub sibling for %s", dandiset_id)
-            ds.create_sibling_github(
-                reponame=dandiset_id,
-                existing="skip",
-                name="github",
-                access_protocol="https",
-                github_organization=gh_org,
-                publish_depends=self.config.backup_remote,
-            )
-            ds.config.set(
-                "remote.github.pushurl",
-                f"git@github.com:{gh_org}/{dandiset_id}.git",
-                where="local",
-            )
-            ds.config.set(f"branch.{DEFAULT_BRANCH}.remote", "github", where="local")
-            ds.config.set(
-                f"branch.{DEFAULT_BRANCH}.merge",
-                f"refs/heads/{DEFAULT_BRANCH}",
-                where="local",
-            )
-            while True:
-                try:
-                    r = self.get_github_repo(f"{gh_org}/{dandiset_id}")
-                except UnknownObjectException:
-                    log.warning(
-                        "GitHub sibling for %s not created yet; sleeping and retrying",
-                        dandiset_id,
-                    )
-                    sleep(5)
-                else:
-                    break
-            r.edit(homepage=f"https://identifiers.org/DANDI:{dandiset_id}")
-        else:
-            log.debug("GitHub remote already exists for %s", dandiset_id)
+    def ensure_github_remote(self, ds: Dataset, dandiset_id: str) -> None:
+        if self.config.gh_org is not None:
+            if create_github_sibling(
+                ds,
+                owner=self.config.gh_org,
+                name=dandiset_id,
+                backup_remote=self.config.backup_remote,
+            ):
+                while True:
+                    try:
+                        r = self.get_github_repo(f"{self.config.gh_org}/{dandiset_id}")
+                    except UnknownObjectException:
+                        log.warning(
+                            "GitHub sibling for %s not created yet; sleeping"
+                            " and retrying",
+                            dandiset_id,
+                        )
+                        sleep(5)
+                    else:
+                        break
+                r.edit(homepage=f"https://identifiers.org/DANDI:{dandiset_id}")
 
     def sync_dataset(self, dandiset: RemoteDandiset, ds: Dataset) -> bool:
         # Returns true if any changes were committed to the repository

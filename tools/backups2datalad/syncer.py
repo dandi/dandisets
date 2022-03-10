@@ -7,9 +7,8 @@ from dandi.dandiapi import RemoteDandiset
 from datalad.api import Dataset
 import trio
 
-from . import log
 from .asyncer import async_assets
-from .util import AssetTracker, Config, Report, quantify
+from .util import AssetTracker, Config, Report, log, quantify
 
 
 @dataclass

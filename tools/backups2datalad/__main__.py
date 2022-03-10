@@ -13,9 +13,8 @@ from dandi.consts import DANDISET_ID_REGEX, known_instances
 from dandi.dandiapi import DandiAPIClient
 from datalad.api import Dataset
 
-from . import log
 from .datasetter import DandiDatasetter
-from .util import Config, pdb_excepthook
+from .util import Config, log, pdb_excepthook
 
 
 @click.group()
@@ -120,11 +119,17 @@ def main(
     metavar="REGEX",
     type=re.compile,
 )
-@click.option("--gh-org", help="GitHub organization to create repositories under")
+@click.option(
+    "--gh-org", help="GitHub organization to create Dandiset repositories under"
+)
 @click.option(
     "--tags/--no-tags",
     default=True,
     help="Enable/disable creation of tags for releases  [default: enabled]",
+)
+@click.option("--zarr-backup-remote", help="Name of the rclone remote to push Zarrs to")
+@click.option(
+    "--zarr-gh-org", help="GitHub organization to create Zarr repositories under"
 )
 @click.argument("dandisets", nargs=-1)
 @click.pass_obj
@@ -132,13 +137,18 @@ def update_from_backup(
     datasetter: DandiDatasetter,
     dandisets: Sequence[str],
     backup_remote: Optional[str],
+    zarr_backup_remote: Optional[str],
     gh_org: Optional[str],
+    zarr_gh_org: Optional[str],
     exclude: Optional[re.Pattern[str]],
     tags: bool,
 ) -> None:
     datasetter.config.backup_remote = backup_remote
+    datasetter.config.zarr_backup_remote = zarr_backup_remote
     datasetter.config.enable_tags = tags
-    datasetter.update_from_backup(dandisets, exclude=exclude, gh_org=gh_org)
+    datasetter.config.gh_org = gh_org
+    datasetter.config.zarr_gh_org = zarr_gh_org
+    datasetter.update_from_backup(dandisets, exclude=exclude)
 
 
 @main.command()

@@ -29,7 +29,9 @@ eval python -m tools.backups2datalad \
    --target "$ds" \
    update-from-backup \
    --backup-remote dandi-dandisets-dropbox  \
+   --zarr-backup-remote dandi-dandizarrs-dropbox  \
    --gh-org dandisets \
+   --zarr-gh-org dandizarrs \
    -e '000108$' \
    "$*" 2>&1 | grep -v 'nothing to save, working tree clean'
 

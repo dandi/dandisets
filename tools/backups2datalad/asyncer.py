@@ -20,7 +20,6 @@ import httpx
 from identify.identify import tags_from_filename
 import trio
 
-from . import log
 from .annex import AsyncAnnex
 from .util import (
     AssetTracker,
@@ -28,10 +27,11 @@ from .util import (
     Report,
     TextProcess,
     aiter,
+    arequest,
     custom_commit_date,
-    exp_wait,
     format_errors,
     key2hash,
+    log,
     open_git_annex,
     quantify,
 )
@@ -76,6 +76,7 @@ class Downloader:
             async for asset in aia:
                 if asset is None:
                     break
+                ### TODO: Remove/adjust:
                 if asset.asset_type == AssetType.ZARR:
                     log.warning(
                         "%s: Asset is a Zarr; abandoning Dandiset %s",
@@ -416,35 +417,6 @@ async def aiterassets(
             url = data.get("next")
     log.info("Finished getting assets from API")
     done_flag.set()
-
-
-async def arequest(client: httpx.AsyncClient, method: str, url: str) -> httpx.Response:
-    waits = exp_wait(attempts=5, base=1.25, multiplier=1.25)
-    while True:
-        try:
-            r = await client.request(method, url)
-            r.raise_for_status()
-        except httpx.HTTPError as e:
-            if isinstance(e, httpx.RequestError) or (
-                isinstance(e, httpx.HTTPStatusError) and e.response.status_code >= 500
-            ):
-                try:
-                    delay = next(waits)
-                except StopIteration:
-                    raise e
-                log.warning(
-                    "Retrying %s request to %s in %f seconds as it raised %s: %s",
-                    method.upper(),
-                    url,
-                    delay,
-                    type(e).__name__,
-                    str(e),
-                )
-                await trio.sleep(delay)
-                continue
-            else:
-                raise
-        return r
 
 
 async def asha256(path: Path) -> str:
