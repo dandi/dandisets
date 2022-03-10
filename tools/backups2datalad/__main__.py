@@ -249,6 +249,8 @@ def populate(
                     ],
                     check=True,
                 )
+        else:
+            log.debug("Skipping non-Dandiset node %s", p.name)
 
 
 if __name__ == "__main__":

@@ -34,7 +34,7 @@ eval python -m tools.backups2datalad \
    "$*" 2>&1 | grep -v 'nothing to save, working tree clean'
 
 python -m tools.backups2datalad \
-   -l WARNING \
+   -l DEBUG \
    -J 5 \
    --target "$ds" \
    populate dandi-dandisets-dropbox "$@"
