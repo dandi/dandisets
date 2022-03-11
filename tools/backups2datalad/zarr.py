@@ -30,6 +30,7 @@ from .util import (
     init_dataset,
     key2hash,
     log,
+    maxdatetime,
     quantify,
 )
 
@@ -87,8 +88,7 @@ class ZarrSyncer:
                 self.extant_paths.add(str(entry))
                 bucket_url, st = await self.stat(entry)
                 md5_digest = entry.get_digest().value
-                if self.last_timestamp is None or self.last_timestamp < st.modified:
-                    self.last_timestamp = st.modified
+                self.last_timestamp = maxdatetime(self.last_timestamp, st.modified)
                 dest = self.repo / str(entry)
                 if dest.is_dir():
                     log.info(
@@ -285,7 +285,11 @@ class ZarrSyncer:
 
 
 async def sync_zarr(
-    asset: RemoteZarrAsset, checksum: str, dsdir: Path, config: Config
+    asset: RemoteZarrAsset,
+    checksum: str,
+    dsdir: Path,
+    config: Config,
+    ts_fut: Optional[MiniFuture[Optional[datetime]]] = None,
 ) -> None:
     ds = Dataset(dsdir)
     if not ds.is_installed():
@@ -329,8 +333,12 @@ async def sync_zarr(
             config.jobs,
             config.zarr_gh_org is not None,
         )
+        if ts_fut is not None:
+            ts_fut.set(commit_ts)
     else:
         log.info("Zarr %s: no changes; not committing", asset.zarr)
+        if ts_fut is not None:
+            ts_fut.set(None)
 
 
 def init_zarr_dataset(ds: Dataset, asset: RemoteZarrAsset, config: Config) -> None:
@@ -390,6 +398,6 @@ def get_latest_delete_marker_timestamp(
         Bucket=s3bucket, Prefix=f"zarr/{zarr_id}/"
     ):
         for dm in page.get("DeleteMarkers", []):
-            if dm["IsLatest"] and (ts is None or ts < dm["LastModified"]):
-                ts = dm["LastModified"]
+            if dm["IsLatest"]:
+                ts = maxdatetime(ts, dm["LastModified"])
     return ts

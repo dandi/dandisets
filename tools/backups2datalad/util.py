@@ -74,6 +74,7 @@ class Config:
     zarr_backup_remote: Optional[str] = None
     gh_org: Optional[str] = None
     zarr_gh_org: Optional[str] = None
+    zarr_target: Optional[Path] = None
 
     def match_asset(self, asset_path: str) -> bool:
         return bool(self.asset_filter is None or self.asset_filter.search(asset_path))
@@ -527,3 +528,10 @@ class MiniFuture(Generic[T]):
     async def get(self) -> T:
         await self.event.wait()
         return cast(T, self.value)
+
+
+def maxdatetime(state: Optional[datetime], candidate: datetime) -> datetime:
+    if state is None or state < candidate:
+        return candidate
+    else:
+        return state

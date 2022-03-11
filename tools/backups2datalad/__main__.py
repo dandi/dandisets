@@ -131,6 +131,12 @@ def main(
 @click.option(
     "--zarr-gh-org", help="GitHub organization to create Zarr repositories under"
 )
+@click.option(
+    "-Z",
+    "--zarr-target",
+    type=click.Path(file_okay=False, path_type=Path),
+    required=True,
+)
 @click.argument("dandisets", nargs=-1)
 @click.pass_obj
 def update_from_backup(
@@ -140,6 +146,7 @@ def update_from_backup(
     zarr_backup_remote: Optional[str],
     gh_org: Optional[str],
     zarr_gh_org: Optional[str],
+    zarr_target: Path,
     exclude: Optional[re.Pattern[str]],
     tags: bool,
 ) -> None:
@@ -148,6 +155,7 @@ def update_from_backup(
     datasetter.config.enable_tags = tags
     datasetter.config.gh_org = gh_org
     datasetter.config.zarr_gh_org = zarr_gh_org
+    datasetter.config.zarr_target = zarr_target
     datasetter.update_from_backup(dandisets, exclude=exclude)
 
 
