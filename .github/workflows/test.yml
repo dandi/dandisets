@@ -50,6 +50,11 @@ jobs:
         if: matrix.python-version == '3.9'
         run: sudo apt-get update && sudo apt-get install -y libhdf5-dev
 
+      - name: Configure Git
+        run: |
+          git config --global user.email "github@test.test"
+          git config --global user.name "GitHub Almighty"
+
       - name: Run tests with coverage
         if: matrix.noxenv == 'test'
         run: nox -e test -- --cov-report=xml
