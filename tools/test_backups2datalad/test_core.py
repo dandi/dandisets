@@ -17,7 +17,7 @@ from backups2datalad.consts import DEFAULT_BRANCH
 from backups2datalad.datasetter import DandiDatasetter
 from backups2datalad.util import Config, custom_commit_date
 
-log = logging.getLogger("test_backups2datalad")
+log = logging.getLogger("test_backups2datalad.test_core")
 
 
 def test_1(text_dandiset: SampleDandiset, tmp_path: Path) -> None:

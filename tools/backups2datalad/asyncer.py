@@ -409,7 +409,7 @@ async def async_assets(
                         else:
                             assert config.zarr_target is not None
                             src = str(config.zarr_target / zarr_id)
-                        clone(source=src, path=asset_path)
+                        clone(source=src, path=ds.pathobj / asset_path)
                     elif ts is not None:
                         dm.report.updated += 1
                         ds = Dataset(ds.pathobj / asset_path)
