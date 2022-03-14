@@ -226,6 +226,8 @@ class Downloader:
                     )
 
     async def process_zarr(self, asset: RemoteZarrAsset, zarr_digest: str) -> None:
+        self.tracker.register_asset(asset, force=self.config.force)
+        self.tracker.finish_asset(asset.path)
         # In case the Zarr is empty:
         self.last_timestamp = maxdatetime(self.last_timestamp, asset.created)
         if asset.zarr in self.zarrs:
@@ -403,6 +405,7 @@ async def async_assets(
                 for asset_path in zarrlink.asset_paths:
                     dm.report.downloaded += 1
                     if not (ds.pathobj / asset_path).exists():
+                        log.info("Zarr asset added at %s; cloning", asset_path)
                         dm.report.added += 1
                         if config.zarr_gh_org is not None:
                             src = "https://github.com/{config.zarr_gh_org}/{zarr_id}"
@@ -411,12 +414,13 @@ async def async_assets(
                             src = str(config.zarr_target / zarr_id)
                         clone(source=src, path=ds.pathobj / asset_path)
                     elif ts is not None:
+                        log.info("Zarr asset modified at %s; updating", asset_path)
                         dm.report.updated += 1
-                        ds = Dataset(ds.pathobj / asset_path)
+                        zds = Dataset(ds.pathobj / asset_path)
                         if config.zarr_gh_org is not None:
-                            ds.update(how="ff-only", sibling="github")
+                            zds.update(how="ff-only", sibling="github")
                         else:
-                            ds.update(how="ff-only")
+                            zds.update(how="ff-only")
 
             if dandiset.version_id == "draft":
                 if dm.report.registered or dm.report.downloaded:

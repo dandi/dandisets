@@ -99,7 +99,7 @@ class ZarrSyncer:
                     await trio.to_thread.run_sync(self.rmtree, dest)
                 else:
                     for ep in entry.parents:
-                        pp = dest / str(ep)
+                        pp = self.repo / str(ep)
                         if pp.is_file() or pp.is_symlink():
                             log.info(
                                 "Zarr %s: %s: deleting conflicting file path %s",

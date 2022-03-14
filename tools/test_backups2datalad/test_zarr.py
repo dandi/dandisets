@@ -1,5 +1,6 @@
 import logging
 from pathlib import Path
+from shutil import rmtree
 
 from conftest import SampleDandiset
 from dandi.utils import find_files
@@ -78,6 +79,8 @@ def test_backup_zarr(new_dandiset: SampleDandiset, tmp_path: Path) -> None:
 
     zarrds = Dataset(tmp_path / "zarrs" / asset.zarr)
     check_zarr(zarr_path, zarrds, checksum=asset.get_digest().value)
+    zarrgit = GitRepo(zarrds.pathobj)
+    assert zarrgit.get_commit_count() == 3
 
     ds = Dataset(tmp_path / "ds" / dandiset_id)
     assert_repo_status(ds.path)
@@ -90,3 +93,27 @@ def test_backup_zarr(new_dandiset: SampleDandiset, tmp_path: Path) -> None:
 
     gitrepo = GitRepo(ds.pathobj)
     assert gitrepo.get_commit_count() == 3
+    assert gitrepo.get_commit_subject("HEAD") == "[backups2datalad] 1 file added"
+    assert {asset["path"] for asset in gitrepo.get_assets_json("HEAD")} == {
+        "sample.zarr"
+    }
+
+    rmtree(zarr_path)
+    zarr.save(zarr_path, np.eye(5))
+    new_dandiset.upload()
+    log.info("test_backup_zarr: Syncing modified Zarr dandiset")
+    di.update_from_backup([dandiset_id])
+
+    asset = new_dandiset.dandiset.get_asset_by_path("sample.zarr")
+    check_zarr(zarr_path, zarrds, checksum=asset.get_digest().value)
+    (submod,) = ds.repo.get_submodules_()
+    assert submod["path"] == ds.pathobj / "sample.zarr"
+    assert submod["gitmodule_url"] == str(zarrds.pathobj)
+    assert submod["type"] == "dataset"
+    assert submod["gitshasum"] == zarrds.repo.format_commit("%H")
+    assert gitrepo.get_commit_count() == 4
+    assert gitrepo.get_commit_subject("HEAD") == "[backups2datalad] 1 file updated"
+    assert {asset["path"] for asset in gitrepo.get_assets_json("HEAD")} == {
+        "sample.zarr"
+    }
+    assert zarrgit.get_commit_count() == 4

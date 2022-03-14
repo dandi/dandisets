@@ -280,14 +280,24 @@ def dataset_files(dspath: Path) -> Iterator[str]:
         p
         for p in dspath.iterdir()
         if p.name
-        not in (".dandi", ".datalad", ".git", ".gitattributes", dandiset_metadata_file)
+        not in (
+            ".dandi",
+            ".datalad",
+            ".git",
+            ".gitattributes",
+            ".gitmodules",
+            dandiset_metadata_file,
+        )
     )
     while files:
         p = files.popleft()
         if p.is_file():
             yield str(p.relative_to(dspath))
         elif p.is_dir():
-            files.extend(p.iterdir())
+            if (p / ".git").exists():
+                yield str(p.relative_to(dspath))
+            else:
+                files.extend(p.iterdir())
 
 
 @contextmanager
