@@ -117,3 +117,46 @@ def test_backup_zarr(new_dandiset: SampleDandiset, tmp_path: Path) -> None:
         "sample.zarr"
     }
     assert zarrgit.get_commit_count() == 4
+
+
+def test_backup_zarr_entry_conflicts(
+    new_dandiset: SampleDandiset, tmp_path: Path
+) -> None:
+    zarr_path = new_dandiset.dspath / "sample.zarr"
+    zarr_path.mkdir()
+    (zarr_path / "changed01").mkdir()
+    (zarr_path / "changed01" / "file.txt").write_text("This is test text.\n")
+    (zarr_path / "changed02").write_text("This is also test text.\n")
+    new_dandiset.upload()
+
+    di = DandiDatasetter(
+        dandi_client=new_dandiset.client,
+        target_path=tmp_path / "ds",
+        config=Config(
+            content_url_regex=r".*/blobs/",
+            s3bucket="dandi-api-staging-dandisets",
+            zarr_target=tmp_path / "zarrs",
+        ),
+    )
+    dandiset_id = new_dandiset.dandiset_id
+    log.info("test_backup_zarr_entry_conflicts: Syncing Zarr dandiset")
+    di.update_from_backup([dandiset_id])
+
+    asset = new_dandiset.dandiset.get_asset_by_path("sample.zarr")
+    zarrds = Dataset(tmp_path / "zarrs" / asset.zarr)
+    check_zarr(zarr_path, zarrds, checksum=asset.get_digest().value)
+
+    rmtree(zarr_path)
+    zarr_path.mkdir()
+    (zarr_path / "changed01").write_text("This is now a file.\n")
+    (zarr_path / "changed02").mkdir()
+    (zarr_path / "changed02" / "file.txt").write_text(
+        "The parent is now a directory.\n"
+    )
+    new_dandiset.upload()
+
+    log.info("test_backup_zarr_entry_conflicts: Syncing modified Zarr dandiset")
+    di.update_from_backup([dandiset_id])
+
+    asset = new_dandiset.dandiset.get_asset_by_path("sample.zarr")
+    check_zarr(zarr_path, zarrds, checksum=asset.get_digest().value)
