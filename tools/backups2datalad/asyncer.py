@@ -444,7 +444,7 @@ async def asha256(path: Path) -> str:
     digester = hashlib.sha256()
     async with await tp.open("rb") as fp:
         while True:
-            blob = await fp.read1()
+            blob = await fp.read(65535)
             if blob == b"":
                 break
             digester.update(blob)
