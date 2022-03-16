@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import shlex
 import subprocess
+from time import sleep
 from typing import Any, Iterator, List, Optional, Sequence
 
 from dandi.consts import dandiset_metadata_file
@@ -18,6 +19,7 @@ import datalad
 from datalad.api import Dataset
 from ghrepo import GHRepo
 from github import Github
+from github.GithubException import UnknownObjectException
 from github.Repository import Repository
 from humanize import naturalsize
 from morecontext import envset
@@ -138,9 +140,18 @@ class DandiDatasetter:
                 f"refs/heads/{DEFAULT_BRANCH}",
                 where="local",
             )
-            self.get_github_repo(f"{gh_org}/{dandiset_id}").edit(
-                homepage=f"https://identifiers.org/DANDI:{dandiset_id}"
-            )
+            while True:
+                try:
+                    r = self.get_github_repo(f"{gh_org}/{dandiset_id}")
+                except UnknownObjectException:
+                    log.warning(
+                        "GitHub sibling for %s not created yet; sleeping and retrying",
+                        dandiset_id,
+                    )
+                    sleep(5)
+                else:
+                    break
+            r.edit(homepage=f"https://identifiers.org/DANDI:{dandiset_id}")
         else:
             log.debug("GitHub remote already exists for %s", dandiset_id)
 
