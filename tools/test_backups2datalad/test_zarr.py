@@ -7,6 +7,7 @@ from dandi.utils import find_files
 from datalad.api import Dataset
 from datalad.tests.utils import assert_repo_status
 import numpy as np
+import pytest
 from test_util import GitRepo
 import trio
 import zarr
@@ -119,6 +120,7 @@ def test_backup_zarr(new_dandiset: SampleDandiset, tmp_path: Path) -> None:
     assert zarrgit.get_commit_count() == 4
 
 
+@pytest.mark.skip(reason="https://github.com/datalad/datalad/issues/6558")
 def test_backup_zarr_entry_conflicts(
     new_dandiset: SampleDandiset, tmp_path: Path
 ) -> None:
