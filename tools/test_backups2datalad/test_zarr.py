@@ -162,3 +162,32 @@ def test_backup_zarr_entry_conflicts(
 
     asset = new_dandiset.dandiset.get_asset_by_path("sample.zarr")
     check_zarr(zarr_path, zarrds, checksum=asset.get_digest().value)
+
+
+def test_backup_zarr_delete_zarr(new_dandiset: SampleDandiset, tmp_path: Path) -> None:
+    zarr_path = new_dandiset.dspath / "sample.zarr"
+    zarr.save(zarr_path, np.arange(1000), np.arange(1000, 0, -1))
+    new_dandiset.upload()
+
+    di = DandiDatasetter(
+        dandi_client=new_dandiset.client,
+        target_path=tmp_path / "ds",
+        config=Config(
+            content_url_regex=r".*/blobs/",
+            s3bucket="dandi-api-staging-dandisets",
+            zarr_target=tmp_path / "zarrs",
+        ),
+    )
+    dandiset_id = new_dandiset.dandiset_id
+
+    log.info("test_backup_zarr_delete_zarr: Syncing Zarr dandiset")
+    di.update_from_backup([dandiset_id])
+
+    asset = new_dandiset.dandiset.get_asset_by_path("sample.zarr")
+    asset.delete()
+
+    log.info("test_backup_zarr_delete_zarr: Syncing Zarr dandiset after deleting Zarr")
+    di.update_from_backup([dandiset_id])
+    assert not (tmp_path / "ds" / dandiset_id / "sample.zarr").exists()
+    gitrepo = GitRepo(tmp_path / "ds" / dandiset_id)
+    assert gitrepo.get_commit_subject("HEAD") == "[backups2datalad] 1 file deleted"
