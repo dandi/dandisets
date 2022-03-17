@@ -234,6 +234,7 @@ def populate(
                         "here",
                     ],
                     check=True,
+                    cwd=p,
                 )
                 log.info("Moving assets for Dandiset %s to backup remote", p.name)
                 subprocess.run(
@@ -248,6 +249,7 @@ def populate(
                         backup_remote,
                     ],
                     check=True,
+                    cwd=p,
                 )
         else:
             log.debug("Skipping non-Dandiset node %s", p.name)
