@@ -319,8 +319,10 @@ async def sync_zarr(
         summary = report.get_summary()
         log.info("Zarr %s: %s; committing", asset.zarr, summary)
         if zsync.last_timestamp is None:
-            assert delete_ts is not None
-            commit_ts = delete_ts
+            if delete_ts is None:
+                commit_ts = asset.created
+            else:
+                commit_ts = delete_ts
         elif delete_ts is not None and zsync.last_timestamp < delete_ts:
             commit_ts = delete_ts
         else:
