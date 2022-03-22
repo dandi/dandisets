@@ -9,6 +9,8 @@ PS4='> '
 ds=$(dirname "$0")
 ds=$(dirname "$ds")
 
+zarrds=/mnt/backup/dandi/dandizarrs
+
 source ~/.bashrc-miniconda
 conda activate dandisets
 
@@ -28,6 +30,7 @@ eval python -m tools.backups2datalad \
    -J 5 \
    --target "$ds" \
    update-from-backup \
+   --zarr-target "$zarrds" \
    --backup-remote dandi-dandisets-dropbox  \
    --zarr-backup-remote dandi-dandizarrs-dropbox  \
    --gh-org dandisets \
@@ -40,6 +43,11 @@ python -m tools.backups2datalad \
    -J 5 \
    --target "$ds" \
    populate dandi-dandisets-dropbox "$@"
+
+python -m tools.backups2datalad \
+   -l DEBUG \
+   -J 5 \
+   populate-zarrs --zarr-target "$zarrds" dandi-dandizarrs-dropbox
 
 git pull  # so we possibly merge changes on the server
 datalad push -J 5
