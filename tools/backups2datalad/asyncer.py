@@ -111,13 +111,19 @@ class Downloader(trio.abc.AsyncResource):
                 if not downloading:
                     log.info("%s: Will download in a future run", asset.path)
                     self.tracker.mark_future(asset)
-                    if now - asset.created > timedelta(days=1):
-                        log.error(
-                            "%s: Asset created more than a day ago"
-                            " but SHA256 digest has not yet been computed",
-                            asset.path,
-                        )
-                        self.report.old_unhashed += 1
+                    if (
+                        asset.asset_type == AssetType.BLOB
+                        and now - asset.created > timedelta(days=1)
+                    ):
+                        try:
+                            asset.get_raw_digest(DigestType.sha2_256)
+                        except NotFoundError:
+                            log.error(
+                                "%s: Asset created more than a day ago"
+                                " but SHA256 digest has not yet been computed",
+                                asset.path,
+                            )
+                            self.report.old_unhashed += 1
 
     async def process_asset(
         self,
