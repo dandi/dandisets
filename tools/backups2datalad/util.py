@@ -420,7 +420,7 @@ def exp_wait(
     """
     n = 0
     while attempts is None or n < attempts:
-        yield base ** n * multiplier
+        yield base**n * multiplier
         n += 1
 
 
@@ -469,10 +469,15 @@ def init_dataset(
     cfg_proc: Optional[str] = "text2git",
 ) -> None:
     log.info("Creating dataset for %s", desc)
-    datalad.cfg.set("datalad.repo.backend", backend, where="override")
-    with custom_commit_date(commit_date):
-        with envset("GIT_CONFIG_PARAMETERS", f"'init.defaultBranch={DEFAULT_BRANCH}'"):
-            ds.create(cfg_proc=cfg_proc)
+    try:
+        datalad.cfg.set("datalad.repo.backend", backend, where="override")
+        with custom_commit_date(commit_date):
+            with envset(
+                "GIT_CONFIG_PARAMETERS", f"'init.defaultBranch={DEFAULT_BRANCH}'"
+            ):
+                ds.create(cfg_proc=cfg_proc)
+    finally:
+        datalad.cfg.unset("datalad.repo.backend", where="override")
     if backup_remote is not None:
         ds.repo.init_remote(
             backup_remote.name,
