@@ -91,6 +91,8 @@ class ZarrSyncer:
                 self.last_timestamp = maxdatetime(self.last_timestamp, st.modified)
                 dest = self.repo / str(entry)
                 if dest.is_dir():
+                    # File path is replacing a directory, which needs to be
+                    # deleted
                     log.info(
                         "Zarr %s: %s: deleting conflicting directory at same path",
                         self.zarr_id,
@@ -101,6 +103,8 @@ class ZarrSyncer:
                     for ep in entry.parents:
                         pp = self.repo / str(ep)
                         if pp.is_file() or pp.is_symlink():
+                            # Annexed file at parent path of `entry` needs to
+                            # be replaced with a directory
                             log.info(
                                 "Zarr %s: %s: deleting conflicting file path %s",
                                 self.zarr_id,
