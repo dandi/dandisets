@@ -94,6 +94,21 @@ class AsyncAnnex(trio.abc.AsyncResource):
         async with self.locks["registerurl"]:
             if self.pregisterurl is None:
                 self.pregisterurl = await open_git_annex(
-                    self.nursery, "registerurl", "--batch", path=self.repo
+                    self.nursery,
+                    "registerurl",
+                    "--batch",
+                    "--json",
+                    "--json-error-messages",
+                    path=self.repo,
                 )
             await self.pregisterurl.send(f"{key} {url}\n")
+            ### TODO: Do something if readline() returns "" (signalling EOF)
+            r = json.loads(await self.pregisterurl.readline())
+        if not r["success"]:
+            log.error(
+                "`git annex registerurl %s %s` call failed:%s",
+                key,
+                url,
+                format_errors(r["error-messages"]),
+            )
+            ### TODO: Raise an exception?
