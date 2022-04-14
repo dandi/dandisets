@@ -6,7 +6,7 @@ from datetime import datetime
 import os
 from pathlib import Path
 import sys
-from typing import AsyncIterator, Optional, Set, Tuple
+from typing import TYPE_CHECKING, AsyncIterator, Optional, Set, Tuple
 from urllib.parse import urlparse, urlunparse
 
 import boto3
@@ -33,6 +33,9 @@ from .util import (
     maxdatetime,
     quantify,
 )
+
+if TYPE_CHECKING:
+    from mypy_boto3_s3 import S3Client
 
 if sys.version_info[:2] >= (3, 10):
     from contextlib import aclosing
@@ -389,17 +392,19 @@ def save_and_push(
 async def get_latest_deletion(
     s3bucket: str, zarr_id: str, fut: MiniFuture[Optional[datetime]]
 ) -> None:
+    # Create client outside of thread in order to avoid
+    # <https://github.com/boto/boto3/issues/1592>
+    client = boto3.client("s3", config=BotoConfig(signature_version=UNSIGNED))
     ts = await trio.to_thread.run_sync(
-        get_latest_delete_marker_timestamp, s3bucket, zarr_id
+        get_latest_delete_marker_timestamp, client, s3bucket, zarr_id
     )
     fut.set(ts)
 
 
 def get_latest_delete_marker_timestamp(
-    s3bucket: str, zarr_id: str
+    client: S3Client, s3bucket: str, zarr_id: str
 ) -> Optional[datetime]:
     ts: Optional[datetime] = None
-    client = boto3.client("s3", config=BotoConfig(signature_version=UNSIGNED))
     for page in client.get_paginator("list_object_versions").paginate(
         Bucket=s3bucket, Prefix=f"zarr/{zarr_id}/"
     ):
