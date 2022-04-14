@@ -206,9 +206,10 @@ class ZarrSyncer:
                     ".git",
                     ".gitattributes",
                 ):
-                    pass
+                    is_empty = False
                 elif p.is_dir():
                     dirs.append(p)
+                    is_empty = False
                 elif path not in self.extant_paths:
                     log.info("Zarr %s: deleting %s", self.zarr_id, path)
                     p.unlink()
