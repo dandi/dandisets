@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from functools import partial
 import hashlib
 import json
 from operator import attrgetter
@@ -412,15 +413,21 @@ async def async_assets(
                         else:
                             assert config.zarr_target is not None
                             src = str(config.zarr_target / zarr_id)
-                        clone(source=src, path=ds.pathobj / asset_path)
+                        await trio.to_thread.run_sync(
+                            partial(clone, source=src, path=ds.pathobj / asset_path)
+                        )
                     elif ts is not None:
                         log.info("Zarr asset modified at %s; updating", asset_path)
                         dm.report.updated += 1
                         zds = Dataset(ds.pathobj / asset_path)
                         if config.zarr_gh_org is not None:
-                            zds.update(how="ff-only", sibling="github")
+                            await trio.to_thread.run_sync(
+                                partial(zds.update, how="ff-only", sibling="github")
+                            )
                         else:
-                            zds.update(how="ff-only")
+                            await trio.to_thread.run_sync(
+                                partial(zds.update, how="ff-only")
+                            )
 
             if dandiset.version_id == "draft":
                 if dm.report.registered or dm.report.downloaded:
