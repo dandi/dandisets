@@ -94,3 +94,6 @@ class GitRepo:
         return cast(
             List[dict], json.loads(self.get_blob(commitish, ".dandi/assets.json"))
         )
+
+    def get_commit_count(self) -> int:
+        return int(self.readcmd("rev-list", "--count", "HEAD"))

@@ -4,6 +4,7 @@ from collections import deque
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
+from functools import partial
 import json
 import logging
 import os
@@ -19,6 +20,7 @@ from typing import (
     AsyncIterable,
     AsyncIterator,
     Dict,
+    Generic,
     Iterator,
     List,
     Optional,
@@ -32,18 +34,23 @@ from typing import (
 from dandi.consts import dandiset_metadata_file
 from dandi.dandiapi import RemoteAsset, RemoteDandiset
 from dandi.dandiset import APIDandiset
+import datalad
 from datalad.api import Dataset
 from datalad.support.json_py import dump
+import httpx
 from morecontext import envset
 import trio
 
-from . import log
+from .consts import DEFAULT_BRANCH
+
+log = logging.getLogger("backups2datalad")
+
+T = TypeVar("T")
 
 if sys.version_info[:2] >= (3, 10):
     # So aiter() can be re-exported without mypy complaining:
     from builtins import aiter as aiter
 else:
-    T = TypeVar("T")
 
     def aiter(obj: AsyncIterable[T]) -> AsyncIterator[T]:
         return obj.__aiter__()
@@ -64,6 +71,10 @@ class Config:
     s3bucket: str = "dandiarchive"
     enable_tags: bool = True
     backup_remote: Optional[str] = None
+    zarr_backup_remote: Optional[str] = None
+    gh_org: Optional[str] = None
+    zarr_gh_org: Optional[str] = None
+    zarr_target: Optional[Path] = None
 
     def match_asset(self, asset_path: str) -> bool:
         return bool(self.asset_filter is None or self.asset_filter.search(asset_path))
@@ -128,12 +139,12 @@ class TextProcess(trio.abc.AsyncResource):
     buff: bytes = b""
 
     async def aclose(self) -> None:
-        await self.p.aclose()
-        if self.p.returncode not in (None, 0):
+        assert self.p.stdin is not None
+        await self.p.stdin.aclose()
+        rc = await self.p.wait()
+        if rc != 0:
             log.warning(
-                "git-annex %s command exited with return code %d",
-                self.name,
-                self.p.returncode,
+                "git-annex %s command exited with return code %d", self.name, rc
             )
 
     async def send(self, s: str) -> None:
@@ -269,14 +280,24 @@ def dataset_files(dspath: Path) -> Iterator[str]:
         p
         for p in dspath.iterdir()
         if p.name
-        not in (".dandi", ".datalad", ".git", ".gitattributes", dandiset_metadata_file)
+        not in (
+            ".dandi",
+            ".datalad",
+            ".git",
+            ".gitattributes",
+            ".gitmodules",
+            dandiset_metadata_file,
+        )
     )
     while files:
         p = files.popleft()
         if p.is_file():
             yield str(p.relative_to(dspath))
         elif p.is_dir():
-            files.extend(p.iterdir())
+            if (p / ".git").exists():
+                yield str(p.relative_to(dspath))
+            else:
+                files.extend(p.iterdir())
 
 
 @contextmanager
@@ -356,15 +377,19 @@ def key2hash(key: str) -> str:
     return key.split("-")[-1].partition(".")[0]
 
 
-async def open_git_annex(*args: str, path: Optional[Path] = None) -> TextProcess:
-    # Note: The syntax for starting an interactable process will change in trio
-    # 0.20.0.
+async def open_git_annex(
+    nursery: trio.Nursery, *args: str, path: Optional[Path] = None
+) -> TextProcess:
     log.debug("Running git-annex %s", shlex.join(args))
-    p = await trio.open_process(
+    p = await nursery.start(
+        partial(
+            trio.run_process,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            cwd=str(path),  # trio-typing says this has to be a string.
+            check=False,
+        ),
         ["git-annex", *args],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        cwd=str(path),  # trio-typing says this has to be a string.
     )
     return TextProcess(p, name=args[0])
 
@@ -395,5 +420,133 @@ def exp_wait(
     """
     n = 0
     while attempts is None or n < attempts:
-        yield base ** n * multiplier
+        yield base**n * multiplier
         n += 1
+
+
+async def arequest(client: httpx.AsyncClient, method: str, url: str) -> httpx.Response:
+    waits = exp_wait(attempts=5, base=1.25, multiplier=1.25)
+    while True:
+        try:
+            r = await client.request(method, url, follow_redirects=True)
+            r.raise_for_status()
+        except httpx.HTTPError as e:
+            if isinstance(e, httpx.RequestError) or (
+                isinstance(e, httpx.HTTPStatusError) and e.response.status_code >= 500
+            ):
+                try:
+                    delay = next(waits)
+                except StopIteration:
+                    raise e
+                log.warning(
+                    "Retrying %s request to %s in %f seconds as it raised %s: %s",
+                    method.upper(),
+                    url,
+                    delay,
+                    type(e).__name__,
+                    str(e),
+                )
+                await trio.sleep(delay)
+                continue
+            else:
+                raise
+        return r
+
+
+@dataclass
+class Remote:
+    name: str
+    prefix: str
+    uuid: str
+
+
+def init_dataset(
+    ds: Dataset,
+    desc: str,
+    commit_date: datetime,
+    backup_remote: Optional[Remote] = None,
+    backend: str = "SHA256E",
+    cfg_proc: Optional[str] = "text2git",
+) -> None:
+    log.info("Creating dataset for %s", desc)
+    try:
+        datalad.cfg.set("datalad.repo.backend", backend, where="override")
+        with custom_commit_date(commit_date):
+            with envset(
+                "GIT_CONFIG_PARAMETERS", f"'init.defaultBranch={DEFAULT_BRANCH}'"
+            ):
+                ds.create(cfg_proc=cfg_proc)
+    finally:
+        datalad.cfg.unset("datalad.repo.backend", where="override")
+    if backup_remote is not None:
+        ds.repo.init_remote(
+            backup_remote.name,
+            [
+                "type=external",
+                "externaltype=rclone",
+                "chunk=1GB",
+                f"target={backup_remote.name}",
+                f"prefix={backup_remote.prefix}",
+                "embedcreds=no",
+                f"uuid={backup_remote.uuid}",
+                "encryption=none",
+            ],
+        )
+        ds.repo.call_annex(["untrust", backup_remote])
+        ds.repo.set_preferred_content(
+            "wanted",
+            "(not metadata=distribution-restrictions=*)",
+            remote=backup_remote,
+        )
+
+
+def create_github_sibling(
+    ds: Dataset, owner: str, name: str, backup_remote: Optional[str]
+) -> bool:
+    # Returns True iff sibling was created
+    if "github" not in ds.repo.get_remotes():
+        log.info("Creating GitHub sibling for %s", name)
+        ds.create_sibling_github(
+            reponame=name,
+            existing="skip",
+            name="github",
+            access_protocol="https",
+            github_organization=owner,
+            publish_depends=backup_remote,
+        )
+        ds.config.set(
+            "remote.github.pushurl",
+            f"git@github.com:{owner}/{name}.git",
+            where="local",
+        )
+        ds.config.set(f"branch.{DEFAULT_BRANCH}.remote", "github", where="local")
+        ds.config.set(
+            f"branch.{DEFAULT_BRANCH}.merge",
+            f"refs/heads/{DEFAULT_BRANCH}",
+            where="local",
+        )
+        return True
+    else:
+        log.debug("GitHub remote already exists for %s", name)
+        return False
+
+
+@dataclass
+class MiniFuture(Generic[T]):
+    event: trio.Event = field(default_factory=trio.Event)
+    value: Optional[T] = None
+
+    def set(self, value: T) -> None:
+        self.value = value
+        self.event.set()
+
+    async def get(self) -> T:
+        await self.event.wait()
+        return cast(T, self.value)
+
+
+def maxdatetime(state: Optional[datetime], candidate: datetime) -> datetime:
+    if state is None or state < candidate:
+        return candidate
+    else:
+        return state

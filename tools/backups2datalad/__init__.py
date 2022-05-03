@@ -17,9 +17,3 @@ Later TODOs
 - parallelize across datasets or may be better files (would that be possible within
   dataset?) using DataLad's #5022 ConsumerProducer?
 """
-
-import logging
-
-DEFAULT_BRANCH = "draft"
-
-log = logging.getLogger("backups2datalad")

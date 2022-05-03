@@ -1,13 +1,11 @@
 from datetime import datetime, timezone
 import logging
-import os
 from pathlib import Path
 from time import sleep
-from typing import Any, Dict, Iterator, List, Optional
 
+from conftest import SampleDandiset
 from dandi.consts import dandiset_metadata_file
-from dandi.dandiapi import DandiAPIClient, Version
-from dandi.upload import upload
+from dandi.dandiapi import Version
 from dandi.utils import yaml_load
 from datalad.api import Dataset
 from datalad.support.annexrepo import AnnexRepo
@@ -15,88 +13,17 @@ from datalad.tests.utils import assert_repo_status, ok_file_under_git
 import pytest
 from test_util import GitRepo
 
-from backups2datalad import DEFAULT_BRANCH
+from backups2datalad.consts import DEFAULT_BRANCH
 from backups2datalad.datasetter import DandiDatasetter
 from backups2datalad.util import Config, custom_commit_date
 
-log = logging.getLogger("test_backups2datalad")
+log = logging.getLogger("test_backups2datalad.test_core")
 
 
-@pytest.fixture(autouse=True)
-def capture_all_logs(caplog: pytest.LogCaptureFixture) -> None:
-    caplog.set_level(logging.DEBUG, logger="backups2datalad")
-    caplog.set_level(logging.DEBUG, logger="test_backups2datalad")
-
-
-@pytest.fixture(scope="session")
-def dandi_client() -> DandiAPIClient:
-    api_token = os.environ["DANDI_API_KEY"]
-    with DandiAPIClient.for_dandi_instance("dandi-staging", token=api_token) as client:
-        yield client
-
-
-@pytest.fixture()
-def text_dandiset(
-    dandi_client: DandiAPIClient, tmp_path_factory: pytest.TempPathFactory
-) -> Iterator[Dict[str, Any]]:
-    d = dandi_client.create_dandiset(
-        "Dandiset for testing backups2datalad",
-        {
-            "schemaKey": "Dandiset",
-            "name": "Dandiset for testing backups2datalad",
-            "description": "A test text Dandiset",
-            "contributor": [
-                {
-                    "schemaKey": "Person",
-                    "name": "Wodder, John",
-                    "roleName": ["dcite:Author", "dcite:ContactPerson"],
-                }
-            ],
-            "license": ["spdx:CC0-1.0"],
-            "manifestLocation": ["https://github.com/dandi/dandi-cli"],
-        },
-    )
-    dandiset_id = d.identifier
-    dspath = tmp_path_factory.mktemp("text_dandiset")
-    (dspath / dandiset_metadata_file).write_text(f"identifier: '{dandiset_id}'\n")
-    (dspath / "file.txt").write_text("This is test text.\n")
-    (dspath / "v0.txt").write_text("Version 0\n")
-    (dspath / "subdir1").mkdir()
-    (dspath / "subdir1" / "apple.txt").write_text("Apple\n")
-    (dspath / "subdir2").mkdir()
-    (dspath / "subdir2" / "banana.txt").write_text("Banana\n")
-    (dspath / "subdir2" / "coconut.txt").write_text("Coconut\n")
-
-    def upload_dandiset(paths: Optional[List[str]] = None, **kwargs: Any) -> None:
-        upload(
-            paths=paths or [dspath],
-            dandi_instance="dandi-staging",
-            devel_debug=True,
-            allow_any_path=True,
-            validation="skip",
-            **kwargs,
-        )
-
-    try:
-        upload_dandiset()
-        yield {
-            "client": dandi_client,
-            "dspath": dspath,
-            "dandiset": d,
-            "dandiset_id": dandiset_id,
-            "reupload": upload_dandiset,
-        }
-    finally:
-        for v in d.get_versions():
-            if v.identifier != "draft":
-                dandi_client.delete(f"{d.api_path}versions/{v.identifier}/")
-        d.delete()
-
-
-def test_1(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
+def test_1(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
     # TODO: move pre-setup into a fixture, e.g. local_setup1 or make code work without?
     di = DandiDatasetter(
-        dandi_client=text_dandiset["client"],
+        dandi_client=text_dandiset.client,
         target_path=tmp_path,
         config=Config(
             # gh_org=None,
@@ -120,19 +47,17 @@ def test_1(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
     # ret = di.update_from_backup()
     # assert ret is None, "nothing is returned ATM, if added -- test should be extended"
 
-    dandiset_id = text_dandiset["dandiset_id"]
+    dandiset_id = text_dandiset.dandiset_id
     log.info("test_1: Syncing test dandiset")
     di.update_from_backup([dandiset_id])
 
-    ds = Dataset(
-        tmp_path / text_dandiset["dandiset_id"]
-    )  # but we should get the super-dataset?
+    ds = Dataset(tmp_path / dandiset_id)  # but we should get the super-dataset?
     assert_repo_status(ds.path)  # that all is clean etc
     ok_file_under_git(ds.path, "file.txt")
 
-    (text_dandiset["dspath"] / "new.txt").write_text("This is a new file.\n")
+    (text_dandiset.dspath / "new.txt").write_text("This is a new file.\n")
     log.info("test_1: Updating test dandiset on server")
-    text_dandiset["reupload"]()
+    text_dandiset.upload()
     assert_repo_status(ds.path)  # no side-effects somehow
     log.info("test_1: Syncing test dandiset")
     di.update_from_backup([dandiset_id])
@@ -164,9 +89,9 @@ def test_1(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
         assert metadata.get("doi")
 
     log.info("test_1: Waiting for Dandiset to become valid")
-    text_dandiset["dandiset"].wait_until_valid(65)
+    text_dandiset.dandiset.wait_until_valid(65)
     log.info("test_1: Publishing Dandiset")
-    v1 = text_dandiset["dandiset"].publish().version
+    v1 = text_dandiset.dandiset.publish().version
     version1 = v1.identifier
     log.info("test_1: Syncing test dandiset")
     di.update_from_backup([dandiset_id])
@@ -176,11 +101,11 @@ def test_1(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
     v1_hash = tags[version1]
     check_version_tag(v1)
 
-    (text_dandiset["dspath"] / "new.txt").write_text(
+    (text_dandiset.dspath / "new.txt").write_text(
         "This file's contents were changed.\n"
     )
     log.info("test_1: Updating test dandiset on server")
-    text_dandiset["reupload"]()
+    text_dandiset.upload()
     log.info("test_1: Syncing test dandiset")
     di.update_from_backup([dandiset_id])
     assert_repo_status(ds.path)  # that all is clean etc
@@ -189,9 +114,9 @@ def test_1(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
     ).read_text() == "This file's contents were changed.\n"
 
     log.info("test_1: Waiting for Dandiset to become valid")
-    text_dandiset["dandiset"].wait_until_valid(65)
+    text_dandiset.dandiset.wait_until_valid(65)
     log.info("test_1: Publishing Dandiset")
-    v2 = text_dandiset["dandiset"].publish().version
+    v2 = text_dandiset.dandiset.publish().version
     version2 = v2.identifier
     log.info("test_1: Syncing test dandiset")
     di.update_from_backup([dandiset_id])
@@ -215,7 +140,7 @@ def test_1(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
         }
 
 
-def test_2(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
+def test_2(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
     """
     Test of adding in version-tagging after backups have already been taken.
 
@@ -223,7 +148,7 @@ def test_2(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
     tagging disabled, and then takes another backup with tagging re-enabled.
     """
     di = DandiDatasetter(
-        dandi_client=text_dandiset["client"],
+        dandi_client=text_dandiset.client,
         target_path=tmp_path,
         config=Config(
             content_url_regex=r".*/blobs/",
@@ -232,9 +157,9 @@ def test_2(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
         ),
     )
 
-    dandiset_id = text_dandiset["dandiset_id"]
-    dspath = text_dandiset["dspath"]
-    dandiset = text_dandiset["dandiset"]
+    dandiset_id = text_dandiset.dandiset_id
+    dspath = text_dandiset.dspath
+    dandiset = text_dandiset.dandiset
     log.info("test_2: Creating new backup of Dandiset")
     di.update_from_backup([dandiset_id])
     backupdir = tmp_path / dandiset_id
@@ -252,7 +177,7 @@ def test_2(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
         # Something goes wrong with the download if v{i} and w{i} have the same
         # content.
         (dspath / f"w{i}.txt").write_text(f"Wersion {i}\n")
-        text_dandiset["reupload"]()
+        text_dandiset.upload()
         log.info("test_2: Publishing version #%s", i)
         dandiset.wait_until_valid(65)
         v = dandiset.publish().version
@@ -291,14 +216,14 @@ def test_2(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
         }
 
 
-def test_3(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
+def test_3(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
     """
     Test of "debouncing" (GH-89, GH-97).
 
     This test creates several versions and takes a backup afterwards.
     """
     di = DandiDatasetter(
-        dandi_client=text_dandiset["client"],
+        dandi_client=text_dandiset.client,
         target_path=tmp_path,
         config=Config(
             content_url_regex=r".*/blobs/",
@@ -306,9 +231,9 @@ def test_3(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
             enable_tags=True,
         ),
     )
-    dandiset_id = text_dandiset["dandiset_id"]
-    dspath = text_dandiset["dspath"]
-    dandiset = text_dandiset["dandiset"]
+    dandiset_id = text_dandiset.dandiset_id
+    dspath = text_dandiset.dspath
+    dandiset = text_dandiset.dandiset
     versions = []
     for i in range(1, 4):
         (dspath / "counter.txt").write_text(f"{i}\n")
@@ -321,7 +246,7 @@ def test_3(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
         # Something goes wrong with the download if v{i} and w{i} have the same
         # content.
         (dspath / f"w{i}.txt").write_text(f"Wersion {i}\n")
-        text_dandiset["reupload"]()
+        text_dandiset.upload()
         log.info("test_3: Publishing version #%s", i)
         dandiset.wait_until_valid(65)
         if i < 3:
@@ -371,12 +296,12 @@ def test_3(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
         }
 
 
-def test_4(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
+def test_4(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
     """
     This test creates several versions and takes a backup after each one.
     """
     di = DandiDatasetter(
-        dandi_client=text_dandiset["client"],
+        dandi_client=text_dandiset.client,
         target_path=tmp_path,
         config=Config(
             content_url_regex=r".*/blobs/",
@@ -384,9 +309,9 @@ def test_4(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
             enable_tags=True,
         ),
     )
-    dandiset_id = text_dandiset["dandiset_id"]
-    dspath = text_dandiset["dspath"]
-    dandiset = text_dandiset["dandiset"]
+    dandiset_id = text_dandiset.dandiset_id
+    dspath = text_dandiset.dspath
+    dandiset = text_dandiset.dandiset
     repo = GitRepo(tmp_path / dandiset_id)
     for i in range(1, 4):
         (dspath / "counter.txt").write_text(f"{i}\n")
@@ -399,7 +324,7 @@ def test_4(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
         # Something goes wrong with the download if v{i} and w{i} have the same
         # content.
         (dspath / f"w{i}.txt").write_text(f"Wersion {i}\n")
-        text_dandiset["reupload"]()
+        text_dandiset.upload()
         log.info("test_4: Publishing version #%s", i)
         dandiset.wait_until_valid(65)
         v = dandiset.publish().version
@@ -419,9 +344,9 @@ def test_4(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
         }
 
 
-def test_binary(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
+def test_binary(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
     di = DandiDatasetter(
-        dandi_client=text_dandiset["client"],
+        dandi_client=text_dandiset.client,
         target_path=tmp_path,
         config=Config(
             content_url_regex=r".*/blobs/",
@@ -429,10 +354,10 @@ def test_binary(text_dandiset: Dict[str, Any], tmp_path: Path) -> None:
             enable_tags=True,
         ),
     )
-    dandiset_id = text_dandiset["dandiset_id"]
-    dspath = text_dandiset["dspath"]
+    dandiset_id = text_dandiset.dandiset_id
+    dspath = text_dandiset.dspath
     (dspath / "data.dat").write_bytes(b"\0\1\2\3\4\5")
-    text_dandiset["reupload"]()
+    text_dandiset.upload()
     log.info("test_binary: Syncing test dandiset")
     di.update_from_backup([dandiset_id])
     backup = tmp_path / dandiset_id

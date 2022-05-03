@@ -6,13 +6,14 @@ from typing import Dict, List, Optional
 
 import trio
 
-from . import log
-from .util import TextProcess, format_errors, open_git_annex
+from .util import TextProcess, format_errors, log, open_git_annex
 
 
 @dataclass
 class AsyncAnnex(trio.abc.AsyncResource):
     repo: Path
+    nursery: trio.Nursery
+    digest_type: str = "SHA256"
     pfromkey: Optional[TextProcess] = None
     pexaminekey: Optional[TextProcess] = None
     pwhereis: Optional[TextProcess] = None
@@ -30,6 +31,7 @@ class AsyncAnnex(trio.abc.AsyncResource):
         async with self.locks["fromkey"]:
             if self.pfromkey is None:
                 self.pfromkey = await open_git_annex(
+                    self.nursery,
                     "fromkey",
                     "--force",
                     "--batch",
@@ -49,16 +51,19 @@ class AsyncAnnex(trio.abc.AsyncResource):
             )
             ### TODO: Raise an exception?
 
-    async def mkkey(self, filename: str, size: int, sha256_digest: str) -> str:
+    async def mkkey(self, filename: str, size: int, digest: str) -> str:
         async with self.locks["examinekey"]:
             if self.pexaminekey is None:
                 self.pexaminekey = await open_git_annex(
+                    self.nursery,
                     "examinekey",
                     "--batch",
-                    "--migrate-to-backend=SHA256E",
+                    f"--migrate-to-backend={self.digest_type}E",
                     path=self.repo,
                 )
-            await self.pexaminekey.send(f"SHA256-s{size}--{sha256_digest} {filename}\n")
+            await self.pexaminekey.send(
+                f"{self.digest_type}-s{size}--{digest} {filename}\n"
+            )
             ### TODO: Do something if readline() returns "" (signalling EOF)
             return (await self.pexaminekey.readline()).strip()
 
@@ -67,6 +72,7 @@ class AsyncAnnex(trio.abc.AsyncResource):
         async with self.locks["whereis"]:
             if self.pwhereis is None:
                 self.pwhereis = await open_git_annex(
+                    self.nursery,
                     "whereis",
                     "--batch-keys",
                     "--json",
@@ -88,6 +94,21 @@ class AsyncAnnex(trio.abc.AsyncResource):
         async with self.locks["registerurl"]:
             if self.pregisterurl is None:
                 self.pregisterurl = await open_git_annex(
-                    "registerurl", "--batch", path=self.repo
+                    self.nursery,
+                    "registerurl",
+                    "--batch",
+                    "--json",
+                    "--json-error-messages",
+                    path=self.repo,
                 )
             await self.pregisterurl.send(f"{key} {url}\n")
+            ### TODO: Do something if readline() returns "" (signalling EOF)
+            r = json.loads(await self.pregisterurl.readline())
+        if not r["success"]:
+            log.error(
+                "`git annex registerurl %s %s` call failed:%s",
+                key,
+                url,
+                format_errors(r["error-messages"]),
+            )
+            ### TODO: Raise an exception?

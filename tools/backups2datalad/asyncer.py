@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from functools import partial
 import hashlib
 import json
 from operator import attrgetter
@@ -12,29 +13,32 @@ import sys
 from typing import AsyncIterator, Dict, List, Optional
 from urllib.parse import urlparse, urlunparse
 
-from dandi.dandiapi import AssetType, RemoteAsset, RemoteDandiset
+from dandi.dandiapi import AssetType, RemoteAsset, RemoteDandiset, RemoteZarrAsset
 from dandi.exceptions import NotFoundError
 from dandischema.models import DigestType
-from datalad.api import Dataset
+from datalad.api import Dataset, clone
 import httpx
 from identify.identify import tags_from_filename
 import trio
 
-from . import log
 from .annex import AsyncAnnex
 from .util import (
     AssetTracker,
     Config,
+    MiniFuture,
     Report,
     TextProcess,
     aiter,
+    arequest,
     custom_commit_date,
-    exp_wait,
     format_errors,
     key2hash,
+    log,
+    maxdatetime,
     open_git_annex,
     quantify,
 )
+from .zarr import sync_zarr
 
 if sys.version_info[:2] >= (3, 10):
     from contextlib import aclosing
@@ -51,27 +55,31 @@ class ToDownload:
 
 
 @dataclass
-class Downloader(trio.abc.AsyncResource):
+class ZarrLink:
+    zarr_dspath: Path
+    timestamp_fut: MiniFuture[Optional[datetime]]
+    asset_paths: List[str]
+
+
+@dataclass
+class Downloader:
     dandiset_id: str
     addurl: TextProcess
     repo: Path
     config: Config
     tracker: AssetTracker
     s3client: httpx.AsyncClient
+    annex: AsyncAnnex
+    nursery: trio.Nursery
     last_timestamp: Optional[datetime] = None
-    nursery: Optional[trio.Nursery] = None
     report: Report = field(init=False, default_factory=Report)
     in_progress: Dict[str, ToDownload] = field(init=False, default_factory=dict)
-    annex: AsyncAnnex = field(init=False)
     download_sender: trio.MemorySendChannel[ToDownload] = field(init=False)
     download_receiver: trio.MemoryReceiveChannel[ToDownload] = field(init=False)
+    zarrs: Dict[str, ZarrLink] = field(init=False, default_factory=dict)
 
     def __post_init__(self) -> None:
-        self.annex = AsyncAnnex(self.repo)
         self.download_sender, self.download_receiver = trio.open_memory_channel(0)
-
-    async def aclose(self) -> None:
-        await self.annex.aclose()
 
     async def asset_loop(self, aia: AsyncIterator[Optional[RemoteAsset]]) -> None:
         now = datetime.now(timezone.utc)
@@ -80,32 +88,42 @@ class Downloader(trio.abc.AsyncResource):
             async for asset in aia:
                 if asset is None:
                     break
-                if asset.asset_type == AssetType.ZARR:
-                    log.warning(
-                        "%s: Asset is a Zarr; abandoning Dandiset %s",
-                        asset.path,
-                        self.dandiset_id,
-                    )
-                    downloading = False
                 if downloading:
-                    try:
-                        sha256_digest = asset.get_raw_digest(DigestType.sha2_256)
-                    except NotFoundError:
-                        log.info(
-                            "%s: SHA256 has not been computed yet;"
-                            " not downloading any more assets",
-                            asset.path,
-                        )
-                        downloading = False
+                    if asset.asset_type == AssetType.ZARR:
+                        try:
+                            zarr_digest = asset.get_digest().value
+                        except NotFoundError:
+                            log.info(
+                                "%s: Zarr checksum has not been computed yet;"
+                                " not downloading any more assets",
+                                asset.path,
+                            )
+                            downloading = False
+                        else:
+                            self.nursery.start_soon(
+                                self.process_zarr,
+                                asset,
+                                zarr_digest,
+                                name=f"process_zarr:{asset.path}",
+                            )
                     else:
-                        assert self.nursery is not None
-                        self.nursery.start_soon(
-                            self.process_asset,
-                            asset,
-                            sha256_digest,
-                            self.download_sender.clone(),
-                            name=f"process_asset:{asset.path}",
-                        )
+                        try:
+                            sha256_digest = asset.get_raw_digest(DigestType.sha2_256)
+                        except NotFoundError:
+                            log.info(
+                                "%s: SHA256 has not been computed yet;"
+                                " not downloading any more assets",
+                                asset.path,
+                            )
+                            downloading = False
+                        else:
+                            self.nursery.start_soon(
+                                self.process_asset,
+                                asset,
+                                sha256_digest,
+                                self.download_sender.clone(),
+                                name=f"process_asset:{asset.path}",
+                            )
                 # Not `else`, as we want to "fall through" if `downloading`
                 # is negated above.
                 if not downloading:
@@ -132,8 +150,7 @@ class Downloader(trio.abc.AsyncResource):
         sender: trio.MemorySendChannel[ToDownload],
     ) -> None:
         async with sender:
-            if self.last_timestamp is None or self.last_timestamp < asset.created:
-                self.last_timestamp = asset.created
+            self.last_timestamp = maxdatetime(self.last_timestamp, asset.created)
             dest = self.repo / asset.path
             if not self.tracker.register_asset(asset, force=self.config.force):
                 log.debug(
@@ -173,17 +190,17 @@ class Downloader(trio.abc.AsyncResource):
             if to_update:
                 bucket_url = await self.get_file_bucket_url(asset)
                 dest.unlink(missing_ok=True)
-                key = await self.annex.mkkey(
-                    PurePosixPath(asset.path).name, asset.size, sha256_digest
-                )
-                remotes = await self.annex.get_key_remotes(key)
                 if "text" not in tags_from_filename(asset.path):
                     log.info(
                         "%s: File is binary; registering key with git-annex", asset.path
                     )
+                    key = await self.annex.mkkey(
+                        PurePosixPath(asset.path).name, asset.size, sha256_digest
+                    )
                     await self.annex.from_key(key, asset.path)
                     await self.register_url(asset.path, key, bucket_url)
                     await self.register_url(asset.path, key, asset.base_download_url)
+                    remotes = await self.annex.get_key_remotes(key)
                     if (
                         remotes is not None
                         and self.config.backup_remote is not None
@@ -214,6 +231,35 @@ class Downloader(trio.abc.AsyncResource):
                             sha256_digest=sha256_digest,
                         )
                     )
+
+    async def process_zarr(self, asset: RemoteZarrAsset, zarr_digest: str) -> None:
+        self.tracker.register_asset(asset, force=self.config.force)
+        self.tracker.finish_asset(asset.path)
+        # In case the Zarr is empty:
+        self.last_timestamp = maxdatetime(self.last_timestamp, asset.created)
+        if asset.zarr in self.zarrs:
+            self.zarrs[asset.zarr].asset_paths.append(asset.path)
+        elif self.config.zarr_target is None:
+            raise RuntimeError(
+                f"Zarr encountered in Dandiset {self.dandiset_id} but"
+                " zarr_target not set"
+            )
+        else:
+            zarr_dspath = self.config.zarr_target / asset.zarr
+            ts_fut: MiniFuture[Optional[datetime]] = MiniFuture()
+            self.nursery.start_soon(
+                sync_zarr,
+                asset,
+                zarr_digest,
+                zarr_dspath,
+                self.config,
+                ts_fut,
+            )
+            self.zarrs[asset.zarr] = ZarrLink(
+                zarr_dspath=zarr_dspath,
+                timestamp_fut=ts_fut,
+                asset_paths=[asset.path],
+            )
 
     async def get_file_bucket_url(self, asset: RemoteAsset) -> str:
         log.debug("%s: Fetching bucket URL", asset.path)
@@ -285,7 +331,6 @@ class Downloader(trio.abc.AsyncResource):
                     self.report.downloaded += 1
                     dl = self.in_progress.pop(path)
                     self.tracker.finish_asset(dl.path)
-                    assert self.nursery is not None
                     self.nursery.start_soon(
                         self.check_unannexed_hash,
                         dl.path,
@@ -319,30 +364,77 @@ async def async_assets(
         aiterassets(dandiset, done_flag)
     ) as aia:
         while not done_flag.is_set():
-            async with await open_git_annex(
-                "addurl",
-                "--batch",
-                "--with-files",
-                "--jobs",
-                str(config.jobs),
-                "--json",
-                "--json-error-messages",
-                "--json-progress",
-                "--raw",
-                path=ds.pathobj,
-            ) as p:
-                async with httpx.AsyncClient() as s3client:
-                    async with Downloader(
-                        dandiset.identifier, p, ds.pathobj, config, tracker, s3client
-                    ) as dm:
-                        try:
-                            async with trio.open_nursery() as nursery:
-                                dm.nursery = nursery
-                                nursery.start_soon(dm.asset_loop, aia)
-                                nursery.start_soon(dm.feed_addurl)
-                                nursery.start_soon(dm.read_addurl)
-                        finally:
-                            tracker.dump()
+            # We need an outer nursery to use for creating git-annex processes,
+            # and we need an inner nursery for waiting for tasks to complete.
+            # We can't combine the two, because the processes need to outlive
+            # the `start_soon()` calls, so their scopes need to be outside the
+            # inner nursery, which means we have to have an outer nursery as
+            # well.
+            async with trio.open_nursery() as annex_nursery:
+                async with await open_git_annex(
+                    annex_nursery,
+                    "addurl",
+                    "--batch",
+                    "--with-files",
+                    "--jobs",
+                    str(config.jobs),
+                    "--json",
+                    "--json-error-messages",
+                    "--json-progress",
+                    "--raw",
+                    path=ds.pathobj,
+                ) as p, AsyncAnnex(
+                    ds.pathobj, annex_nursery
+                ) as annex, httpx.AsyncClient() as s3client:
+                    try:
+                        async with trio.open_nursery() as nursery:
+                            dm = Downloader(
+                                dandiset_id=dandiset.identifier,
+                                addurl=p,
+                                repo=ds.pathobj,
+                                config=config,
+                                tracker=tracker,
+                                s3client=s3client,
+                                annex=annex,
+                                nursery=nursery,
+                            )
+                            nursery.start_soon(dm.asset_loop, aia)
+                            nursery.start_soon(dm.feed_addurl)
+                            nursery.start_soon(dm.read_addurl)
+                    finally:
+                        tracker.dump()
+
+            timestamp = dm.last_timestamp
+            for zarr_id, zarrlink in dm.zarrs.items():
+                ts = await zarrlink.timestamp_fut.get()
+                if ts is not None:
+                    timestamp = maxdatetime(timestamp, ts)
+                for asset_path in zarrlink.asset_paths:
+                    dm.report.downloaded += 1
+                    if not (ds.pathobj / asset_path).exists():
+                        log.info("Zarr asset added at %s; cloning", asset_path)
+                        dm.report.added += 1
+                        if config.zarr_gh_org is not None:
+                            src = "https://github.com/{config.zarr_gh_org}/{zarr_id}"
+                        else:
+                            assert config.zarr_target is not None
+                            src = str(config.zarr_target / zarr_id)
+                        await trio.to_thread.run_sync(
+                            partial(clone, source=src, path=ds.pathobj / asset_path)
+                        )
+                    elif ts is not None:
+                        log.info("Zarr asset modified at %s; updating", asset_path)
+                        dm.report.updated += 1
+                        zds = Dataset(ds.pathobj / asset_path)
+                        if config.zarr_gh_org is not None:
+                            await trio.to_thread.run_sync(
+                                partial(zds.update, how="ff-only", sibling="github")
+                            )
+                        else:
+                            await trio.to_thread.run_sync(
+                                partial(zds.update, how="ff-only")
+                            )
+
             if dandiset.version_id == "draft":
                 if dm.report.registered or dm.report.downloaded:
                     log.info(
@@ -355,8 +447,8 @@ async def async_assets(
                         r["state"] != "clean" for r in ds.status(result_renderer=None)
                     ):
                         log.info("Commiting changes")
-                        assert dm.last_timestamp is not None
-                        with custom_commit_date(dm.last_timestamp):
+                        assert timestamp is not None
+                        with custom_commit_date(timestamp):
                             ds.save(message=dm.report.get_commit_message())
                         total_report.commits += 1
                 else:
@@ -413,35 +505,6 @@ async def aiterassets(
             url = data.get("next")
     log.info("Finished getting assets from API")
     done_flag.set()
-
-
-async def arequest(client: httpx.AsyncClient, method: str, url: str) -> httpx.Response:
-    waits = exp_wait(attempts=5, base=1.25, multiplier=1.25)
-    while True:
-        try:
-            r = await client.request(method, url)
-            r.raise_for_status()
-        except httpx.HTTPError as e:
-            if isinstance(e, httpx.RequestError) or (
-                isinstance(e, httpx.HTTPStatusError) and e.response.status_code >= 500
-            ):
-                try:
-                    delay = next(waits)
-                except StopIteration:
-                    raise e
-                log.warning(
-                    "Retrying %s request to %s in %f seconds as it raised %s: %s",
-                    method.upper(),
-                    url,
-                    delay,
-                    type(e).__name__,
-                    str(e),
-                )
-                await trio.sleep(delay)
-                continue
-            else:
-                raise
-        return r
 
 
 async def asha256(path: Path) -> str:

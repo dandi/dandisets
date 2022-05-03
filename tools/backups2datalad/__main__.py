@@ -13,9 +13,8 @@ from dandi.consts import DANDISET_ID_REGEX, known_instances
 from dandi.dandiapi import DandiAPIClient
 from datalad.api import Dataset
 
-from . import log
 from .datasetter import DandiDatasetter
-from .util import Config, pdb_excepthook
+from .util import Config, log, pdb_excepthook
 
 
 @click.group()
@@ -120,11 +119,23 @@ def main(
     metavar="REGEX",
     type=re.compile,
 )
-@click.option("--gh-org", help="GitHub organization to create repositories under")
+@click.option(
+    "--gh-org", help="GitHub organization to create Dandiset repositories under"
+)
 @click.option(
     "--tags/--no-tags",
     default=True,
     help="Enable/disable creation of tags for releases  [default: enabled]",
+)
+@click.option("--zarr-backup-remote", help="Name of the rclone remote to push Zarrs to")
+@click.option(
+    "--zarr-gh-org", help="GitHub organization to create Zarr repositories under"
+)
+@click.option(
+    "-Z",
+    "--zarr-target",
+    type=click.Path(file_okay=False, path_type=Path),
+    required=True,
 )
 @click.argument("dandisets", nargs=-1)
 @click.pass_obj
@@ -132,13 +143,20 @@ def update_from_backup(
     datasetter: DandiDatasetter,
     dandisets: Sequence[str],
     backup_remote: Optional[str],
+    zarr_backup_remote: Optional[str],
     gh_org: Optional[str],
+    zarr_gh_org: Optional[str],
+    zarr_target: Path,
     exclude: Optional[re.Pattern[str]],
     tags: bool,
 ) -> None:
     datasetter.config.backup_remote = backup_remote
+    datasetter.config.zarr_backup_remote = zarr_backup_remote
     datasetter.config.enable_tags = tags
-    datasetter.update_from_backup(dandisets, exclude=exclude, gh_org=gh_org)
+    datasetter.config.gh_org = gh_org
+    datasetter.config.zarr_gh_org = zarr_gh_org
+    datasetter.config.zarr_target = zarr_target
+    datasetter.update_from_backup(dandisets, exclude=exclude)
 
 
 @main.command()
@@ -187,7 +205,7 @@ def release(
         dataset.push(to="github", jobs=datasetter.config.jobs)
 
 
-@main.command()
+@main.command("populate")
 @click.option(
     "-e",
     "--exclude",
@@ -198,7 +216,7 @@ def release(
 @click.argument("backup_remote")
 @click.argument("dandisets", nargs=-1)
 @click.pass_obj
-def populate(
+def populate_cmd(
     datasetter: DandiDatasetter,
     dandisets: Sequence[str],
     backup_remote: str,
@@ -215,44 +233,78 @@ def populate(
             elif not Dataset(p).is_installed():
                 log.info("Dataset %s is not installed; skipping", p.name)
             else:
-                log.info("Downloading assets for Dandiset %s", p.name)
-                subprocess.run(
-                    [
-                        "git-annex",
-                        "get",
-                        "-c",
-                        "annex.retry=3",
-                        "--jobs",
-                        str(datasetter.config.jobs),
-                        "--from=web",
-                        "--not",
-                        "--in",
-                        backup_remote,
-                        "--and",
-                        "--not",
-                        "--in",
-                        "here",
-                    ],
-                    check=True,
-                    cwd=p,
-                )
-                log.info("Moving assets for Dandiset %s to backup remote", p.name)
-                subprocess.run(
-                    [
-                        "git-annex",
-                        "move",
-                        "-c",
-                        "annex.retry=3",
-                        "--jobs",
-                        str(datasetter.config.jobs),
-                        "--to",
-                        backup_remote,
-                    ],
-                    check=True,
-                    cwd=p,
-                )
+                populate(p, backup_remote, f"Dandiset {p.name}", datasetter.config.jobs)
         else:
             log.debug("Skipping non-Dandiset node %s", p.name)
+
+
+@main.command()
+@click.option(
+    "-Z",
+    "--zarr-target",
+    type=click.Path(file_okay=False, path_type=Path),
+    required=True,
+)
+@click.argument("backup_remote")
+@click.argument("zarrs", nargs=-1)
+@click.pass_obj
+def populate_zarrs(
+    datasetter: DandiDatasetter,
+    zarr_target: Path,
+    zarrs: Sequence[str],
+    backup_remote: str,
+) -> None:
+    if zarrs:
+        dirs = [zarr_target / z for z in zarrs]
+    else:
+        dirs = list(zarr_target.iterdir())
+    for p in dirs:
+        if p.is_dir() and p.name not in (".git", ".datalad"):
+            if not Dataset(p).is_installed():
+                log.info("Zarr %s is not installed; skipping", p.name)
+            else:
+                populate(p, backup_remote, f"Zarr {p.name}", datasetter.config.jobs)
+        else:
+            log.debug("Skipping non-Zarr node %s", p.name)
+
+
+def populate(dirpath: Path, backup_remote: str, desc: str, jobs: int) -> None:
+    log.info("Downloading files for %s", desc)
+    subprocess.run(
+        [
+            "git-annex",
+            "get",
+            "-c",
+            "annex.retry=3",
+            "--jobs",
+            str(jobs),
+            "--from=web",
+            "--not",
+            "--in",
+            backup_remote,
+            "--and",
+            "--not",
+            "--in",
+            "here",
+        ],
+        check=True,
+        cwd=dirpath,
+    )
+    log.info("Moving files for %s to backup remote", desc)
+    subprocess.run(
+        [
+            "git-annex",
+            "move",
+            "-c",
+            "annex.retry=3",
+            "--jobs",
+            str(jobs),
+            "--to",
+            backup_remote,
+        ],
+        check=True,
+        cwd=dirpath,
+    )
 
 
 if __name__ == "__main__":
