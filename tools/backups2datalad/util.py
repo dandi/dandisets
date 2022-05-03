@@ -492,11 +492,11 @@ def init_dataset(
                 "encryption=none",
             ],
         )
-        ds.repo.call_annex(["untrust", backup_remote])
+        ds.repo.call_annex(["untrust", backup_remote.name])
         ds.repo.set_preferred_content(
             "wanted",
             "(not metadata=distribution-restrictions=*)",
-            remote=backup_remote,
+            remote=backup_remote.name,
         )
 
 
