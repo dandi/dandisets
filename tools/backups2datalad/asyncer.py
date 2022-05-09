@@ -415,7 +415,7 @@ async def async_assets(
                         log.info("Zarr asset added at %s; cloning", asset_path)
                         dm.report.added += 1
                         if config.zarr_gh_org is not None:
-                            src = "https://github.com/{config.zarr_gh_org}/{zarr_id}"
+                            src = f"https://github.com/{config.zarr_gh_org}/{zarr_id}"
                         else:
                             assert config.zarr_target is not None
                             src = str(config.zarr_target / zarr_id)
