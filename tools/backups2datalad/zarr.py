@@ -297,58 +297,60 @@ async def sync_zarr(
     checksum: str,
     dsdir: Path,
     config: Config,
+    limit: trio.CapacityLimiter,
     ts_fut: Optional[MiniFuture[Optional[datetime]]] = None,
 ) -> None:
-    ds = Dataset(dsdir)
-    if not ds.is_installed():
-        await trio.to_thread.run_sync(init_zarr_dataset, ds, asset, config)
-    async with trio.open_nursery() as nursery:
-        delete_ts_fut: MiniFuture[Optional[datetime]] = MiniFuture()
-        nursery.start_soon(
-            get_latest_deletion, config.s3bucket, asset.zarr, delete_ts_fut
-        )
-        async with AsyncAnnex(dsdir, nursery, digest_type="MD5") as annex:
-            async with httpx.AsyncClient() as s3client:
-                zsync = ZarrSyncer(
-                    api_url=asset.client.api_url,
-                    zarr_id=asset.zarr,
-                    repo=dsdir,
-                    annex=annex,
-                    s3client=s3client,
-                    backup_remote=config.backup_remote,
-                    checksum=checksum,
-                )
-                # Don't use `nursery.start_soon(zsync.run)`, as then the annex
-                # and s3client would be closed before the run() finished.
-                await zsync.run()
-    report = zsync.report
-    delete_ts = await delete_ts_fut.get()
-    if report:
-        summary = report.get_summary()
-        log.info("Zarr %s: %s; committing", asset.zarr, summary)
-        if zsync.last_timestamp is None:
-            if delete_ts is None:
-                commit_ts = asset.created
-            else:
+    async with limit:
+        ds = Dataset(dsdir)
+        if not ds.is_installed():
+            await trio.to_thread.run_sync(init_zarr_dataset, ds, asset, config)
+        async with trio.open_nursery() as nursery:
+            delete_ts_fut: MiniFuture[Optional[datetime]] = MiniFuture()
+            nursery.start_soon(
+                get_latest_deletion, config.s3bucket, asset.zarr, delete_ts_fut
+            )
+            async with AsyncAnnex(dsdir, nursery, digest_type="MD5") as annex:
+                async with httpx.AsyncClient() as s3client:
+                    zsync = ZarrSyncer(
+                        api_url=asset.client.api_url,
+                        zarr_id=asset.zarr,
+                        repo=dsdir,
+                        annex=annex,
+                        s3client=s3client,
+                        backup_remote=config.backup_remote,
+                        checksum=checksum,
+                    )
+                    # Don't use `nursery.start_soon(zsync.run)`, as then the annex
+                    # and s3client would be closed before the run() finished.
+                    await zsync.run()
+        report = zsync.report
+        delete_ts = await delete_ts_fut.get()
+        if report:
+            summary = report.get_summary()
+            log.info("Zarr %s: %s; committing", asset.zarr, summary)
+            if zsync.last_timestamp is None:
+                if delete_ts is None:
+                    commit_ts = asset.created
+                else:
+                    commit_ts = delete_ts
+            elif delete_ts is not None and zsync.last_timestamp < delete_ts:
                 commit_ts = delete_ts
-        elif delete_ts is not None and zsync.last_timestamp < delete_ts:
-            commit_ts = delete_ts
+            else:
+                commit_ts = zsync.last_timestamp
+            await trio.to_thread.run_sync(
+                save_and_push,
+                ds,
+                commit_ts,
+                f"[backups2datalad] {summary}",
+                config.jobs,
+                config.zarr_gh_org is not None,
+            )
+            if ts_fut is not None:
+                ts_fut.set(commit_ts)
         else:
-            commit_ts = zsync.last_timestamp
-        await trio.to_thread.run_sync(
-            save_and_push,
-            ds,
-            commit_ts,
-            f"[backups2datalad] {summary}",
-            config.jobs,
-            config.zarr_gh_org is not None,
-        )
-        if ts_fut is not None:
-            ts_fut.set(commit_ts)
-    else:
-        log.info("Zarr %s: no changes; not committing", asset.zarr)
-        if ts_fut is not None:
-            ts_fut.set(None)
+            log.info("Zarr %s: no changes; not committing", asset.zarr)
+            if ts_fut is not None:
+                ts_fut.set(None)
 
 
 def init_zarr_dataset(ds: Dataset, asset: RemoteZarrAsset, config: Config) -> None:

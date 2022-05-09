@@ -63,7 +63,7 @@ def test_sync_zarr(new_dandiset: SampleDandiset, tmp_path: Path) -> None:
     asset = new_dandiset.dandiset.get_asset_by_path("sample.zarr")
     checksum = asset.get_digest().value
     config = Config(s3bucket="dandi-api-staging-dandisets")
-    trio.run(sync_zarr, asset, checksum, tmp_path, config)
+    trio.run(sync_zarr, asset, checksum, tmp_path, config, trio.CapacityLimiter(1))
     check_zarr(zarr_path, Dataset(tmp_path), checksum)
 
 

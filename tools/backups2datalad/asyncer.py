@@ -22,6 +22,7 @@ from identify.identify import tags_from_filename
 import trio
 
 from .annex import AsyncAnnex
+from .consts import ZARR_LIMIT
 from .util import (
     AssetTracker,
     Config,
@@ -77,9 +78,11 @@ class Downloader:
     download_sender: trio.MemorySendChannel[ToDownload] = field(init=False)
     download_receiver: trio.MemoryReceiveChannel[ToDownload] = field(init=False)
     zarrs: Dict[str, ZarrLink] = field(init=False, default_factory=dict)
+    zarr_limit: trio.CapacityLimiter = field(init=False)
 
     def __post_init__(self) -> None:
         self.download_sender, self.download_receiver = trio.open_memory_channel(0)
+        self.zarr_limit = trio.CapacityLimiter(ZARR_LIMIT)
 
     async def asset_loop(self, aia: AsyncIterator[Optional[RemoteAsset]]) -> None:
         now = datetime.now(timezone.utc)
@@ -248,12 +251,12 @@ class Downloader:
             zarr_dspath = self.config.zarr_target / asset.zarr
             ts_fut: MiniFuture[Optional[datetime]] = MiniFuture()
             self.nursery.start_soon(
-                sync_zarr,
+                partial(sync_zarr, ts_fut=ts_fut),
                 asset,
                 zarr_digest,
                 zarr_dspath,
                 self.config,
-                ts_fut,
+                self.zarr_limit,
             )
             self.zarrs[asset.zarr] = ZarrLink(
                 zarr_dspath=zarr_dspath,
