@@ -141,10 +141,10 @@ class DandiDatasetter:
             raise RuntimeError("Dirty repository; clean or save before running")
         with Syncer(config=self.config, dandiset=dandiset, ds=ds) as syncer:
             with dandi_logging(ds.pathobj) as logfile:
-                update_dandiset_metadata(dandiset, ds)
                 syncer.sync_assets()
                 syncer.prune_deleted()
                 syncer.dump_asset_metadata()
+                update_dandiset_metadata(dandiset, ds)
             assert syncer.report is not None
             if any(r["state"] != "clean" for r in ds.status(result_renderer=None)):
                 log.info("Commiting changes")
