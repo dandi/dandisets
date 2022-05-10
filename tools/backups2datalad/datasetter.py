@@ -215,8 +215,13 @@ class DandiDatasetter:
                 ".gitattributes",
                 dandiset_metadata_file,
             ):
-                files += 1
-                size += filestat["bytesize"]
+                if filestat["type"] == "dataset":
+                    substat = self.get_dandiset_stats(Dataset(filestat["path"]))
+                    files += substat.files
+                    size += substat.size
+                else:
+                    files += 1
+                    size += filestat["bytesize"]
         return DandisetStats(files=files, size=size)
 
     def describe_dandiset(self, dandiset: RemoteDandiset, stats: DandisetStats) -> str:
