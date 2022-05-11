@@ -169,12 +169,24 @@ def update_from_backup(
     metavar="REGEX",
     type=re.compile,
 )
+@click.option(
+    "--gh-org",
+    help="GitHub organization Dandiset repositories are located under",
+    required=True,
+)
+@click.option(
+    "--zarr-gh-org",
+    help="GitHub organization Zarr repositories are located under",
+    required=True,
+)
 @click.argument("dandisets", nargs=-1)
 @click.pass_obj
 def update_github_metadata(
     datasetter: DandiDatasetter,
     dandisets: Sequence[str],
     exclude: Optional[re.Pattern[str]],
+    gh_org: str,
+    zarr_gh_org: str,
 ) -> None:
     """
     Update the homepages and descriptions for the GitHub repositories for the
@@ -184,6 +196,8 @@ def update_github_metadata(
     `--target` must point to a clone of the superdataset in which every
     Dandiset subdataset is installed.
     """
+    datasetter.config.gh_org = gh_org
+    datasetter.config.zarr_gh_org = zarr_gh_org
     datasetter.update_github_metadata(dandisets, exclude=exclude)
 
 

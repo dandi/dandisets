@@ -77,20 +77,11 @@ class DandiDatasetter:
             to_save.append(d.identifier)
             self.ensure_github_remote(ds, d.identifier)
             self.tag_releases(d, ds, push=self.config.gh_org is not None)
-            if changed and self.config.gh_org is not None:
-                log.info("Pushing to sibling")
-                ds.push(to="github", jobs=self.config.jobs)
             if self.config.gh_org is not None:
-                stats, zarrstats = self.get_dandiset_stats(ds)
-                self.get_github_repo(f"{self.config.gh_org}/{d.identifier}").edit(
-                    description=self.describe_dandiset(d, stats)
-                )
-                ds_stats.append(stats)
-                if self.config.zarr_gh_org is not None:
-                    for zarr_id, zarr_stat in zarrstats.items():
-                        self.get_github_repo(
-                            f"{self.config.zarr_gh_org}/{zarr_id}"
-                        ).edit(description=self.describe_zarr(zarr_stat))
+                if changed:
+                    log.info("Pushing to sibling")
+                    ds.push(to="github", jobs=self.config.jobs)
+                ds_stats.append(self.set_dandiset_gh_metadata(d, ds))
         superds.save(message="CRON update", path=to_save)
         if self.config.gh_org is not None and not dandiset_ids and exclude is None:
             self.set_superds_description(superds, ds_stats)
@@ -186,21 +177,7 @@ class DandiDatasetter:
         ds_stats: List[DandisetStats] = []
         for d in self.get_dandisets(dandiset_ids, exclude=exclude):
             ds = Dataset(self.target_path / d.identifier)
-            repo = self.get_github_repo_for_dataset(ds)
-            log.info("Setting metadata for %s ...", repo.full_name)
-            stats, zarrstats = self.get_dandiset_stats(ds)
-            repo.edit(
-                homepage=f"https://identifiers.org/DANDI:{d.identifier}",
-                description=self.describe_dandiset(d, stats),
-            )
-            ds_stats.append(stats)
-            if self.config.zarr_gh_org is not None:
-                for zarr_id, zarr_stat in zarrstats.items():
-                    zarr_repo = self.get_github_repo(
-                        f"{self.config.zarr_gh_org}/{zarr_id}"
-                    )
-                    log.info("Setting metadata for %s ...", zarr_repo.full_name)
-                    zarr_repo.edit(description=self.describe_zarr(zarr_stat))
+            ds_stats.append(self.set_dandiset_gh_metadata(d, ds))
         if not dandiset_ids and exclude is None:
             superds = Dataset(self.target_path)
             self.set_superds_description(superds, ds_stats)
@@ -250,6 +227,22 @@ class DandiDatasetter:
                     files += 1
                     size += filestat["bytesize"]
         return (DandisetStats(files=files, size=size), substats)
+
+    def set_dandiset_gh_metadata(self, d: RemoteDandiset, ds: Dataset) -> DandisetStats:
+        assert self.config.gh_org is not None
+        assert self.config.zarr_gh_org is not None
+        repo = self.get_github_repo(f"{self.config.gh_org}/{d.identifier}")
+        log.info("Setting metadata for %s ...", repo.full_name)
+        stats, zarrstats = self.get_dandiset_stats(ds)
+        repo.edit(
+            homepage=f"https://identifiers.org/DANDI:{d.identifier}",
+            description=self.describe_dandiset(d, stats),
+        )
+        for zarr_id, zarr_stat in zarrstats.items():
+            zarr_repo = self.get_github_repo(f"{self.config.zarr_gh_org}/{zarr_id}")
+            log.info("Setting metadata for %s ...", zarr_repo.full_name)
+            zarr_repo.edit(description=self.describe_zarr(zarr_stat))
+        return stats
 
     def describe_dandiset(self, dandiset: RemoteDandiset, stats: DandisetStats) -> str:
         metadata = dandiset.get_raw_metadata()
