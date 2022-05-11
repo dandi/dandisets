@@ -81,13 +81,13 @@ class DandiDatasetter:
                 log.info("Pushing to sibling")
                 ds.push(to="github", jobs=self.config.jobs)
             if self.config.gh_org is not None:
-                stats, substats = self.get_dandiset_stats(ds)
+                stats, zarrstats = self.get_dandiset_stats(ds)
                 self.get_github_repo(f"{self.config.gh_org}/{d.identifier}").edit(
                     description=self.describe_dandiset(d, stats)
                 )
                 ds_stats.append(stats)
                 if self.config.zarr_gh_org is not None:
-                    for zarr_id, zarr_stat in substats.items():
+                    for zarr_id, zarr_stat in zarrstats.items():
                         self.get_github_repo(
                             f"{self.config.zarr_gh_org}/{zarr_id}"
                         ).edit(description=self.describe_zarr(zarr_stat))
@@ -188,14 +188,14 @@ class DandiDatasetter:
             ds = Dataset(self.target_path / d.identifier)
             repo = self.get_github_repo_for_dataset(ds)
             log.info("Setting metadata for %s ...", repo.full_name)
-            stats, substats = self.get_dandiset_stats(ds)
+            stats, zarrstats = self.get_dandiset_stats(ds)
             repo.edit(
                 homepage=f"https://identifiers.org/DANDI:{d.identifier}",
                 description=self.describe_dandiset(d, stats),
             )
             ds_stats.append(stats)
             if self.config.zarr_gh_org is not None:
-                for zarr_id, zarr_stat in substats.items():
+                for zarr_id, zarr_stat in zarrstats.items():
                     zarr_repo = self.get_github_repo(
                         f"{self.config.zarr_gh_org}/{zarr_id}"
                     )
