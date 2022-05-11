@@ -150,6 +150,8 @@ def update_from_backup(
     exclude: Optional[re.Pattern[str]],
     tags: bool,
 ) -> None:
+    if (gh_org is None) != (zarr_gh_org is None):
+        raise click.UsageError("--gh-org and --zarr-gh-org must be defined together")
     datasetter.config.backup_remote = backup_remote
     datasetter.config.zarr_backup_remote = zarr_backup_remote
     datasetter.config.enable_tags = tags
