@@ -6,7 +6,7 @@ click >= 8.0.1
 click-loglevel ~= 0.2
 dandi >= 0.36.0
 dandischema
-datalad
+datalad >= 0.16.0
 ghrepo ~= 0.1
 httpx ~= 0.22.0
 humanize

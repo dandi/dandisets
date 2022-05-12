@@ -64,7 +64,7 @@ class DandiDatasetter:
         dandiset_ids: Sequence[str] = (),
         exclude: Optional[re.Pattern[str]] = None,
     ) -> None:
-        datalad.cfg.set("datalad.repo.backend", "SHA256E", where="override")
+        datalad.cfg.set("datalad.repo.backend", "SHA256E", scope="override")
         superds = self.ensure_superdataset()
         to_save: List[str] = []
         ds_stats: List[DandisetStats] = []
