@@ -14,7 +14,7 @@ from test_util import GitRepo
 import trio
 import zarr
 
-from backups2datalad.datasetter import DandiDatasetter
+from backups2datalad.datasetter import DandiDatasetter, DandisetStats
 from backups2datalad.util import Config
 from backups2datalad.zarr import CHECKSUM_FILE, sync_zarr
 
@@ -70,6 +70,7 @@ def test_sync_zarr(new_dandiset: SampleDandiset, tmp_path: Path) -> None:
 def test_backup_zarr(new_dandiset: SampleDandiset, tmp_path: Path) -> None:
     zarr_path = new_dandiset.dspath / "sample.zarr"
     zarr.save(zarr_path, np.arange(1000), np.arange(1000, 0, -1))
+    (new_dandiset.dspath / "file.txt").write_text("This is test text.\n")
     new_dandiset.upload()
     asset = new_dandiset.dandiset.get_asset_by_path("sample.zarr")
     di = DandiDatasetter(
@@ -101,10 +102,16 @@ def test_backup_zarr(new_dandiset: SampleDandiset, tmp_path: Path) -> None:
 
     gitrepo = GitRepo(ds.pathobj)
     assert gitrepo.get_commit_count() == 3
-    assert gitrepo.get_commit_subject("HEAD") == "[backups2datalad] 1 file added"
+    assert gitrepo.get_commit_subject("HEAD") == "[backups2datalad] 2 files added"
     assert {asset["path"] for asset in gitrepo.get_assets_json("HEAD")} == {
-        "sample.zarr"
+        "file.txt",
+        "sample.zarr",
     }
+
+    assert di.get_dandiset_stats(ds) == (
+        DandisetStats(files=7, size=1576),
+        {asset.zarr: DandisetStats(files=6, size=1557)},
+    )
 
     rmtree(zarr_path)
     zarr.save(zarr_path, np.eye(5))
@@ -122,7 +129,8 @@ def test_backup_zarr(new_dandiset: SampleDandiset, tmp_path: Path) -> None:
     assert gitrepo.get_commit_count() == 4
     assert gitrepo.get_commit_subject("HEAD") == "[backups2datalad] 1 file updated"
     assert {asset["path"] for asset in gitrepo.get_assets_json("HEAD")} == {
-        "sample.zarr"
+        "file.txt",
+        "sample.zarr",
     }
     assert zarrgit.get_commit_count() == 4
 
