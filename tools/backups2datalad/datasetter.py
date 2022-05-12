@@ -210,11 +210,12 @@ class DandiDatasetter:
                 ".dandi",
                 ".datalad",
                 ".gitattributes",
+                ".gitmodules",
                 dandiset_metadata_file,
             ):
                 if filestat["type"] == "dataset":
                     zarr_ds = Dataset(filestat["path"])
-                    zarr_id = Path(self.get_remote_url(ds)).name
+                    zarr_id = Path(self.get_remote_url(zarr_ds)).name
                     try:
                         zarr_stat = substats[zarr_id]
                     except KeyError:
