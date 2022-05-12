@@ -470,14 +470,14 @@ def init_dataset(
 ) -> None:
     log.info("Creating dataset for %s", desc)
     try:
-        datalad.cfg.set("datalad.repo.backend", backend, where="override")
+        datalad.cfg.set("datalad.repo.backend", backend, scope="override")
         with custom_commit_date(commit_date):
             with envset(
                 "GIT_CONFIG_PARAMETERS", f"'init.defaultBranch={DEFAULT_BRANCH}'"
             ):
                 ds.create(cfg_proc=cfg_proc)
     finally:
-        datalad.cfg.unset("datalad.repo.backend", where="override")
+        datalad.cfg.unset("datalad.repo.backend", scope="override")
     if backup_remote is not None:
         ds.repo.init_remote(
             backup_remote.name,
@@ -517,13 +517,13 @@ def create_github_sibling(
         ds.config.set(
             "remote.github.pushurl",
             f"git@github.com:{owner}/{name}.git",
-            where="local",
+            scope="local",
         )
-        ds.config.set(f"branch.{DEFAULT_BRANCH}.remote", "github", where="local")
+        ds.config.set(f"branch.{DEFAULT_BRANCH}.remote", "github", scope="local")
         ds.config.set(
             f"branch.{DEFAULT_BRANCH}.merge",
             f"refs/heads/{DEFAULT_BRANCH}",
-            where="local",
+            scope="local",
         )
         return True
     else:
