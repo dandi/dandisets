@@ -6,17 +6,15 @@ from datetime import datetime
 import os
 from pathlib import Path
 import sys
-from typing import TYPE_CHECKING, AsyncIterator, Optional, Set, Tuple
-from urllib.parse import urlparse, urlunparse
+from typing import AsyncIterator, Iterator, Optional, Set, Tuple
+from urllib.parse import quote
 
+from aiobotocore.session import get_session
 import anyio
-import boto3
 from botocore import UNSIGNED
 from botocore.client import Config as BotoConfig
-from dandi.dandiapi import RemoteZarrAsset, RemoteZarrEntry, ZarrEntryStat, ZarrListing
+from dandi.dandiapi import RemoteZarrAsset
 from datalad.api import Dataset
-import dateutil.parser
-import httpx
 
 from .annex import AsyncAnnex
 from .consts import ZARRS_REMOTE_PREFIX, ZARRS_REMOTE_UUID
@@ -24,7 +22,6 @@ from .util import (
     Config,
     MiniFuture,
     Remote,
-    arequest,
     create_github_sibling,
     custom_commit_date,
     init_dataset,
@@ -34,9 +31,6 @@ from .util import (
     quantify,
 )
 
-if TYPE_CHECKING:
-    from mypy_boto3_s3 import S3Client
-
 if sys.version_info[:2] >= (3, 10):
     from contextlib import aclosing
 else:
@@ -44,6 +38,29 @@ else:
 
 
 CHECKSUM_FILE = ".zarr-checksum"
+
+
+@dataclass
+class ZarrEntry:
+    parts: Tuple[str, ...]
+    size: int
+    md5_digest: str
+    bucket_url: str
+
+    def __str__(self) -> str:
+        return "/".join(self.parts)
+
+    @property
+    def name(self) -> str:
+        return self.parts[-1]
+
+    @property
+    def parents(self) -> Iterator[str]:
+        parts = self.parts
+        yield "/".join(parts)
+        while parts:
+            parts = parts[:-1]
+            yield "/".join(parts)
 
 
 @dataclass
@@ -77,7 +94,7 @@ class ZarrSyncer:
     zarr_id: str
     repo: Path
     annex: AsyncAnnex
-    s3client: httpx.AsyncClient
+    s3bucket: str
     backup_remote: Optional[str]
     checksum: str
     last_timestamp: Optional[datetime] = None
@@ -89,9 +106,6 @@ class ZarrSyncer:
             async for entry in ait:
                 log.info("Zarr %s: %s: Syncing", self.zarr_id, entry)
                 self.extant_paths.add(str(entry))
-                bucket_url, st = await self.stat(entry)
-                md5_digest = entry.get_digest().value
-                self.last_timestamp = maxdatetime(self.last_timestamp, st.modified)
                 dest = self.repo / str(entry)
                 if dest.is_dir():
                     # File path is replacing a directory, which needs to be
@@ -104,7 +118,7 @@ class ZarrSyncer:
                     await anyio.to_thread.run_sync(self.rmtree, dest)
                 else:
                     for ep in entry.parents:
-                        pp = self.repo / str(ep)
+                        pp = self.repo / ep
                         if pp.is_file() or pp.is_symlink():
                             # Annexed file at parent path of `entry` needs to
                             # be replaced with a directory
@@ -132,7 +146,7 @@ class ZarrSyncer:
                         self.zarr_id,
                         entry,
                     )
-                    if md5_digest == await self.get_annex_hash(dest):
+                    if entry.md5_digest == self.get_annex_hash(dest):
                         log.info(
                             "Zarr %s: %s: File in dataset, and hash shows no"
                             " modification; will not update",
@@ -150,10 +164,12 @@ class ZarrSyncer:
                         self.report.updated += 1
                 if to_update:
                     dest.unlink(missing_ok=True)
-                    key = await self.annex.mkkey(entry.name, st.size, md5_digest)
+                    key = await self.annex.mkkey(
+                        entry.name, entry.size, entry.md5_digest
+                    )
                     remotes = await self.annex.get_key_remotes(key)
                     await self.annex.from_key(key, str(entry))
-                    await self.register_url(str(entry), key, bucket_url)
+                    await self.register_url(str(entry), key, entry.bucket_url)
                     await self.register_url(
                         str(entry),
                         key,
@@ -224,59 +240,32 @@ class ZarrSyncer:
             if d.parent != self.repo and not any(d.parent.iterdir()):
                 empty_dirs.append(d.parent)
 
-    async def aiter_file_entries(self) -> AsyncIterator[RemoteZarrEntry]:
-        root = RemoteZarrEntry(client=None, zarr_id=self.zarr_id, parts=())
-        dirs = deque([root])
-        async with httpx.AsyncClient() as client:
-            while dirs:
-                d = dirs.popleft()
-                path = "".join(p + "/" for p in d.parts)
-                log.debug(
-                    "Zarr %s: Getting listing for %s",
-                    self.zarr_id,
-                    path or "root directory",
-                )
-                try:
-                    r = await arequest(
-                        client, "GET", f"{self.api_url}/zarr/{self.zarr_id}.zarr/{path}"
-                    )
-                except httpx.HTTPStatusError as e:
-                    if e.response.status_code == 404 and d.is_root():
-                        # Empty Zarr
-                        return
-                    else:
-                        raise
-                listing = ZarrListing.parse_obj(r.json())
-                for name in listing.dirnames:
-                    dirs.append(
-                        d._get_subpath(
-                            name, isdir=True, checksum=listing.checksums[name]
+    async def aiter_file_entries(self) -> AsyncIterator[ZarrEntry]:
+        prefix = f"zarr/{self.zarr_id}/"
+        async with get_session().create_client(
+            "s3", config=BotoConfig(signature_version=UNSIGNED)
+        ) as client:
+            async for page in client.get_paginator("list_object_versions").paginate(
+                Bucket=self.s3bucket, Prefix=prefix
+            ):
+                for v in page.get("Versions", []):
+                    if v["IsLatest"]:
+                        self.last_timestamp = maxdatetime(
+                            self.last_timestamp, v["LastModified"]
                         )
-                    )
-                for name in listing.filenames:
-                    yield d._get_subpath(
-                        name, isdir=False, checksum=listing.checksums[name]
-                    )
+                        yield ZarrEntry(
+                            parts=tuple(v["Key"][len(prefix) :].split("/")),
+                            size=v["Size"],
+                            md5_digest=v["ETag"].strip('"'),
+                            bucket_url=f"https://{self.s3bucket}.s3.amazonaws.com/{quote(v['Key'])}?versionId={v['VersionId']}",
+                        )
+                for dm in page.get("DeleteMarkers", []):
+                    if dm["IsLatest"]:
+                        self.last_timestamp = maxdatetime(
+                            self.last_timestamp, dm["LastModified"]
+                        )
 
-    async def stat(self, entry: RemoteZarrEntry) -> Tuple[str, ZarrEntryStat]:
-        # Returns the versioned AWS URL for the entry and the entry's size and
-        # modified timestamp
-        log.debug("Zarr %s: Querying S3 for details on %s", self.zarr_id, entry)
-        r = await arequest(
-            self.s3client,
-            "HEAD",
-            f"{self.api_url}/zarr/{self.zarr_id}.zarr/{entry}",
-        )
-        urlbits = urlparse(str(r.url))
-        version_id = r.headers["x-amz-version-id"]
-        aws_url = urlunparse(urlbits._replace(query=f"versionId={version_id}"))
-        st = ZarrEntryStat(
-            size=int(r.headers["Content-Length"]),
-            modified=dateutil.parser.parse(r.headers["Last-Modified"]),
-        )
-        return (aws_url, st)
-
-    async def get_annex_hash(self, filepath: Path) -> str:
+    def get_annex_hash(self, filepath: Path) -> str:
         # OPT: do not bother checking or talking to annex --
         # shaves off about 20% of runtime on 000003, so let's just
         # not bother checking etc but judge from the resolved path to be
@@ -309,36 +298,25 @@ async def sync_zarr(
         if not ds.is_installed():
             await anyio.to_thread.run_sync(init_zarr_dataset, ds, asset, config)
         async with anyio.create_task_group() as nursery:
-            delete_ts_fut: MiniFuture[Optional[datetime]] = MiniFuture()
-            nursery.start_soon(
-                get_latest_deletion, config.s3bucket, asset.zarr, delete_ts_fut
-            )
             async with AsyncAnnex(dsdir, nursery, digest_type="MD5") as annex:
-                async with httpx.AsyncClient() as s3client:
-                    zsync = ZarrSyncer(
-                        api_url=asset.client.api_url,
-                        zarr_id=asset.zarr,
-                        repo=dsdir,
-                        annex=annex,
-                        s3client=s3client,
-                        backup_remote=config.backup_remote,
-                        checksum=checksum,
-                    )
-                    # Don't use `nursery.start_soon(zsync.run)`, as then the annex
-                    # and s3client would be closed before the run() finished.
-                    await zsync.run()
+                zsync = ZarrSyncer(
+                    api_url=asset.client.api_url,
+                    zarr_id=asset.zarr,
+                    repo=dsdir,
+                    annex=annex,
+                    s3bucket=config.s3bucket,
+                    backup_remote=config.backup_remote,
+                    checksum=checksum,
+                )
+                # Don't use `nursery.start_soon(zsync.run)`, as then the annex
+                # would be closed before the run() finished.
+                await zsync.run()
         report = zsync.report
-        delete_ts = await delete_ts_fut.get()
         if report:
             summary = report.get_summary()
             log.info("Zarr %s: %s; committing", asset.zarr, summary)
             if zsync.last_timestamp is None:
-                if delete_ts is None:
-                    commit_ts = asset.created
-                else:
-                    commit_ts = delete_ts
-            elif delete_ts is not None and zsync.last_timestamp < delete_ts:
-                commit_ts = delete_ts
+                commit_ts = asset.created
             else:
                 commit_ts = zsync.last_timestamp
             await anyio.to_thread.run_sync(
@@ -394,28 +372,3 @@ def save_and_push(
         ds.save(message=commit_msg)
     if push:
         ds.push(to="github", jobs=jobs)
-
-
-async def get_latest_deletion(
-    s3bucket: str, zarr_id: str, fut: MiniFuture[Optional[datetime]]
-) -> None:
-    # Create client outside of thread in order to avoid
-    # <https://github.com/boto/boto3/issues/1592>
-    client = boto3.client("s3", config=BotoConfig(signature_version=UNSIGNED))
-    ts = await anyio.to_thread.run_sync(
-        get_latest_delete_marker_timestamp, client, s3bucket, zarr_id
-    )
-    fut.set(ts)
-
-
-def get_latest_delete_marker_timestamp(
-    client: S3Client, s3bucket: str, zarr_id: str
-) -> Optional[datetime]:
-    ts: Optional[datetime] = None
-    for page in client.get_paginator("list_object_versions").paginate(
-        Bucket=s3bucket, Prefix=f"zarr/{zarr_id}/"
-    ):
-        for dm in page.get("DeleteMarkers", []):
-            if dm["IsLatest"]:
-                ts = maxdatetime(ts, dm["LastModified"])
-    return ts
