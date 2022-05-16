@@ -1,5 +1,6 @@
 # Python ~= 3.8
 # git-annex >= 10.20220222
+anyio ~= 3.6
 async_generator ~= 1.10; python_version < '3.10'
 boto3
 click >= 8.0.1
@@ -14,4 +15,3 @@ identify ~= 2.0
 morecontext ~= 0.1
 packaging
 PyGithub ~= 1.53
-trio ~= 0.20.0

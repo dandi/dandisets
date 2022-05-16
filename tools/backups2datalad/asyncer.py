@@ -13,13 +13,14 @@ import sys
 from typing import AsyncIterator, Dict, List, Optional
 from urllib.parse import urlparse, urlunparse
 
+import anyio
+from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 from dandi.dandiapi import AssetType, RemoteAsset, RemoteDandiset, RemoteZarrAsset
 from dandi.exceptions import NotFoundError
 from dandischema.models import DigestType
 from datalad.api import Dataset, clone
 import httpx
 from identify.identify import tags_from_filename
-import trio
 
 from .annex import AsyncAnnex
 from .consts import ZARR_LIMIT
@@ -71,18 +72,21 @@ class Downloader:
     tracker: AssetTracker
     s3client: httpx.AsyncClient
     annex: AsyncAnnex
-    nursery: trio.Nursery
+    nursery: anyio.abc.TaskGroup
     last_timestamp: Optional[datetime] = None
     report: Report = field(init=False, default_factory=Report)
     in_progress: Dict[str, ToDownload] = field(init=False, default_factory=dict)
-    download_sender: trio.MemorySendChannel[ToDownload] = field(init=False)
-    download_receiver: trio.MemoryReceiveChannel[ToDownload] = field(init=False)
+    download_sender: MemoryObjectSendStream[ToDownload] = field(init=False)
+    download_receiver: MemoryObjectReceiveStream[ToDownload] = field(init=False)
     zarrs: Dict[str, ZarrLink] = field(init=False, default_factory=dict)
-    zarr_limit: trio.CapacityLimiter = field(init=False)
+    zarr_limit: anyio.CapacityLimiter = field(init=False)
 
     def __post_init__(self) -> None:
-        self.download_sender, self.download_receiver = trio.open_memory_channel(0)
-        self.zarr_limit = trio.CapacityLimiter(ZARR_LIMIT)
+        (
+            self.download_sender,
+            self.download_receiver,
+        ) = anyio.create_memory_object_stream(0)
+        self.zarr_limit = anyio.CapacityLimiter(ZARR_LIMIT)
 
     async def asset_loop(self, aia: AsyncIterator[Optional[RemoteAsset]]) -> None:
         now = datetime.now(timezone.utc)
@@ -150,7 +154,7 @@ class Downloader:
         self,
         asset: RemoteAsset,
         sha256_digest: str,
-        sender: trio.MemorySendChannel[ToDownload],
+        sender: MemoryObjectSendStream[ToDownload],
     ) -> None:
         async with sender:
             self.last_timestamp = maxdatetime(self.last_timestamp, asset.created)
@@ -270,8 +274,6 @@ class Downloader:
         urlbits = urlparse(aws_url)
         key = urlbits.path.lstrip("/")
         log.debug("%s: About to query S3", asset.path)
-        # aiobotocore doesn't work with trio, so we have to make the request
-        # directly.  Fortunately, it's very simple.
         r = await arequest(
             self.s3client,
             "HEAD",
@@ -361,7 +363,7 @@ class Downloader:
 async def async_assets(
     dandiset: RemoteDandiset, ds: Dataset, config: Config, tracker: AssetTracker
 ) -> Report:
-    done_flag = trio.Event()
+    done_flag = anyio.Event()
     total_report = Report()
     async with aclosing(  # type: ignore[type-var]
         aiterassets(dandiset, done_flag)
@@ -373,7 +375,7 @@ async def async_assets(
             # the `start_soon()` calls, so their scopes need to be outside the
             # inner nursery, which means we have to have an outer nursery as
             # well.
-            async with trio.open_nursery() as annex_nursery:
+            async with anyio.create_task_group() as annex_nursery:
                 async with await open_git_annex(
                     annex_nursery,
                     "addurl",
@@ -390,7 +392,7 @@ async def async_assets(
                     ds.pathobj, annex_nursery
                 ) as annex, httpx.AsyncClient() as s3client:
                     try:
-                        async with trio.open_nursery() as nursery:
+                        async with anyio.create_task_group() as nursery:
                             dm = Downloader(
                                 dandiset_id=dandiset.identifier,
                                 addurl=p,
@@ -422,7 +424,7 @@ async def async_assets(
                         else:
                             assert config.zarr_target is not None
                             src = str(config.zarr_target / zarr_id)
-                        await trio.to_thread.run_sync(
+                        await anyio.to_thread.run_sync(
                             partial(clone, source=src, path=ds.pathobj / asset_path)
                         )
                     elif ts is not None:
@@ -430,11 +432,11 @@ async def async_assets(
                         dm.report.updated += 1
                         zds = Dataset(ds.pathobj / asset_path)
                         if config.zarr_gh_org is not None:
-                            await trio.to_thread.run_sync(
+                            await anyio.to_thread.run_sync(
                                 partial(zds.update, how="ff-only", sibling="github")
                             )
                         else:
-                            await trio.to_thread.run_sync(
+                            await anyio.to_thread.run_sync(
                                 partial(zds.update, how="ff-only")
                             )
 
@@ -463,7 +465,7 @@ async def async_assets(
 
 
 async def aiterassets(
-    dandiset: RemoteDandiset, done_flag: trio.Event
+    dandiset: RemoteDandiset, done_flag: anyio.Event
 ) -> AsyncIterator[Optional[RemoteAsset]]:
     last_ts: Optional[datetime] = None
     if dandiset.version_id == "draft":
@@ -512,7 +514,7 @@ async def aiterassets(
 
 async def asha256(path: Path) -> str:
     log.debug("Starting to compute sha256 digest of %s", path)
-    tp = trio.Path(path)
+    tp = anyio.Path(path)
     digester = hashlib.sha256()
     async with await tp.open("rb") as fp:
         while True:

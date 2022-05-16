@@ -9,6 +9,7 @@ import sys
 from typing import TYPE_CHECKING, AsyncIterator, Optional, Set, Tuple
 from urllib.parse import urlparse, urlunparse
 
+import anyio
 import boto3
 from botocore import UNSIGNED
 from botocore.client import Config as BotoConfig
@@ -16,7 +17,6 @@ from dandi.dandiapi import RemoteZarrAsset, RemoteZarrEntry, ZarrEntryStat, Zarr
 from datalad.api import Dataset
 import dateutil.parser
 import httpx
-import trio
 
 from .annex import AsyncAnnex
 from .consts import ZARRS_REMOTE_PREFIX, ZARRS_REMOTE_UUID
@@ -101,7 +101,7 @@ class ZarrSyncer:
                         self.zarr_id,
                         entry,
                     )
-                    await trio.to_thread.run_sync(self.rmtree, dest)
+                    await anyio.to_thread.run_sync(self.rmtree, dest)
                 else:
                     for ep in entry.parents:
                         pp = self.repo / str(ep)
@@ -179,7 +179,7 @@ class ZarrSyncer:
             log.info("Zarr %s: Updating checksum file", self.zarr_id)
             (self.repo / CHECKSUM_FILE).write_text(f"{self.checksum}\n")
             self.report.checksum = True
-        await trio.to_thread.run_sync(self.prune_deleted)
+        await anyio.to_thread.run_sync(self.prune_deleted)
 
     def rmtree(self, dirpath: Path) -> None:
         for p in list(dirpath.iterdir()):
@@ -297,14 +297,18 @@ async def sync_zarr(
     checksum: str,
     dsdir: Path,
     config: Config,
-    limit: trio.CapacityLimiter,
+    limit: Optional[anyio.CapacityLimiter] = None,
     ts_fut: Optional[MiniFuture[Optional[datetime]]] = None,
 ) -> None:
+    if limit is None:
+        # For use when calling sync_zarr() directly from a test, where we can't
+        # construct a CapacityLimiter outside of an async context.
+        limit = anyio.CapacityLimiter(1)
     async with limit:
         ds = Dataset(dsdir)
         if not ds.is_installed():
-            await trio.to_thread.run_sync(init_zarr_dataset, ds, asset, config)
-        async with trio.open_nursery() as nursery:
+            await anyio.to_thread.run_sync(init_zarr_dataset, ds, asset, config)
+        async with anyio.create_task_group() as nursery:
             delete_ts_fut: MiniFuture[Optional[datetime]] = MiniFuture()
             nursery.start_soon(
                 get_latest_deletion, config.s3bucket, asset.zarr, delete_ts_fut
@@ -337,7 +341,7 @@ async def sync_zarr(
                 commit_ts = delete_ts
             else:
                 commit_ts = zsync.last_timestamp
-            await trio.to_thread.run_sync(
+            await anyio.to_thread.run_sync(
                 save_and_push,
                 ds,
                 commit_ts,
@@ -398,7 +402,7 @@ async def get_latest_deletion(
     # Create client outside of thread in order to avoid
     # <https://github.com/boto/boto3/issues/1592>
     client = boto3.client("s3", config=BotoConfig(signature_version=UNSIGNED))
-    ts = await trio.to_thread.run_sync(
+    ts = await anyio.to_thread.run_sync(
         get_latest_delete_marker_timestamp, client, s3bucket, zarr_id
     )
     fut.set(ts)

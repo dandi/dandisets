@@ -3,9 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+import anyio
 from dandi.dandiapi import RemoteDandiset
 from datalad.api import Dataset
-import trio
 
 from .asyncer import async_assets
 from .util import AssetTracker, Config, Report, log, quantify
@@ -33,7 +33,7 @@ class Syncer:
 
     def sync_assets(self) -> None:
         log.info("Syncing assets...")
-        self.report = trio.run(
+        self.report = anyio.run(
             async_assets, self.dandiset, self.ds, self.config, self.tracker
         )
         log.info("Asset sync complete!")

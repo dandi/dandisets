@@ -4,22 +4,22 @@ import json
 from pathlib import Path
 from typing import Dict, List, Optional
 
-import trio
+import anyio
 
 from .util import TextProcess, format_errors, log, open_git_annex
 
 
 @dataclass
-class AsyncAnnex(trio.abc.AsyncResource):
+class AsyncAnnex(anyio.abc.AsyncResource):
     repo: Path
-    nursery: trio.Nursery
+    nursery: anyio.abc.TaskGroup
     digest_type: str = "SHA256"
     pfromkey: Optional[TextProcess] = None
     pexaminekey: Optional[TextProcess] = None
     pwhereis: Optional[TextProcess] = None
     pregisterurl: Optional[TextProcess] = None
-    locks: Dict[str, trio.Lock] = field(
-        init=False, default_factory=lambda: defaultdict(trio.Lock)
+    locks: Dict[str, anyio.Lock] = field(
+        init=False, default_factory=lambda: defaultdict(anyio.Lock)
     )
 
     async def aclose(self) -> None:

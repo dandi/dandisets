@@ -4,13 +4,13 @@ from pathlib import Path
 from shutil import rmtree
 from typing import Optional
 
+import anyio
 from conftest import SampleDandiset
 from dandi.utils import find_files
 from datalad.api import Dataset
 from datalad.tests.utils import assert_repo_status
 import numpy as np
 from test_util import GitRepo
-import trio
 import zarr
 
 from backups2datalad.datasetter import DandiDatasetter, DandisetStats
@@ -62,7 +62,7 @@ def test_sync_zarr(new_dandiset: SampleDandiset, tmp_path: Path) -> None:
     asset = new_dandiset.dandiset.get_asset_by_path("sample.zarr")
     checksum = asset.get_digest().value
     config = Config(s3bucket="dandi-api-staging-dandisets")
-    trio.run(sync_zarr, asset, checksum, tmp_path, config, trio.CapacityLimiter(1))
+    anyio.run(sync_zarr, asset, checksum, tmp_path, config)
     check_zarr(zarr_path, Dataset(tmp_path), checksum)
 
 

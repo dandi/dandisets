@@ -4,7 +4,6 @@ from collections import deque
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
-from functools import partial
 import json
 import logging
 import os
@@ -31,6 +30,7 @@ from typing import (
     cast,
 )
 
+import anyio
 from dandi.consts import dandiset_metadata_file
 from dandi.dandiapi import RemoteAsset, RemoteDandiset
 from dandi.dandiset import APIDandiset
@@ -39,7 +39,6 @@ from datalad.api import Dataset
 from datalad.support.json_py import dump
 import httpx
 from morecontext import envset
-import trio
 
 from .consts import DEFAULT_BRANCH
 
@@ -132,8 +131,8 @@ class Report:
 
 
 @dataclass
-class TextProcess(trio.abc.AsyncResource):
-    p: trio.Process
+class TextProcess(anyio.abc.AsyncResource):
+    p: anyio.abc.Process
     name: str
     encoding: str = "utf-8"
     buff: bytes = b""
@@ -155,7 +154,7 @@ class TextProcess(trio.abc.AsyncResource):
             )
         assert self.p.stdin is not None
         log.log(DEEP_DEBUG, "Sending to %s command: %r", self.name, s)
-        await self.p.stdin.send_all(s.encode(self.encoding))
+        await self.p.stdin.send(s.encode(self.encoding))
 
     async def readline(self) -> str:
         if self.p.returncode is not None:
@@ -168,8 +167,9 @@ class TextProcess(trio.abc.AsyncResource):
             try:
                 i = self.buff.index(b"\n")
             except ValueError:
-                blob = await self.p.stdout.receive_some()
-                if blob == b"":
+                try:
+                    blob = await self.p.stdout.receive()
+                except anyio.EndOfStream:
                     # EOF
                     log.log(DEEP_DEBUG, "%s command reached EOF", self.name)
                     line = self.buff.decode(self.encoding)
@@ -378,18 +378,16 @@ def key2hash(key: str) -> str:
 
 
 async def open_git_annex(
-    nursery: trio.Nursery, *args: str, path: Optional[Path] = None
+    _nursery: anyio.abc.TaskGroup, *args: str, path: Optional[Path] = None
 ) -> TextProcess:
+    # The `nursery` argument was necessary when using trio 0.20 and may become
+    # necessary in a future version of anyio.
     log.debug("Running git-annex %s", shlex.join(args))
-    p = await nursery.start(
-        partial(
-            trio.run_process,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            cwd=str(path),  # trio-typing says this has to be a string.
-            check=False,
-        ),
+    p = await anyio.open_process(
         ["git-annex", *args],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        cwd=path,
     )
     return TextProcess(p, name=args[0])
 
@@ -446,7 +444,7 @@ async def arequest(client: httpx.AsyncClient, method: str, url: str) -> httpx.Re
                     type(e).__name__,
                     str(e),
                 )
-                await trio.sleep(delay)
+                await anyio.sleep(delay)
                 continue
             else:
                 raise
@@ -533,7 +531,7 @@ def create_github_sibling(
 
 @dataclass
 class MiniFuture(Generic[T]):
-    event: trio.Event = field(default_factory=trio.Event)
+    event: anyio.Event = field(default_factory=anyio.Event)
     value: Optional[T] = None
 
     def set(self, value: T) -> None:
