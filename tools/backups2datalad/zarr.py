@@ -57,7 +57,6 @@ class ZarrEntry:
     @property
     def parents(self) -> Iterator[str]:
         parts = self.parts
-        yield "/".join(parts)
         while parts:
             parts = parts[:-1]
             yield "/".join(parts)
