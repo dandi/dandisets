@@ -112,6 +112,23 @@ def test_backup_zarr(new_dandiset: SampleDandiset, tmp_path: Path) -> None:
         {asset.zarr: DandisetStats(files=6, size=1557)},
     )
 
+    log.info("test_backup_zarr: Syncing unmodified Zarr dandiset")
+    di.update_from_backup([dandiset_id])
+
+    check_zarr(zarr_path, zarrds, checksum=asset.get_digest().value)
+    (submod,) = ds.repo.get_submodules_()
+    assert submod["path"] == ds.pathobj / "sample.zarr"
+    assert submod["gitmodule_url"] == str(zarrds.pathobj)
+    assert submod["type"] == "dataset"
+    assert submod["gitshasum"] == zarrds.repo.format_commit("%H")
+    assert gitrepo.get_commit_count() == 3
+    assert gitrepo.get_commit_subject("HEAD") == "[backups2datalad] 2 files added"
+    assert {asset["path"] for asset in gitrepo.get_assets_json("HEAD")} == {
+        "file.txt",
+        "sample.zarr",
+    }
+    assert zarrgit.get_commit_count() == 3
+
     rmtree(zarr_path)
     zarr.save(zarr_path, np.eye(5))
     new_dandiset.upload()
