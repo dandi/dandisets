@@ -38,11 +38,17 @@ eval python -m tools.backups2datalad \
    -e '000108$' \
    "$*" 2>&1 | grep -v 'nothing to save, working tree clean'
 
+git pull  
+datalad push -J 5
+
 python -m tools.backups2datalad \
    -l DEBUG \
    -J 5 \
    --target "$ds" \
    populate dandi-dandisets-dropbox "$@"
+
+git pull  
+datalad push -J 5
 
 python -m tools.backups2datalad \
    -l DEBUG \
