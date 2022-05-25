@@ -293,9 +293,12 @@ class ZarrSyncer:
                     return True
                 if obj["LastModified"] > last_sync:
                     log.info(
-                        "Zarr %s: %s was modified on server since last sync",
+                        "Zarr %s: %s was modified on server at %s, after last"
+                        " sync at %s",
                         self.zarr_id,
                         path,
+                        obj["LastModified"],
+                        last_sync,
                     )
                     return True
         if local_paths:
