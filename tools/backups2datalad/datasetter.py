@@ -36,6 +36,7 @@ from .util import (
     custom_commit_date,
     dandi_logging,
     init_dataset,
+    is_meta_file,
     log,
     quantify,
     readcmd,
@@ -206,13 +207,7 @@ class DandiDatasetter:
         substats: Dict[str, DandisetStats] = {}
         for filestat in ds.status(annex="basic", result_renderer=None):
             path = Path(filestat["path"]).relative_to(ds.pathobj)
-            if path.parts[0] not in (
-                ".dandi",
-                ".datalad",
-                ".gitattributes",
-                ".gitmodules",
-                dandiset_metadata_file,
-            ):
+            if not is_meta_file(path.parts[0], dandiset=True):
                 if filestat["type"] == "dataset":
                     zarr_ds = Dataset(filestat["path"])
                     zarr_id = Path(self.get_remote_url(zarr_ds)).name

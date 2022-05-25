@@ -277,17 +277,7 @@ def custom_commit_date(dt: Optional[datetime]) -> Iterator[None]:
 
 def dataset_files(dspath: Path) -> Iterator[str]:
     files = deque(
-        p
-        for p in dspath.iterdir()
-        if p.name
-        not in (
-            ".dandi",
-            ".datalad",
-            ".git",
-            ".gitattributes",
-            ".gitmodules",
-            dandiset_metadata_file,
-        )
+        p for p in dspath.iterdir() if not is_meta_file(p.name, dandiset=True)
     )
     while files:
         p = files.popleft()
@@ -548,3 +538,10 @@ def maxdatetime(state: Optional[datetime], candidate: datetime) -> datetime:
         return candidate
     else:
         return state
+
+
+def is_meta_file(path: str, dandiset: bool = False) -> bool:
+    root = path.split("/")[0]
+    if dandiset and root == dandiset_metadata_file:
+        return True
+    return root in (".dandi", ".datalad", ".git", ".gitattributes", ".gitmodules")

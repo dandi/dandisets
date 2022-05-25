@@ -14,4 +14,5 @@ humanize
 identify ~= 2.0
 morecontext ~= 0.1
 packaging
+pydantic ~= 1.8
 PyGithub ~= 1.53

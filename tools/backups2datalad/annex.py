@@ -2,9 +2,10 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 import json
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import AsyncIterator, Dict, List, Optional
 
 import anyio
+from anyio.streams.text import TextReceiveStream
 
 from .util import TextProcess, format_errors, log, open_git_annex
 
@@ -112,3 +113,26 @@ class AsyncAnnex(anyio.abc.AsyncResource):
                 format_errors(r["error-messages"]),
             )
             ### TODO: Raise an exception?
+
+    async def list_files(self) -> AsyncIterator[str]:
+        async with await anyio.open_process(
+            ["git", "ls-tree", "-r", "--name-only", "-z", "HEAD"],
+            cwd=self.repo,
+            stderr=None,
+        ) as p:
+            buff = ""
+            assert p.stdout is not None
+            async for text in TextReceiveStream(p.stdout):
+                while True:
+                    try:
+                        i = text.index("\0")
+                    except ValueError:
+                        buff = text
+                        break
+                    else:
+                        yield buff + text[:i]
+                        buff = ""
+                        text = text[i + 1 :]
+            if buff:
+                yield buff
+            ### TODO: Raise an exception if p.returncode is nonzero?

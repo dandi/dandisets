@@ -14,7 +14,7 @@ from test_util import GitRepo
 import zarr
 
 from backups2datalad.datasetter import DandiDatasetter, DandisetStats
-from backups2datalad.util import Config
+from backups2datalad.util import Config, is_meta_file
 from backups2datalad.zarr import CHECKSUM_FILE, sync_zarr
 
 log = logging.getLogger("test_backups2datalad.test_zarr")
@@ -35,13 +35,7 @@ def check_zarr(
     }
     assert zarrds.is_installed()
     assert_repo_status(zarrds.path)
-    sync_entries = {
-        f
-        for f in zarrds.repo.get_files()
-        if f != ".gitattributes"
-        and f != CHECKSUM_FILE
-        and not f.startswith(".datalad/")
-    }
+    sync_entries = {f for f in zarrds.repo.get_files() if not is_meta_file(f)}
     assert sync_entries == zarr_entries
     for e in sync_entries:
         p = zarrds.pathobj / e
@@ -52,7 +46,7 @@ def check_zarr(
         assert (zarrds.pathobj / CHECKSUM_FILE).read_text().strip() == checksum
     else:
         assert (zarrds.pathobj / CHECKSUM_FILE).exists()
-    assert zarrds.repo.is_under_annex([CHECKSUM_FILE]) == [False]
+    assert zarrds.repo.is_under_annex([str(CHECKSUM_FILE)]) == [False]
 
 
 def test_sync_zarr(new_dandiset: SampleDandiset, tmp_path: Path) -> None:
@@ -108,8 +102,8 @@ def test_backup_zarr(new_dandiset: SampleDandiset, tmp_path: Path) -> None:
     }
 
     assert di.get_dandiset_stats(ds) == (
-        DandisetStats(files=7, size=1576),
-        {asset.zarr: DandisetStats(files=6, size=1557)},
+        DandisetStats(files=6, size=1535),
+        {asset.zarr: DandisetStats(files=5, size=1516)},
     )
 
     log.info("test_backup_zarr: Syncing unmodified Zarr dandiset")
