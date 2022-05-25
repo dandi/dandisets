@@ -2,24 +2,25 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 import json
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import AsyncIterator, Dict, List, Optional
 
-import trio
+import anyio
+from anyio.streams.text import TextReceiveStream
 
 from .util import TextProcess, format_errors, log, open_git_annex
 
 
 @dataclass
-class AsyncAnnex(trio.abc.AsyncResource):
+class AsyncAnnex(anyio.abc.AsyncResource):
     repo: Path
-    nursery: trio.Nursery
+    nursery: anyio.abc.TaskGroup
     digest_type: str = "SHA256"
     pfromkey: Optional[TextProcess] = None
     pexaminekey: Optional[TextProcess] = None
     pwhereis: Optional[TextProcess] = None
     pregisterurl: Optional[TextProcess] = None
-    locks: Dict[str, trio.Lock] = field(
-        init=False, default_factory=lambda: defaultdict(trio.Lock)
+    locks: Dict[str, anyio.Lock] = field(
+        init=False, default_factory=lambda: defaultdict(anyio.Lock)
     )
 
     async def aclose(self) -> None:
@@ -112,3 +113,26 @@ class AsyncAnnex(trio.abc.AsyncResource):
                 format_errors(r["error-messages"]),
             )
             ### TODO: Raise an exception?
+
+    async def list_files(self) -> AsyncIterator[str]:
+        async with await anyio.open_process(
+            ["git", "ls-tree", "-r", "--name-only", "-z", "HEAD"],
+            cwd=self.repo,
+            stderr=None,
+        ) as p:
+            buff = ""
+            assert p.stdout is not None
+            async for text in TextReceiveStream(p.stdout):
+                while True:
+                    try:
+                        i = text.index("\0")
+                    except ValueError:
+                        buff = text
+                        break
+                    else:
+                        yield buff + text[:i]
+                        buff = ""
+                        text = text[i + 1 :]
+            if buff:
+                yield buff
+            ### TODO: Raise an exception if p.returncode is nonzero?

@@ -4,7 +4,7 @@ from pathlib import Path
 import subprocess
 from typing import Any, Dict, List, Set, Union, cast
 
-from dandi.consts import dandiset_metadata_file
+from backups2datalad.util import is_meta_file
 
 
 @dataclass
@@ -86,8 +86,7 @@ class GitRepo:
             for fname in self.readcmd(
                 "ls-tree", "-r", "--name-only", commitish
             ).splitlines()
-            if fname not in (".gitattributes", dandiset_metadata_file)
-            and not fname.startswith((".dandi/", ".datalad/"))
+            if not is_meta_file(fname, dandiset=True)
         }
 
     def get_assets_json(self, commitish: str) -> List[dict]:
