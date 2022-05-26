@@ -235,6 +235,7 @@ class ZarrSyncer:
             old_checksum = None
         if old_checksum != self.checksum:
             log.info("Zarr %s: Updating checksum file", self.zarr_id)
+            (self.repo / CHECKSUM_FILE).parent.mkdir(exist_ok=True)
             (self.repo / CHECKSUM_FILE).write_text(f"{self.checksum}\n")
             self.report.checksum = True
         self.write_sync_file()
