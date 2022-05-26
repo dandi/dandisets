@@ -413,7 +413,7 @@ def exp_wait(
 
 
 async def arequest(client: httpx.AsyncClient, method: str, url: str) -> httpx.Response:
-    waits = exp_wait(attempts=10, base=1.25, multiplier=1.25)
+    waits = exp_wait(attempts=10, base=1.8)
     while True:
         try:
             r = await client.request(method, url, follow_redirects=True)
