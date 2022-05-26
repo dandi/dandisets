@@ -144,7 +144,7 @@ class DandiDatasetter:
                 syncer.dump_asset_metadata()
             assert syncer.report is not None
             if any(r["state"] != "clean" for r in ds.status(result_renderer=None)):
-                log.info("Commiting changes")
+                log.info("Committing changes")
                 with custom_commit_date(dandiset.version.modified):
                     ds.save(message=syncer.get_commit_message())
                 syncer.report.commits += 1

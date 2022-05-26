@@ -451,7 +451,7 @@ async def async_assets(
                     if any(
                         r["state"] != "clean" for r in ds.status(result_renderer=None)
                     ):
-                        log.info("Commiting changes")
+                        log.info("Committing changes")
                         assert timestamp is not None
                         with custom_commit_date(timestamp):
                             ds.save(message=dm.report.get_commit_message())
