@@ -83,7 +83,9 @@ class DandiDatasetter:
                     log.info("Pushing to sibling")
                     ds.push(to="github", jobs=self.config.jobs)
                 ds_stats.append(self.set_dandiset_gh_metadata(d, ds))
+        log.debug("Committing superdataset")
         superds.save(message="CRON update", path=to_save)
+        log.debug("Superdataset committed")
         if self.config.gh_org is not None and not dandiset_ids and exclude is None:
             self.set_superds_description(superds, ds_stats)
 
@@ -143,14 +145,18 @@ class DandiDatasetter:
                 syncer.prune_deleted()
                 syncer.dump_asset_metadata()
             assert syncer.report is not None
+            log.debug("Checking whether repository is dirty ...")
             if any(r["state"] != "clean" for r in ds.status(result_renderer=None)):
-                log.info("Commiting changes")
+                log.info("Committing changes")
                 with custom_commit_date(dandiset.version.modified):
                     ds.save(message=syncer.get_commit_message())
+                log.debug("Commit made")
                 syncer.report.commits += 1
-            elif syncer.report.commits == 0:
-                log.info("No changes made to repository; deleting logfile")
-                logfile.unlink()
+            else:
+                log.debug("Repository is clean")
+                if syncer.report.commits == 0:
+                    log.info("No changes made to repository; deleting logfile")
+                    logfile.unlink()
             return syncer.report.commits > 0
 
     def get_remote_url(self, ds: Dataset) -> str:
@@ -386,8 +392,10 @@ class DandiDatasetter:
             )
             git("checkout", "-b", f"release-{dandiset.version_id}", matching[0])
             update_dandiset_metadata(dandiset, ds)
+            log.debug("Committing changes")
             with custom_commit_date(dandiset.version.created):
                 ds.save(message=f"[backups2datalad] {dandiset_metadata_file} updated")
+            log.debug("Commit made")
         else:
             log.info(
                 "Assets in candidate commits do not match assets in version %s;"
