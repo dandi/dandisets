@@ -41,6 +41,7 @@ if TYPE_CHECKING:
     from types_aiobotocore_s3.client import S3Client
 
 
+OLD_CHECKSUM_FILE = Path(".zarr-checksum")
 CHECKSUM_FILE = Path(".dandi", "zarr-checksum")
 
 SYNC_FILE = Path(".dandi", "s3sync.json")
@@ -238,6 +239,9 @@ class ZarrSyncer:
             (self.repo / CHECKSUM_FILE).parent.mkdir(exist_ok=True)
             (self.repo / CHECKSUM_FILE).write_text(f"{self.checksum}\n")
             self.report.checksum = True
+        # Remove a possibly still present previous location for the checksum file
+        if (self.repo / OLD_CHECKSUM_FILE).exists():
+            (self.repo / OLD_CHECKSUM_FILE).unlink()
         self.write_sync_file()
         await anyio.to_thread.run_sync(self.prune_deleted, local_paths)
 
