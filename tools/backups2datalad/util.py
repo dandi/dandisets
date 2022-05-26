@@ -486,6 +486,7 @@ def init_dataset(
             "(not metadata=distribution-restrictions=*)",
             remote=backup_remote.name,
         )
+    log.debug("Dataset for %s created", desc)
 
 
 def create_github_sibling(
