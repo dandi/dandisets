@@ -421,6 +421,7 @@ async def sync_zarr(
             await anyio.to_thread.run_sync(
                 save_and_push,
                 ds,
+                asset.zarr,
                 commit_ts,
                 f"[backups2datalad] {summary}",
                 config.jobs,
@@ -452,24 +453,36 @@ def init_zarr_dataset(ds: Dataset, asset: RemoteZarrAsset, config: Config) -> No
         backend="MD5E",
         cfg_proc=None,
     )
+    log.debug("Zarr %s: Excluding .dandi/ from git-annex", asset.zarr)
     ds.repo.set_gitattributes(
         [("*", {"annex.largefiles": "nothing"})], attrfile=".dandi/.gitattributes"
     )
     with custom_commit_date(asset.created):
         ds.save(message="Exclude .dandi/ from git-annex")
     if config.zarr_gh_org is not None:
+        log.debug("Zarr %s: Creating GitHub sibling", asset.zarr)
         create_github_sibling(
             ds,
             owner=config.zarr_gh_org,
             name=asset.zarr,
             backup_remote=config.zarr_backup_remote,
         )
+    log.debug("Zarr %s: Finished initializing dataset", asset.zarr)
 
 
 def save_and_push(
-    ds: Dataset, commit_date: datetime, commit_msg: str, jobs: int, push: bool
+    ds: Dataset,
+    zarr_id: str,
+    commit_date: datetime,
+    commit_msg: str,
+    jobs: int,
+    push: bool,
 ) -> None:
+    log.debug("Zarr %s: Committing", zarr_id)
     with custom_commit_date(commit_date):
         ds.save(message=commit_msg)
+    log.debug("Zarr %s: Commit made", zarr_id)
     if push:
+        log.debug("Zarr %s: Pushing to GitHub", zarr_id)
         ds.push(to="github", jobs=jobs)
+        log.debug("Zarr %s: Finished pushing to GitHub", zarr_id)

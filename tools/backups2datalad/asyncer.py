@@ -427,6 +427,7 @@ async def async_assets(
                         await anyio.to_thread.run_sync(
                             partial(clone, source=src, path=ds.pathobj / asset_path)
                         )
+                        log.debug("Finished cloning Zarr to %s", asset_path)
                     elif ts is not None:
                         log.info("Zarr asset modified at %s; updating", asset_path)
                         dm.report.updated += 1
@@ -439,6 +440,7 @@ async def async_assets(
                             await anyio.to_thread.run_sync(
                                 partial(zds.update, how="ff-only")
                             )
+                        log.debug("Finished updating Zarr at %s", asset_path)
 
             if dandiset.version_id == "draft":
                 if dm.report.registered or dm.report.downloaded:
@@ -448,6 +450,7 @@ async def async_assets(
                         quantify(dm.report.registered, "asset"),
                         quantify(dm.report.downloaded, "asset"),
                     )
+                    log.debug("Checking whether repository is dirty ...")
                     if any(
                         r["state"] != "clean" for r in ds.status(result_renderer=None)
                     ):
@@ -455,7 +458,10 @@ async def async_assets(
                         assert timestamp is not None
                         with custom_commit_date(timestamp):
                             ds.save(message=dm.report.get_commit_message())
+                        log.debug("Commit made")
                         total_report.commits += 1
+                    else:
+                        log.debug("Repository is clean")
                 else:
                     log.info(
                         "No assets downloaded for this version segment; not committing"
