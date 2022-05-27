@@ -331,7 +331,7 @@ class ZarrSyncer:
         for path in local_paths:
             log.info("Zarr %s: deleting %s", self.zarr_id, path)
             p = self.repo / path
-            p.unlink()
+            p.unlink(missing_ok=True)
             self.report.deleted += 1
             d = p.parent
             while d != self.repo and not any(d.iterdir()):
