@@ -268,6 +268,7 @@ class ZarrSyncer:
             prefix=self.s3prefix,
             last_modified=self.last_timestamp,
         )
+        (self.repo / SYNC_FILE).parent.mkdir(exist_ok=True)
         (self.repo / SYNC_FILE).write_text(data.json(indent=4) + "\n")
 
     async def needs_sync(
