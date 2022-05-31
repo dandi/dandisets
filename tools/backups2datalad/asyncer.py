@@ -427,6 +427,11 @@ async def async_assets(
                         await anyio.to_thread.run_sync(
                             partial(clone, source=src, path=ds.pathobj / asset_path)
                         )
+                        if config.zarr_gh_org is not None:
+                            await anyio.run_process(
+                                ["git", "remote", "rename", "origin", "github"],
+                                cwd=ds.pathobj / asset_path,
+                            )
                         log.debug("Finished cloning Zarr to %s", asset_path)
                     elif ts is not None:
                         log.info("Zarr asset modified at %s; updating", asset_path)
