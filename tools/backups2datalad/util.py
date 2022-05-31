@@ -490,14 +490,15 @@ def init_dataset(
 
 
 def create_github_sibling(
-    ds: Dataset, owner: str, name: str, backup_remote: Optional[str]
+    ds: Dataset, owner: str, name: str, backup_remote: Optional[str],
+    *, existing: str = 'skip'
 ) -> bool:
     # Returns True iff sibling was created
     if "github" not in ds.repo.get_remotes():
         log.info("Creating GitHub sibling for %s", name)
         ds.create_sibling_github(
             reponame=name,
-            existing="skip",
+            existing=existing,
             name="github",
             access_protocol="https",
             github_organization=owner,
