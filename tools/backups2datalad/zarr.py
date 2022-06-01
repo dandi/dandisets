@@ -490,5 +490,5 @@ def save_and_push(
     log.debug("Zarr %s: Commit made", zarr_id)
     if push:
         log.debug("Zarr %s: Pushing to GitHub", zarr_id)
-        ds.push(to="github", jobs=jobs)
+        ds.push(to="github", jobs=jobs, data="nothing")
         log.debug("Zarr %s: Finished pushing to GitHub", zarr_id)
