@@ -252,7 +252,7 @@ class AssetTracker:
         """
         for apath in self.local_assets:
             if config.match_asset(apath):
-                del self.asset_metadata[apath]
+                self.asset_metadata.pop(apath, None)
                 yield apath
 
     def dump(self) -> None:
