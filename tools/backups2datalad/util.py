@@ -281,7 +281,7 @@ def dataset_files(dspath: Path) -> Iterator[str]:
     )
     while files:
         p = files.popleft()
-        if p.is_file():
+        if p.is_file() or p.is_symlink():
             yield str(p.relative_to(dspath))
         elif p.is_dir():
             if (p / ".git").exists():
@@ -490,8 +490,12 @@ def init_dataset(
 
 
 def create_github_sibling(
-    ds: Dataset, owner: str, name: str, backup_remote: Optional[str],
-    *, existing: str = 'skip'
+    ds: Dataset,
+    owner: str,
+    name: str,
+    backup_remote: Optional[str],
+    *,
+    existing: str = "skip",
 ) -> bool:
     # Returns True iff sibling was created
     if "github" not in ds.repo.get_remotes():
