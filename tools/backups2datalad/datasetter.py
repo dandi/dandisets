@@ -157,6 +157,9 @@ class DandiDatasetter:
                 if syncer.report.commits == 0:
                     log.info("No changes made to repository; deleting logfile")
                     logfile.unlink()
+            log.debug("Running `git gc`")
+            subprocess.run(["git", "gc"], cwd=ds.path, check=True)
+            log.debug("Finished running `git gc`")
             return syncer.report.commits > 0
 
     def get_remote_url(self, ds: Dataset) -> str:

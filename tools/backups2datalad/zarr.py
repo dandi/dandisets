@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from functools import partial
 import os
 from pathlib import Path
 import sys
@@ -425,14 +426,20 @@ async def sync_zarr(
             else:
                 commit_ts = zsync.last_timestamp
             await anyio.to_thread.run_sync(
-                save_and_push,
-                ds,
-                asset.zarr,
-                commit_ts,
-                f"[backups2datalad] {summary}",
-                config.jobs,
-                config.zarr_gh_org is not None,
+                save, ds, commit_ts, f"[backups2datalad] {summary}"
             )
+            log.debug("Zarr %s: Commit made", asset.zarr)
+            log.debug("Zarr %s: Running `git gc`", asset.zarr)
+            await anyio.run_process(
+                ["git", "gc"], cwd=ds.path, stdout=None, stderr=None
+            )
+            log.debug("Zarr %s: Finished running `git gc`", asset.zarr)
+            if config.zarr_gh_org is not None:
+                log.debug("Zarr %s: Pushing to GitHub", asset.zarr)
+                await anyio.to_thread.run_sync(
+                    partial(ds.push, to="github", jobs=config.jobs, data="nothing")
+                )
+                log.debug("Zarr %s: Finished pushing to GitHub", asset.zarr)
             if ts_fut is not None:
                 ts_fut.set(commit_ts)
         else:
@@ -476,19 +483,6 @@ def init_zarr_dataset(ds: Dataset, asset: RemoteZarrAsset, config: Config) -> No
     log.debug("Zarr %s: Finished initializing dataset", asset.zarr)
 
 
-def save_and_push(
-    ds: Dataset,
-    zarr_id: str,
-    commit_date: datetime,
-    commit_msg: str,
-    jobs: int,
-    push: bool,
-) -> None:
-    log.debug("Zarr %s: Committing", zarr_id)
+def save(ds: Dataset, commit_date: datetime, commit_msg: str) -> None:
     with custom_commit_date(commit_date):
         ds.save(message=commit_msg)
-    log.debug("Zarr %s: Commit made", zarr_id)
-    if push:
-        log.debug("Zarr %s: Pushing to GitHub", zarr_id)
-        ds.push(to="github", jobs=jobs, data="nothing")
-        log.debug("Zarr %s: Finished pushing to GitHub", zarr_id)
