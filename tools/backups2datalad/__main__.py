@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 import re
-import subprocess
 import sys
 from typing import Optional, Sequence
 
@@ -246,10 +245,14 @@ def populate_cmd(
         if p.is_dir() and re.fullmatch(DANDISET_ID_REGEX, p.name):
             if exclude is not None and exclude.search(p.name):
                 log.debug("Skipping dandiset %s", p.name)
-            elif not Dataset(p).is_installed():
-                log.info("Dataset %s is not installed; skipping", p.name)
             else:
-                populate(p, backup_remote, f"Dandiset {p.name}", datasetter.config.jobs)
+                ds = Dataset(p)
+                if not ds.is_installed():
+                    log.info("Dataset %s is not installed; skipping", p.name)
+                else:
+                    populate(
+                        ds, backup_remote, f"Dandiset {p.name}", datasetter.config.jobs
+                    )
         else:
             log.debug("Skipping non-Dandiset node %s", p.name)
 
@@ -276,19 +279,19 @@ def populate_zarrs(
         dirs = list(zarr_target.iterdir())
     for p in dirs:
         if p.is_dir() and p.name not in (".git", ".datalad"):
-            if not Dataset(p).is_installed():
+            ds = Dataset(p)
+            if not ds.is_installed():
                 log.info("Zarr %s is not installed; skipping", p.name)
             else:
-                populate(p, backup_remote, f"Zarr {p.name}", datasetter.config.jobs)
+                populate(ds, backup_remote, f"Zarr {p.name}", datasetter.config.jobs)
         else:
             log.debug("Skipping non-Zarr node %s", p.name)
 
 
-def populate(dirpath: Path, backup_remote: str, desc: str, jobs: int) -> None:
+def populate(ds: Dataset, backup_remote: str, desc: str, jobs: int) -> None:
     log.info("Downloading files for %s", desc)
-    subprocess.run(
+    ds.repo.call_annex_records(
         [
-            "git-annex",
             "get",
             "-c",
             "annex.retry=3",
@@ -302,24 +305,11 @@ def populate(dirpath: Path, backup_remote: str, desc: str, jobs: int) -> None:
             "--not",
             "--in",
             "here",
-        ],
-        check=True,
-        cwd=dirpath,
+        ]
     )
     log.info("Moving files for %s to backup remote", desc)
-    subprocess.run(
-        [
-            "git-annex",
-            "move",
-            "-c",
-            "annex.retry=3",
-            "--jobs",
-            str(jobs),
-            "--to",
-            backup_remote,
-        ],
-        check=True,
-        cwd=dirpath,
+    ds.repo.call_annex_records(
+        ["move", "-c", "annex.retry=3", "--jobs", str(jobs), "--to", backup_remote]
     )
 
 
