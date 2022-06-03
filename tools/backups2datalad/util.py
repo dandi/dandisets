@@ -13,6 +13,7 @@ import shlex
 import subprocess
 import sys
 import textwrap
+import threading
 from types import TracebackType
 from typing import (
     Any,
@@ -265,12 +266,18 @@ class AssetTracker:
 
 
 @contextmanager
-def custom_commit_date(dt: Optional[datetime]) -> Iterator[None]:
+def custom_commit_date(
+    dt: Optional[datetime],
+    lock: threading.Lock = threading.Lock(),  # noqa: B008
+) -> Iterator[None]:
     if dt is not None:
-        with envset("GIT_AUTHOR_NAME", "DANDI User"):
-            with envset("GIT_AUTHOR_EMAIL", "info@dandiarchive.org"):
-                with envset("GIT_AUTHOR_DATE", str(dt)):
-                    yield
+        with lock:
+            # Lock in order to avoid issues from multiple
+            # custom_commit_date()'s being in scope at once
+            with envset("GIT_AUTHOR_NAME", "DANDI User"):
+                with envset("GIT_AUTHOR_EMAIL", "info@dandiarchive.org"):
+                    with envset("GIT_AUTHOR_DATE", str(dt)):
+                        yield
     else:
         yield
 
