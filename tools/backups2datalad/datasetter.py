@@ -81,7 +81,7 @@ class DandiDatasetter:
             if self.config.gh_org is not None:
                 if changed:
                     log.info("Pushing to sibling")
-                    ds.push(to="github", jobs=self.config.jobs)
+                    ds.push(to="github", jobs=self.config.jobs, data="nothing")
                 ds_stats.append(self.set_dandiset_gh_metadata(d, ds))
         log.debug("Committing superdataset")
         superds.save(message="CRON update", path=to_save)
@@ -321,7 +321,7 @@ class DandiDatasetter:
                     check=True,
                 )
             if push:
-                ds.push(to="github", jobs=self.config.jobs)
+                ds.push(to="github", jobs=self.config.jobs, data="nothing")
 
     def mkrelease(
         self,
