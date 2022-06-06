@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 import re
+import shlex
+import subprocess
 import sys
 from typing import Optional, Sequence
 
+import anyio
 import click
 from click_loglevel import LogLevel
 from dandi.consts import DANDISET_ID_REGEX, known_instances
@@ -13,7 +17,15 @@ from dandi.dandiapi import DandiAPIClient
 from datalad.api import Dataset
 
 from .datasetter import DandiDatasetter
-from .util import Config, log, pdb_excepthook
+from .util import (
+    Config,
+    TextProcess,
+    aiter,
+    format_errors,
+    log,
+    pdb_excepthook,
+    quantify,
+)
 
 
 @click.group()
@@ -250,8 +262,12 @@ def populate_cmd(
                 if not ds.is_installed():
                     log.info("Dataset %s is not installed; skipping", p.name)
                 else:
-                    populate(
-                        ds, backup_remote, f"Dandiset {p.name}", datasetter.config.jobs
+                    anyio.run(
+                        populate,
+                        ds.pathobj,
+                        backup_remote,
+                        f"Dandiset {p.name}",
+                        datasetter.config.jobs,
                     )
         else:
             log.debug("Skipping non-Dandiset node %s", p.name)
@@ -283,34 +299,78 @@ def populate_zarrs(
             if not ds.is_installed():
                 log.info("Zarr %s is not installed; skipping", p.name)
             else:
-                populate(ds, backup_remote, f"Zarr {p.name}", datasetter.config.jobs)
+                anyio.run(
+                    populate,
+                    ds.pathobj,
+                    backup_remote,
+                    f"Zarr {p.name}",
+                    datasetter.config.jobs,
+                )
         else:
             log.debug("Skipping non-Zarr node %s", p.name)
 
 
-def populate(ds: Dataset, backup_remote: str, desc: str, jobs: int) -> None:
+async def populate(dirpath: Path, backup_remote: str, desc: str, jobs: int) -> None:
     log.info("Downloading files for %s", desc)
-    ds.repo.call_annex_records(
-        [
-            "get",
-            "-c",
-            "annex.retry=3",
-            "--jobs",
-            str(jobs),
-            "--from=web",
-            "--not",
-            "--in",
-            backup_remote,
-            "--and",
-            "--not",
-            "--in",
-            "here",
-        ]
+    await call_annex_json(
+        "get",
+        "-c",
+        "annex.retry=3",
+        "--jobs",
+        str(jobs),
+        "--from=web",
+        "--not",
+        "--in",
+        backup_remote,
+        "--and",
+        "--not",
+        "--in",
+        "here",
+        path=dirpath,
     )
     log.info("Moving files for %s to backup remote", desc)
-    ds.repo.call_annex_records(
-        ["move", "-c", "annex.retry=3", "--jobs", str(jobs), "--to", backup_remote]
+    await call_annex_json(
+        "move",
+        "-c",
+        "annex.retry=3",
+        "--jobs",
+        str(jobs),
+        "--to",
+        backup_remote,
+        path=dirpath,
     )
+
+
+async def call_annex_json(cmd: str, *args: str, path: Path) -> None:
+    log.debug("Running git-annex %s", shlex.join(args))
+    success = 0
+    failed = 0
+    async with await anyio.open_process(
+        ["git-annex", cmd, *args, "--json", "--json-error-messages"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        cwd=path,
+    ) as p0, TextProcess(p0, name=cmd) as p:
+        async for line in aiter(p):
+            data = json.loads(line)
+            if data["success"]:
+                success += 1
+            else:
+                log.error(
+                    "`git-annex %s` failed for %s:%s",
+                    cmd,
+                    data["file"],
+                    format_errors(data["error-messages"]),
+                )
+                failed += 1
+    log.info(
+        "git-annex %s: %s succeeded, %s failed",
+        cmd,
+        quantify(success, "file"),
+        quantify(failed, "file"),
+    )
+    if failed:
+        raise RuntimeError(f"git-annex {cmd} failed for {quantify(failed, 'file')}")
 
 
 if __name__ == "__main__":
