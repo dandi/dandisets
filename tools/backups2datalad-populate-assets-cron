@@ -1,0 +1,44 @@
+#!/bin/bash
+
+set -eu
+
+export PS1='$ '
+PS4='> '
+#set -x
+
+ds=$(dirname "$0")
+ds=$(dirname "$ds")
+
+zarrds=/mnt/backup/dandi/dandizarrs
+
+source ~/.bashrc-miniconda
+conda activate dandisets
+
+cd "$ds"
+chronic pip install -r tools/backups2datalad.req.txt
+
+export DATALAD_LOG_LEVEL=WARNING  # otherwise too much of noise
+
+mkdir -p .git/tmp
+
+set -o pipefail
+set -x
+
+(
+python -m tools.backups2datalad \
+   -l DEBUG \
+   -J 5 \
+   --target "$ds" \
+   populate dandi-dandisets-dropbox "$@"
+
+datalad push -J 5
+
+) 2>|.git/tmp/stderr-pa
+
+if [ -s .git/tmp/stderr-pa ]; then
+	echo "There was stderr from backup/datalad invocations:"
+	cat .git/tmp/stderr-pa
+fi
+
+# we must be clean
+git diff --exit-code
