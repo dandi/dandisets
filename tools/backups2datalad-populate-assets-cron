@@ -31,7 +31,7 @@ python -m tools.backups2datalad \
    --target "$ds" \
    populate dandi-dandisets-dropbox "$@"
 
-datalad push -J 5
+datalad foreach-dataset -s -r -R 1 -J 5 --chpwd pwd --cmd-type eval 'ds.push(to="github")'
 
 ) 2>|.git/tmp/stderr-pa
 
