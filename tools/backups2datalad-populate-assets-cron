@@ -39,6 +39,3 @@ if [ -s .git/tmp/stderr-pa ]; then
 	echo "There was stderr from backup/datalad invocations:"
 	cat .git/tmp/stderr-pa
 fi
-
-# we must be clean
-git diff --exit-code
