@@ -139,8 +139,8 @@ class TextProcess(anyio.abc.AsyncResource):
     buff: bytes = b""
 
     async def aclose(self) -> None:
-        assert self.p.stdin is not None
-        await self.p.stdin.aclose()
+        if self.p.stdin is not None:
+            await self.p.stdin.aclose()
         rc = await self.p.wait()
         if rc != 0:
             log.warning(
