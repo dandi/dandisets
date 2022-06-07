@@ -328,17 +328,29 @@ async def populate(dirpath: Path, backup_remote: str, desc: str, jobs: int) -> N
         "here",
         path=dirpath,
     )
-    log.info("Moving files for %s to backup remote", desc)
-    await call_annex_json(
-        "move",
-        "-c",
-        "annex.retry=3",
-        "--jobs",
-        str(jobs),
-        "--to",
-        backup_remote,
-        path=dirpath,
-    )
+    i = 0
+    while True:
+        log.info("Moving files for %s to backup remote", desc)
+        try:
+            await call_annex_json(
+                "move",
+                "-c",
+                "annex.retry=3",
+                "--jobs",
+                str(jobs),
+                "--to",
+                backup_remote,
+                path=dirpath,
+            )
+        except RuntimeError as e:
+            i += 1
+            if i < 5:
+                log.error("%s; retrying", e)
+                continue
+            else:
+                raise
+        else:
+            break
 
 
 async def call_annex_json(cmd: str, *args: str, path: Path) -> None:
