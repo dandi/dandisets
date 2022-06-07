@@ -16,9 +16,10 @@ import pytest
 from test_util import GitRepo
 
 from backups2datalad.__main__ import main
+from backups2datalad.config import Config
 from backups2datalad.consts import DEFAULT_BRANCH
 from backups2datalad.datasetter import DandiDatasetter
-from backups2datalad.util import Config, custom_commit_date, is_meta_file
+from backups2datalad.util import custom_commit_date, is_meta_file
 
 log = logging.getLogger("test_backups2datalad.test_core")
 
@@ -35,22 +36,19 @@ def test_1(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
     # TODO: move pre-setup into a fixture, e.g. local_setup1 or make code work without?
     di = DandiDatasetter(
         dandi_client=text_dandiset.client,
-        target_path=tmp_path,
         config=Config(
-            # gh_org=None,
-            # re_filter=None,
-            # backup_remote=None,
-            # jobs=jobs,
-            # force=force,
-            content_url_regex=r".*/blobs/",
+            backup_root=tmp_path,
+            dandi_instance="dandi-staging",
             s3bucket="dandi-api-staging-dandisets",
         ),
     )
 
+    dandisets_root = tmp_path / "dandisets"
+
     with pytest.raises(Exception):
         log.info("test_1: Testing sync of nonexistent Dandiset")
         di.update_from_backup(["999999"])
-    assert not (tmp_path / "999999").exists()
+    assert not (dandisets_root / "999999").exists()
 
     # Since we are using text_dandiset, that immediately creates us a dandiset
     # TODO: may be separate it out, so we could start "clean" and still work ok
@@ -62,7 +60,7 @@ def test_1(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
     log.info("test_1: Syncing test dandiset")
     di.update_from_backup([dandiset_id])
 
-    ds = Dataset(tmp_path / dandiset_id)  # but we should get the super-dataset?
+    ds = Dataset(dandisets_root / dandiset_id)  # but we should get the super-dataset?
     assert_repo_status(ds.path)  # that all is clean etc
     ok_file_under_git(ds.path, "file.txt")
 
@@ -160,9 +158,9 @@ def test_2(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
     """
     di = DandiDatasetter(
         dandi_client=text_dandiset.client,
-        target_path=tmp_path,
         config=Config(
-            content_url_regex=r".*/blobs/",
+            backup_root=tmp_path,
+            dandi_instance="dandi-staging",
             s3bucket="dandi-api-staging-dandisets",
             enable_tags=False,
         ),
@@ -173,7 +171,7 @@ def test_2(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
     dandiset = text_dandiset.dandiset
     log.info("test_2: Creating new backup of Dandiset")
     di.update_from_backup([dandiset_id])
-    backupdir = tmp_path / dandiset_id
+    backupdir = tmp_path / "dandisets" / dandiset_id
     repo = GitRepo(backupdir)
 
     versions = []
@@ -235,9 +233,9 @@ def test_3(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
     """
     di = DandiDatasetter(
         dandi_client=text_dandiset.client,
-        target_path=tmp_path,
         config=Config(
-            content_url_regex=r".*/blobs/",
+            backup_root=tmp_path,
+            dandi_instance="dandi-staging",
             s3bucket="dandi-api-staging-dandisets",
             enable_tags=True,
         ),
@@ -272,7 +270,7 @@ def test_3(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
         versions.append((dandiset.publish().version, status))
     log.info("test_3: Creating backup of Dandiset")
     di.update_from_backup([dandiset_id])
-    repo = GitRepo(tmp_path / dandiset_id)
+    repo = GitRepo(tmp_path / "dandisets" / dandiset_id)
     for i, (v, status) in enumerate(versions, start=1):
         assert repo.parent_is_ancestor(
             v.identifier, DEFAULT_BRANCH
@@ -313,9 +311,9 @@ def test_4(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
     """
     di = DandiDatasetter(
         dandi_client=text_dandiset.client,
-        target_path=tmp_path,
         config=Config(
-            content_url_regex=r".*/blobs/",
+            backup_root=tmp_path,
+            dandi_instance="dandi-staging",
             s3bucket="dandi-api-staging-dandisets",
             enable_tags=True,
         ),
@@ -323,7 +321,7 @@ def test_4(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
     dandiset_id = text_dandiset.dandiset_id
     dspath = text_dandiset.dspath
     dandiset = text_dandiset.dandiset
-    repo = GitRepo(tmp_path / dandiset_id)
+    repo = GitRepo(tmp_path / "dandisets" / dandiset_id)
     for i in range(1, 4):
         (dspath / "counter.txt").write_text(f"{i}\n")
         for vn in dspath.glob("v*.txt"):
@@ -358,9 +356,9 @@ def test_4(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
 def test_binary(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
     di = DandiDatasetter(
         dandi_client=text_dandiset.client,
-        target_path=tmp_path,
         config=Config(
-            content_url_regex=r".*/blobs/",
+            backup_root=tmp_path,
+            dandi_instance="dandi-staging",
             s3bucket="dandi-api-staging-dandisets",
             enable_tags=True,
         ),
@@ -371,7 +369,7 @@ def test_binary(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
     text_dandiset.upload()
     log.info("test_binary: Syncing test dandiset")
     di.update_from_backup([dandiset_id])
-    backup = tmp_path / dandiset_id
+    backup = tmp_path / "dandisets" / dandiset_id
     annex = AnnexRepo(backup)
     data_backup = backup / "data.dat"
     assert data_backup.is_symlink() and not data_backup.is_file()
@@ -379,18 +377,21 @@ def test_binary(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
 
 
 def test_backup_command(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
+    cfgfile = tmp_path / "config.yaml"
+    cfgfile.write_text(
+        "dandi_instance: dandi-staging\n"
+        "s3bucket: dandi-api-staging-dandisets\n"
+        "dandisets:\n"
+        "  path: ds\n"
+    )
     r = CliRunner().invoke(
         main,
         [
-            "--dandi-instance",
-            "dandi-staging",
-            "--target",
-            str(tmp_path / "ds"),
-            "--s3bucket",
-            "dandi-api-staging-dandisets",
+            "--backup-root",
+            str(tmp_path),
+            "-c",
+            str(cfgfile),
             "update-from-backup",
-            "--zarr-target",
-            str(tmp_path / "zarr"),
             text_dandiset.dandiset_id,
         ],
         standalone_mode=False,

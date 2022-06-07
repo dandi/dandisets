@@ -9,8 +9,6 @@ PS4='> '
 ds=$(dirname "$0")
 ds=$(dirname "$ds")
 
-zarrds=/mnt/backup/dandi/dandizarrs
-
 source ~/.bashrc-miniconda
 conda activate dandisets
 
@@ -28,8 +26,9 @@ set -x
 python -m tools.backups2datalad \
    -l DEBUG \
    -J 5 \
-   --target "$ds" \
-   populate dandi-dandisets-dropbox "$@"
+   --backup-root "$ds" \
+   --config tools/backups2datalad.cfg.yaml \
+   populate "$@"
 
 datalad foreach-dataset -s -r -R 1 -J 5 --chpwd pwd --cmd-type eval 'ds.push(to="github")'
 

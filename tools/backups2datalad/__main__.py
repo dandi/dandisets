@@ -12,20 +12,13 @@ from typing import Optional, Sequence
 import anyio
 import click
 from click_loglevel import LogLevel
-from dandi.consts import DANDISET_ID_REGEX, known_instances
+from dandi.consts import DANDISET_ID_REGEX
 from dandi.dandiapi import DandiAPIClient
 from datalad.api import Dataset
 
+from .config import Config
 from .datasetter import DandiDatasetter
-from .util import (
-    Config,
-    TextProcess,
-    aiter,
-    format_errors,
-    log,
-    pdb_excepthook,
-    quantify,
-)
+from .util import TextProcess, aiter, format_errors, log, pdb_excepthook, quantify
 
 
 @click.group()
@@ -36,20 +29,20 @@ from .util import (
     type=re.compile,
 )
 @click.option(
-    "-i",
-    "--dandi-instance",
-    type=click.Choice(sorted(known_instances)),
-    default="dandi",
-    help="DANDI instance to use",
-    show_default=True,
+    "-B",
+    "--backup-root",
+    type=click.Path(file_okay=False, path_type=Path),
+)
+@click.option(
+    "-c",
+    "--config",
+    type=click.Path(dir_okay=False, exists=True, path_type=Path),
 )
 @click.option(
     "-J",
     "--jobs",
     type=int,
-    default=10,
     help="How many parallel jobs to use when downloading and pushing",
-    show_default=True,
 )
 @click.option(
     "-f",
@@ -70,42 +63,35 @@ from .util import (
     is_flag=True,
     help="Log backups2datalad at DEBUG and all other loggers at INFO",
 )
-@click.option(
-    "--s3bucket",
-    help="S3 bucket on which the Dandisets' assets are stored",
-    default="dandiarchive",
-    show_default=True,
-)
-@click.option(
-    "-T",
-    "--target",
-    type=click.Path(file_okay=False, path_type=Path),
-    default=Path(),
-)
 @click.pass_context
 def main(
     ctx: click.Context,
     asset_filter: Optional[re.Pattern[str]],
-    dandi_instance: str,
     force: Optional[str],
-    jobs: int,
+    jobs: Optional[int],
     log_level: int,
     pdb: bool,
     quiet_debug: bool,
-    target: Path,
-    s3bucket: str,
+    backup_root: Path,
+    config: Optional[Path],
 ) -> None:
+    if config is None:
+        cfg = Config()
+    else:
+        cfg = Config.load_yaml(config)
+    if backup_root is not None:
+        cfg.backup_root = backup_root
+    if jobs is not None:
+        cfg.jobs = jobs
+    if asset_filter is not None:
+        cfg.asset_filter = asset_filter
+    if force is not None:
+        cfg.force = force
     ctx.obj = DandiDatasetter(
         dandi_client=ctx.with_resource(
-            DandiAPIClient.for_dandi_instance(dandi_instance)
+            DandiAPIClient.for_dandi_instance(cfg.dandi_instance)
         ),
-        target_path=target,
-        config=Config(
-            asset_filter=asset_filter,
-            jobs=jobs,
-            force=force,
-            s3bucket=s3bucket,
-        ),
+        config=cfg,
     )
     if pdb:
         sys.excepthook = pdb_excepthook
@@ -113,16 +99,14 @@ def main(
         log.setLevel(logging.DEBUG)
         log_level = logging.INFO
     logging.basicConfig(
-        format="%(asctime)s [%(levelname)-8s] %(name)s %(message)s",
+        format="%(asctime)s [%(levelname)-8s] %(name)s: %(message)s",
         datefmt="%Y-%m-%dT%H:%M:%S%z",
         level=log_level,
-        force=True,  # Override dandi's settings
     )
     ctx.obj.debug_logfile()
 
 
 @main.command()
-@click.option("--backup-remote", help="Name of the rclone remote to push to")
 @click.option(
     "-e",
     "--exclude",
@@ -131,44 +115,20 @@ def main(
     type=re.compile,
 )
 @click.option(
-    "--gh-org", help="GitHub organization to create Dandiset repositories under"
-)
-@click.option(
     "--tags/--no-tags",
-    default=True,
+    default=None,
     help="Enable/disable creation of tags for releases  [default: enabled]",
-)
-@click.option("--zarr-backup-remote", help="Name of the rclone remote to push Zarrs to")
-@click.option(
-    "--zarr-gh-org", help="GitHub organization to create Zarr repositories under"
-)
-@click.option(
-    "-Z",
-    "--zarr-target",
-    type=click.Path(file_okay=False, path_type=Path),
-    required=True,
 )
 @click.argument("dandisets", nargs=-1)
 @click.pass_obj
 def update_from_backup(
     datasetter: DandiDatasetter,
     dandisets: Sequence[str],
-    backup_remote: Optional[str],
-    zarr_backup_remote: Optional[str],
-    gh_org: Optional[str],
-    zarr_gh_org: Optional[str],
-    zarr_target: Path,
     exclude: Optional[re.Pattern[str]],
-    tags: bool,
+    tags: Optional[bool],
 ) -> None:
-    if (gh_org is None) != (zarr_gh_org is None):
-        raise click.UsageError("--gh-org and --zarr-gh-org must be defined together")
-    datasetter.config.backup_remote = backup_remote
-    datasetter.config.zarr_backup_remote = zarr_backup_remote
-    datasetter.config.enable_tags = tags
-    datasetter.config.gh_org = gh_org
-    datasetter.config.zarr_gh_org = zarr_gh_org
-    datasetter.config.zarr_target = zarr_target
+    if tags is not None:
+        datasetter.config.enable_tags = tags
     datasetter.update_from_backup(dandisets, exclude=exclude)
 
 
@@ -180,24 +140,12 @@ def update_from_backup(
     metavar="REGEX",
     type=re.compile,
 )
-@click.option(
-    "--gh-org",
-    help="GitHub organization Dandiset repositories are located under",
-    required=True,
-)
-@click.option(
-    "--zarr-gh-org",
-    help="GitHub organization Zarr repositories are located under",
-    required=True,
-)
 @click.argument("dandisets", nargs=-1)
 @click.pass_obj
 def update_github_metadata(
     datasetter: DandiDatasetter,
     dandisets: Sequence[str],
     exclude: Optional[re.Pattern[str]],
-    gh_org: str,
-    zarr_gh_org: str,
 ) -> None:
     """
     Update the homepages and descriptions for the GitHub repositories for the
@@ -207,8 +155,6 @@ def update_github_metadata(
     `--target` must point to a clone of the superdataset in which every
     Dandiset subdataset is installed.
     """
-    datasetter.config.gh_org = gh_org
-    datasetter.config.zarr_gh_org = zarr_gh_org
     datasetter.update_github_metadata(dandisets, exclude=exclude)
 
 
@@ -226,7 +172,7 @@ def release(
     push: bool,
 ) -> None:
     dandiset_obj = datasetter.dandi_client.get_dandiset(dandiset, version)
-    dataset = Dataset(datasetter.target_path / dandiset)
+    dataset = Dataset(datasetter.config.dandiset_root / dandiset)
     datasetter.mkrelease(dandiset_obj, dataset, commitish=commitish, push=push)
     if push:
         dataset.push(to="github", jobs=datasetter.config.jobs)
@@ -240,19 +186,21 @@ def release(
     metavar="REGEX",
     type=re.compile,
 )
-@click.argument("backup_remote")
 @click.argument("dandisets", nargs=-1)
 @click.pass_obj
 def populate_cmd(
     datasetter: DandiDatasetter,
     dandisets: Sequence[str],
-    backup_remote: str,
     exclude: Optional[re.Pattern[str]],
 ) -> None:
-    if dandisets:
-        dirs = [datasetter.target_path / d for d in dandisets]
+    if (r := datasetter.config.dandisets.remote) is not None:
+        backup_remote = r.name
     else:
-        dirs = list(datasetter.target_path.iterdir())
+        raise click.UsageError("dandisets.remote not set in config file")
+    if dandisets:
+        dirs = [datasetter.config.dandiset_root / d for d in dandisets]
+    else:
+        dirs = list(datasetter.config.dandiset_root.iterdir())
     for p in dirs:
         if p.is_dir() and re.fullmatch(DANDISET_ID_REGEX, p.name):
             if exclude is not None and exclude.search(p.name):
@@ -274,25 +222,22 @@ def populate_cmd(
 
 
 @main.command()
-@click.option(
-    "-Z",
-    "--zarr-target",
-    type=click.Path(file_okay=False, path_type=Path),
-    required=True,
-)
-@click.argument("backup_remote")
 @click.argument("zarrs", nargs=-1)
 @click.pass_obj
-def populate_zarrs(
-    datasetter: DandiDatasetter,
-    zarr_target: Path,
-    zarrs: Sequence[str],
-    backup_remote: str,
-) -> None:
-    if zarrs:
-        dirs = [zarr_target / z for z in zarrs]
+def populate_zarrs(datasetter: DandiDatasetter, zarrs: Sequence[str]) -> None:
+    zcfg = datasetter.config.zarrs
+    if zcfg is None:
+        raise click.UsageError("Zarr backups not configured in config file")
+    if (r := zcfg.remote) is not None:
+        backup_remote = r.name
     else:
-        dirs = list(zarr_target.iterdir())
+        raise click.UsageError("zarrs.remote not set in config file")
+    zarr_root = datasetter.config.zarr_root
+    assert zarr_root is not None
+    if zarrs:
+        dirs = [zarr_root / z for z in zarrs]
+    else:
+        dirs = list(zarr_root.iterdir())
     for p in dirs:
         if p.is_dir() and p.name not in (".git", ".datalad"):
             ds = Dataset(p)

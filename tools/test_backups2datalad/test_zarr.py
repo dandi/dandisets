@@ -13,8 +13,9 @@ import numpy as np
 from test_util import GitRepo
 import zarr
 
+from backups2datalad.config import Config, ResourceConfig
 from backups2datalad.datasetter import DandiDatasetter, DandisetStats
-from backups2datalad.util import Config, is_meta_file
+from backups2datalad.util import is_meta_file
 from backups2datalad.zarr import CHECKSUM_FILE, sync_zarr
 
 log = logging.getLogger("test_backups2datalad.test_zarr")
@@ -55,7 +56,9 @@ def test_sync_zarr(new_dandiset: SampleDandiset, tmp_path: Path) -> None:
     new_dandiset.upload()
     asset = new_dandiset.dandiset.get_asset_by_path("sample.zarr")
     checksum = asset.get_digest().value
-    config = Config(s3bucket="dandi-api-staging-dandisets")
+    config = Config(
+        s3bucket="dandi-api-staging-dandisets", zarrs=ResourceConfig(path="zarrs")
+    )
     anyio.run(sync_zarr, asset, checksum, tmp_path, config)
     check_zarr(zarr_path, Dataset(tmp_path), checksum)
 
@@ -68,11 +71,12 @@ def test_backup_zarr(new_dandiset: SampleDandiset, tmp_path: Path) -> None:
     asset = new_dandiset.dandiset.get_asset_by_path("sample.zarr")
     di = DandiDatasetter(
         dandi_client=new_dandiset.client,
-        target_path=tmp_path / "ds",
         config=Config(
-            content_url_regex=r".*/blobs/",
+            backup_root=tmp_path,
+            dandi_instance="dandi-staging",
             s3bucket="dandi-api-staging-dandisets",
-            zarr_target=tmp_path / "zarrs",
+            dandisets=ResourceConfig(path="ds"),
+            zarrs=ResourceConfig(path="zarrs"),
         ),
     )
     dandiset_id = new_dandiset.dandiset_id
@@ -168,11 +172,12 @@ def test_backup_zarr_entry_conflicts(
 
     di = DandiDatasetter(
         dandi_client=new_dandiset.client,
-        target_path=tmp_path / "ds",
         config=Config(
-            content_url_regex=r".*/blobs/",
+            backup_root=tmp_path,
+            dandi_instance="dandi-staging",
             s3bucket="dandi-api-staging-dandisets",
-            zarr_target=tmp_path / "zarrs",
+            dandisets=ResourceConfig(path="ds"),
+            zarrs=ResourceConfig(path="zarrs"),
         ),
     )
     dandiset_id = new_dandiset.dandiset_id
@@ -206,11 +211,12 @@ def test_backup_zarr_delete_zarr(new_dandiset: SampleDandiset, tmp_path: Path) -
 
     di = DandiDatasetter(
         dandi_client=new_dandiset.client,
-        target_path=tmp_path / "ds",
         config=Config(
-            content_url_regex=r".*/blobs/",
+            backup_root=tmp_path,
+            dandi_instance="dandi-staging",
             s3bucket="dandi-api-staging-dandisets",
-            zarr_target=tmp_path / "zarrs",
+            dandisets=ResourceConfig(path="ds"),
+            zarrs=ResourceConfig(path="zarrs"),
         ),
     )
     dandiset_id = new_dandiset.dandiset_id
@@ -252,11 +258,12 @@ def test_backup_zarr_pathological(new_dandiset: SampleDandiset, tmp_path: Path) 
 
     di = DandiDatasetter(
         dandi_client=new_dandiset.client,
-        target_path=tmp_path / "ds",
         config=Config(
-            content_url_regex=r".*/blobs/",
+            backup_root=tmp_path,
+            dandi_instance="dandi-staging",
             s3bucket="dandi-api-staging-dandisets",
-            zarr_target=tmp_path / "zarrs",
+            dandisets=ResourceConfig(path="ds"),
+            zarrs=ResourceConfig(path="zarrs"),
         ),
     )
 

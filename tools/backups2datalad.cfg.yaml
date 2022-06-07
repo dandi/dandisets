@@ -1,0 +1,18 @@
+dandi_instance: dandi
+s3bucket: dandiarchive
+
+dandisets:
+  path: dandisets
+  github_org: dandisets
+  remote:
+    name: dandi-dandisets-dropbox
+    prefix: dandi-dandisets/annexstore
+    uuid: "727f466f-60c3-4778-90b2-b2332856c2f8"
+
+zarrs:
+  path: dandizarrs
+  github_org: dandizarrs
+  remote:
+    name: dandi-dandizarrs-dropbox
+    prefix: dandi-dandizarrs/annexstore
+    uuid: "727f466f-60c3-4778-90b2-b2332856c2f9"
