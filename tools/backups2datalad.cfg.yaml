@@ -1,5 +1,6 @@
 dandi_instance: dandi
 s3bucket: dandiarchive
+jobs: 5
 
 dandisets:
   path: dandisets

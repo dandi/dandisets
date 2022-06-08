@@ -1,34 +1,11 @@
 #!/bin/bash
 # Just the update portion
-# TODO: absorb common functionality into a reusable component
-
-set -eu
-
-export PS1='$ '
-PS4='> '
-#set -x
-
-ds=$(dirname "$0")
-ds=$(dirname "$ds")
-
-source ~/.bashrc-miniconda
-conda activate dandisets
-
-cd "$ds"
-chronic pip install -r tools/backups2datalad.req.txt
-
-export DATALAD_LOG_LEVEL=WARNING  # otherwise too much of noise
-
-mkdir -p .git/tmp
-
-set -o pipefail
-set -x
+source "$(dirname "$0")"/backups2datalad-cron-common
 
 (
 eval python -m tools.backups2datalad \
    -l WARNING \
-   -J 5 \
-   --backup-root "$ds" \
+   --backup-root "$backup_root" \
    --config tools/backups2datalad.cfg.yaml \
    update-from-backup \
    -e '000108$' \
