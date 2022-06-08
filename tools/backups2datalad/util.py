@@ -142,7 +142,7 @@ class TextProcess(anyio.abc.AsyncResource):
         if self.p.stdin is not None:
             await self.p.stdin.aclose()
         rc = await self.p.wait()
-        if rc != 0:
+        if rc != 0 and self.name != "whereis":
             log.warning(
                 "git-annex %s command exited with return code %d", self.name, rc
             )
