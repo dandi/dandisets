@@ -5,6 +5,7 @@ from datetime import datetime
 from functools import partial
 import os
 from pathlib import Path
+import subprocess
 import sys
 from typing import TYPE_CHECKING, AsyncIterator, Iterator, Optional, Set, Tuple, cast
 from urllib.parse import quote
@@ -430,9 +431,15 @@ async def sync_zarr(
             )
             log.debug("Zarr %s: Commit made", asset.zarr)
             log.debug("Zarr %s: Running `git gc`", asset.zarr)
-            await anyio.run_process(
-                ["git", "gc"], cwd=ds.path, stdout=None, stderr=None
-            )
+            try:
+                await anyio.run_process(
+                    ["git", "gc"], cwd=ds.path, stdout=None, stderr=None
+                )
+            except subprocess.CalledProcessError as e:
+                if e.returncode == 128:
+                    log.warning("`git gc` in %s exited with code 128", ds.path)
+                else:
+                    raise
             log.debug("Zarr %s: Finished running `git gc`", asset.zarr)
             if config.zarr_gh_org is not None:
                 log.debug("Zarr %s: Pushing to GitHub", asset.zarr)
