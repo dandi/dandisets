@@ -354,11 +354,12 @@ async def populate(dirpath: Path, backup_remote: str, desc: str, jobs: int) -> N
 
 
 async def call_annex_json(cmd: str, *args: str, path: Path) -> None:
-    log.debug("Running git-annex %s", shlex.join(args))
+    cmd_full = ["git-annex", cmd, *args, "--json", "--json-error-messages"]
+    log.debug("Running %s", shlex.join(cmd_full))
     success = 0
     failed = 0
     async with await anyio.open_process(
-        ["git-annex", cmd, *args, "--json", "--json-error-messages"],
+        cmd_full,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         cwd=path,
