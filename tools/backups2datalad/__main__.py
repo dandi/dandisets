@@ -23,12 +23,6 @@ from .util import TextProcess, aiter, format_errors, log, pdb_excepthook, quanti
 
 @click.group()
 @click.option(
-    "--asset-filter",
-    help="Only consider assets matching the given regex",
-    metavar="REGEX",
-    type=re.compile,
-)
-@click.option(
     "-B",
     "--backup-root",
     type=click.Path(file_okay=False, path_type=Path),
@@ -43,12 +37,6 @@ from .util import TextProcess, aiter, format_errors, log, pdb_excepthook, quanti
     "--jobs",
     type=int,
     help="How many parallel jobs to use when downloading and pushing",
-)
-@click.option(
-    "-f",
-    "--force",
-    type=click.Choice(["assets-update"]),
-    help="Force all assets to be updated, even those whose metadata hasn't changed",
 )
 @click.option(
     "-l",
@@ -66,8 +54,6 @@ from .util import TextProcess, aiter, format_errors, log, pdb_excepthook, quanti
 @click.pass_context
 def main(
     ctx: click.Context,
-    asset_filter: Optional[re.Pattern[str]],
-    force: Optional[str],
     jobs: Optional[int],
     log_level: int,
     pdb: bool,
@@ -83,10 +69,6 @@ def main(
         cfg.backup_root = backup_root
     if jobs is not None:
         cfg.jobs = jobs
-    if asset_filter is not None:
-        cfg.asset_filter = asset_filter
-    if force is not None:
-        cfg.force = force
     ctx.obj = DandiDatasetter(
         dandi_client=ctx.with_resource(
             DandiAPIClient.for_dandi_instance(cfg.dandi_instance)
@@ -108,11 +90,23 @@ def main(
 
 @main.command()
 @click.option(
+    "--asset-filter",
+    help="Only consider assets matching the given regex",
+    metavar="REGEX",
+    type=re.compile,
+)
+@click.option(
     "-e",
     "--exclude",
     help="Skip dandisets matching the given regex",
     metavar="REGEX",
     type=re.compile,
+)
+@click.option(
+    "-f",
+    "--force",
+    type=click.Choice(["assets-update"]),
+    help="Force all assets to be updated, even those whose metadata hasn't changed",
 )
 @click.option(
     "--tags/--no-tags",
@@ -126,7 +120,13 @@ def update_from_backup(
     dandisets: Sequence[str],
     exclude: Optional[re.Pattern[str]],
     tags: Optional[bool],
+    asset_filter: Optional[re.Pattern[str]],
+    force: Optional[str],
 ) -> None:
+    if asset_filter is not None:
+        datasetter.config.asset_filter = asset_filter
+    if force is not None:
+        datasetter.config.force = force
     if tags is not None:
         datasetter.config.enable_tags = tags
     datasetter.update_from_backup(dandisets, exclude=exclude)
@@ -159,6 +159,18 @@ def update_github_metadata(
 
 
 @main.command()
+@click.option(
+    "--asset-filter",
+    help="Only consider assets matching the given regex",
+    metavar="REGEX",
+    type=re.compile,
+)
+@click.option(
+    "-f",
+    "--force",
+    type=click.Choice(["assets-update"]),
+    help="Force all assets to be updated, even those whose metadata hasn't changed",
+)
 @click.option("--commitish", metavar="COMMITISH")
 @click.option("--push/--no-push", default=True)
 @click.argument("dandiset")
@@ -170,7 +182,13 @@ def release(
     version: str,
     commitish: Optional[str],
     push: bool,
+    asset_filter: Optional[re.Pattern[str]],
+    force: Optional[str],
 ) -> None:
+    if asset_filter is not None:
+        datasetter.config.asset_filter = asset_filter
+    if force is not None:
+        datasetter.config.force = force
     dandiset_obj = datasetter.dandi_client.get_dandiset(dandiset, version)
     dataset = Dataset(datasetter.config.dandiset_root / dandiset)
     datasetter.mkrelease(dandiset_obj, dataset, commitish=commitish, push=push)
