@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any, Optional, Pattern
-from uuid import UUID
 
 from dandi.utils import yaml_dump, yaml_load
 from pydantic import BaseModel, Field, root_validator
@@ -13,8 +12,8 @@ from .consts import DEFAULT_GIT_ANNEX_JOBS
 
 class Remote(BaseModel):
     name: str
-    prefix: str
-    uuid: UUID
+    type: str
+    options: dict[str, str]
 
 
 class ResourceConfig(BaseModel):

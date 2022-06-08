@@ -451,16 +451,8 @@ def init_dataset(
     if backup_remote is not None:
         ds.repo.init_remote(
             backup_remote.name,
-            [
-                "type=external",
-                "externaltype=rclone",
-                "chunk=1GB",
-                f"target={backup_remote.name}",
-                f"prefix={backup_remote.prefix}",
-                "embedcreds=no",
-                f"uuid={backup_remote.uuid}",
-                "encryption=none",
-            ],
+            [f"type={backup_remote.type}"]
+            + [f"{k}={v}" for k, v in backup_remote.options.items()],
         )
         ds.repo.call_annex(["untrust", backup_remote.name])
         ds.repo.set_preferred_content(
