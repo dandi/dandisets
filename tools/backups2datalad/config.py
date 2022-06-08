@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Optional, Pattern
+from typing import Any, Dict, Optional, Pattern
 
 from dandi.utils import yaml_dump, yaml_load
 from pydantic import BaseModel, Field, root_validator
@@ -13,7 +13,8 @@ from .consts import DEFAULT_GIT_ANNEX_JOBS
 class Remote(BaseModel):
     name: str
     type: str
-    options: dict[str, str]
+    # Needs to be `typing.Dict` so that pydantic will support it under 3.8
+    options: Dict[str, str]
 
 
 class ResourceConfig(BaseModel):
