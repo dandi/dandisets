@@ -2,34 +2,23 @@ from datetime import datetime, timezone
 import logging
 from pathlib import Path
 from time import sleep
-from traceback import format_exception
 
-from click.testing import CliRunner, Result
 from conftest import SampleDandiset
 from dandi.consts import dandiset_metadata_file
 from dandi.dandiapi import Version
-from dandi.utils import find_files, yaml_load
+from dandi.utils import yaml_load
 from datalad.api import Dataset
 from datalad.support.annexrepo import AnnexRepo
 from datalad.tests.utils import assert_repo_status, ok_file_under_git
 import pytest
 from test_util import GitRepo
 
-from backups2datalad.__main__ import main
 from backups2datalad.config import Config
 from backups2datalad.consts import DEFAULT_BRANCH
 from backups2datalad.datasetter import DandiDatasetter
-from backups2datalad.util import custom_commit_date, is_meta_file
+from backups2datalad.util import custom_commit_date
 
 log = logging.getLogger("test_backups2datalad.test_core")
-
-
-def show_result(r: Result) -> str:
-    if r.exception is not None:
-        assert isinstance(r.exc_info, tuple)
-        return "".join(format_exception(*r.exc_info))
-    else:
-        return r.output
 
 
 def test_1(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
@@ -374,50 +363,6 @@ def test_binary(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
     data_backup = backup / "data.dat"
     assert data_backup.is_symlink() and not data_backup.is_file()
     assert annex.is_under_annex([data_backup]) == [True]
-
-
-def test_backup_command(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
-    cfgfile = tmp_path / "config.yaml"
-    cfgfile.write_text(
-        "dandi_instance: dandi-staging\n"
-        "s3bucket: dandi-api-staging-dandisets\n"
-        "dandisets:\n"
-        "  path: ds\n"
-    )
-    r = CliRunner().invoke(
-        main,
-        [
-            "--backup-root",
-            str(tmp_path),
-            "-c",
-            str(cfgfile),
-            "update-from-backup",
-            text_dandiset.dandiset_id,
-        ],
-        standalone_mode=False,
-    )
-    assert r.exit_code == 0, show_result(r)
-    text_files = {
-        Path(f).relative_to(text_dandiset.dspath).as_posix()
-        for f in find_files(
-            r".*",
-            [text_dandiset.dspath],
-            exclude_dotfiles=False,
-            exclude_dotdirs=False,
-            exclude_vcs=False,
-        )
-    }
-    ds = Dataset(tmp_path / "ds" / text_dandiset.dandiset_id)
-    assert ds.is_installed()
-    assert_repo_status(ds.path)
-    sync_files = {f for f in ds.repo.get_files() if not is_meta_file(f)}
-    assert sync_files == text_files
-    for e in sync_files:
-        p = ds.pathobj / e
-        assert p.is_file()
-        if e != dandiset_metadata_file:
-            assert p.read_text() == (text_dandiset.dspath / e).read_text()
-    assert not any(ds.repo.is_under_annex(list(sync_files)))
 
 
 def test_custom_commit_date(tmp_path: Path) -> None:
