@@ -158,7 +158,13 @@ class DandiDatasetter:
                     log.info("No changes made to repository; deleting logfile")
                     logfile.unlink()
             log.debug("Running `git gc`")
-            subprocess.run(["git", "gc"], cwd=ds.path, check=True)
+            try:
+                subprocess.run(["git", "gc"], cwd=ds.path, check=True)
+            except subprocess.CalledProcessError as e:
+                if e.returncode == 128:
+                    log.warning("`git gc` in %s exited with code 128", ds.path)
+                else:
+                    raise
             log.debug("Finished running `git gc`")
             return syncer.report.commits > 0
 
