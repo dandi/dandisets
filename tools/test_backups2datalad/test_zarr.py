@@ -115,8 +115,19 @@ def test_backup_zarr(new_dandiset: SampleDandiset, tmp_path: Path) -> None:
     assert submod["gitmodule_url"] == str(zarrds.pathobj)
     assert submod["type"] == "dataset"
     assert submod["gitshasum"] == zarrds.repo.format_commit("%H")
-    assert gitrepo.get_commit_count() == 3
-    assert gitrepo.get_commit_subject("HEAD") == "[backups2datalad] 2 files added"
+    c = gitrepo.get_commit_count()
+    if c == 4:
+        # dandiset.yaml was updated again during the second backup because the
+        # server took a while to incorporate the Zarr size data
+        bump = 1
+        assert (
+            gitrepo.get_commit_subject("HEAD")
+            == "[backups2datalad] Only some metadata updates"
+        )
+    else:
+        bump = 0
+        assert c == 3
+        assert gitrepo.get_commit_subject("HEAD") == "[backups2datalad] 2 files added"
     assert {asset["path"] for asset in gitrepo.get_assets_json("HEAD")} == {
         "file.txt",
         "sample.zarr",
@@ -136,7 +147,7 @@ def test_backup_zarr(new_dandiset: SampleDandiset, tmp_path: Path) -> None:
     assert submod["gitmodule_url"] == str(zarrds.pathobj)
     assert submod["type"] == "dataset"
     assert submod["gitshasum"] == zarrds.repo.format_commit("%H")
-    assert gitrepo.get_commit_count() == 4
+    assert gitrepo.get_commit_count() == 4 + bump
     assert gitrepo.get_commit_subject("HEAD") == "[backups2datalad] 1 file updated"
     assert {asset["path"] for asset in gitrepo.get_assets_json("HEAD")} == {
         "file.txt",

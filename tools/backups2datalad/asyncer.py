@@ -9,6 +9,7 @@ import json
 from operator import attrgetter
 import os.path
 from pathlib import Path, PurePosixPath
+import subprocess
 import sys
 from typing import AsyncIterator, Dict, List, Optional
 from urllib.parse import urlparse, urlunparse
@@ -80,6 +81,7 @@ class Downloader:
     download_receiver: MemoryObjectReceiveStream[ToDownload] = field(init=False)
     zarrs: Dict[str, ZarrLink] = field(init=False, default_factory=dict)
     zarr_limit: anyio.CapacityLimiter = field(init=False)
+    need_add: list[str] = field(init=False, default_factory=list)
 
     def __post_init__(self) -> None:
         (
@@ -322,13 +324,16 @@ class Downloader:
                         data.get("percent-progress", "??.??%"),
                     )
                 elif not data["success"]:
-                    log.error(
-                        "%s: download failed:%s",
-                        data["file"],
-                        format_errors(data["error-messages"]),
-                    )
+                    msg = format_errors(data["error-messages"])
+                    log.error("%s: download failed:%s", data["file"], msg)
                     self.in_progress.pop(data["file"])
-                    self.report.failed += 1
+                    if "exited 123" in msg:
+                        log.info(
+                            "Will try `git add`ing %s manually later", data["file"]
+                        )
+                        self.need_add.append(data["file"])
+                    else:
+                        self.report.failed += 1
                 else:
                     path = data["file"]
                     key = data.get("key")
@@ -408,6 +413,16 @@ async def async_assets(
                             nursery.start_soon(dm.read_addurl)
                     finally:
                         tracker.dump()
+
+            for fpath in dm.need_add:
+                log.info("Manually running `git add %s`", fpath)
+                try:
+                    await anyio.run_process(
+                        ["git", "add", fpath], cwd=ds.path, stdout=None, stderr=None
+                    )
+                except subprocess.CalledProcessError:
+                    log.error("Manual `git add %s` failed", fpath)
+                    dm.report.failed += 1
 
             timestamp = dm.last_timestamp
             for zarr_id, zarrlink in dm.zarrs.items():
