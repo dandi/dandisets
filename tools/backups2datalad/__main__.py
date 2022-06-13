@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from functools import partial
 import json
 import logging
 from pathlib import Path
@@ -7,7 +8,7 @@ import re
 import shlex
 import subprocess
 import sys
-from typing import Optional, Sequence
+from typing import AsyncIterable, Optional, Sequence
 
 import anyio
 import click
@@ -16,7 +17,7 @@ from dandi.consts import DANDISET_ID_REGEX
 from dandi.dandiapi import DandiAPIClient
 from datalad.api import Dataset
 
-from .aioutil import TextProcess, aiter
+from .aioutil import TextProcess, aiter, pool_amap
 from .config import Config
 from .datasetter import DandiDatasetter
 from .util import format_errors, log, pdb_excepthook, quantify
@@ -205,45 +206,56 @@ def release(
     metavar="REGEX",
     type=re.compile,
 )
+@click.option("-w", "--workers", type=int, help="Number of workers to run in parallel")
 @click.argument("dandisets", nargs=-1)
 @click.pass_obj
 def populate_cmd(
     datasetter: DandiDatasetter,
     dandisets: Sequence[str],
     exclude: Optional[re.Pattern[str]],
+    workers: Optional[int],
 ) -> None:
     if (r := datasetter.config.dandisets.remote) is not None:
         backup_remote = r.name
     else:
         raise click.UsageError("dandisets.remote not set in config file")
+    if workers is not None:
+        datasetter.config.workers = workers
     if dandisets:
-        dirs = [datasetter.config.dandiset_root / d for d in dandisets]
+        diriter = (datasetter.config.dandiset_root / d for d in dandisets)
     else:
-        dirs = list(datasetter.config.dandiset_root.iterdir())
-    for p in dirs:
+        diriter = datasetter.config.dandiset_root.iterdir()
+    dirs: list[Path] = []
+    for p in diriter:
         if p.is_dir() and re.fullmatch(DANDISET_ID_REGEX, p.name):
             if exclude is not None and exclude.search(p.name):
                 log.debug("Skipping dandiset %s", p.name)
             else:
-                ds = Dataset(p)
-                if not ds.is_installed():
-                    log.info("Dataset %s is not installed; skipping", p.name)
-                else:
-                    anyio.run(
-                        populate,
-                        ds.pathobj,
-                        backup_remote,
-                        f"Dandiset {p.name}",
-                        datasetter.config.jobs,
-                    )
+                dirs.append(p)
         else:
             log.debug("Skipping non-Dandiset node %s", p.name)
+    report = anyio.run(
+        pool_amap,
+        partial(
+            populate,
+            backup_remote=backup_remote,
+            pathtype="Dandiset",
+            jobs=datasetter.config.jobs,
+        ),
+        afilter_installed(dirs),
+        datasetter.config.workers,
+    )
+    if report.failed:
+        sys.exit(f"{quantify(len(report.failed), 'populate job')} failed")
 
 
 @main.command()
+@click.option("-w", "--workers", type=int, help="Number of workers to run in parallel")
 @click.argument("zarrs", nargs=-1)
 @click.pass_obj
-def populate_zarrs(datasetter: DandiDatasetter, zarrs: Sequence[str]) -> None:
+def populate_zarrs(
+    datasetter: DandiDatasetter, zarrs: Sequence[str], workers: Optional[int]
+) -> None:
     zcfg = datasetter.config.zarrs
     if zcfg is None:
         raise click.UsageError("Zarr backups not configured in config file")
@@ -251,30 +263,37 @@ def populate_zarrs(datasetter: DandiDatasetter, zarrs: Sequence[str]) -> None:
         backup_remote = r.name
     else:
         raise click.UsageError("zarrs.remote not set in config file")
+    if workers is not None:
+        datasetter.config.workers = workers
     zarr_root = datasetter.config.zarr_root
     assert zarr_root is not None
     if zarrs:
-        dirs = [zarr_root / z for z in zarrs]
+        diriter = (zarr_root / z for z in zarrs)
     else:
-        dirs = list(zarr_root.iterdir())
-    for p in dirs:
+        diriter = zarr_root.iterdir()
+    dirs: list[Path] = []
+    for p in diriter:
         if p.is_dir() and p.name not in (".git", ".datalad"):
-            ds = Dataset(p)
-            if not ds.is_installed():
-                log.info("Zarr %s is not installed; skipping", p.name)
-            else:
-                anyio.run(
-                    populate,
-                    ds.pathobj,
-                    backup_remote,
-                    f"Zarr {p.name}",
-                    datasetter.config.jobs,
-                )
+            dirs.append(p)
         else:
             log.debug("Skipping non-Zarr node %s", p.name)
+    report = anyio.run(
+        pool_amap,
+        partial(
+            populate,
+            backup_remote=backup_remote,
+            pathtype="Zarr",
+            jobs=datasetter.config.jobs,
+        ),
+        afilter_installed(dirs),
+        datasetter.config.workers,
+    )
+    if report.failed:
+        sys.exit(f"{quantify(len(report.failed), 'populate-zarr job')} failed")
 
 
-async def populate(dirpath: Path, backup_remote: str, desc: str, jobs: int) -> None:
+async def populate(dirpath: Path, backup_remote: str, pathtype: str, jobs: int) -> None:
+    desc = f"{pathtype} {dirpath.name}"
     log.info("Downloading files for %s", desc)
     await call_annex_json(
         "get",
@@ -349,6 +368,15 @@ async def call_annex_json(cmd: str, *args: str, path: Path) -> None:
     )
     if failed:
         raise RuntimeError(f"git-annex {cmd} failed for {quantify(failed, 'file')}")
+
+
+async def afilter_installed(datasets: list[Path]) -> AsyncIterable[Path]:
+    for p in datasets:
+        ds = Dataset(p)
+        if not ds.is_installed():
+            log.info("Dataset %s is not installed; skipping", p.name)
+        else:
+            yield p
 
 
 if __name__ == "__main__":

@@ -1,24 +1,40 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field
+import math
 from pathlib import Path
 import shlex
 import subprocess
 import sys
-from typing import AsyncIterable, AsyncIterator, Generic, Optional, TypeVar, cast
+from typing import (
+    AsyncIterable,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Generic,
+    Optional,
+    TypeVar,
+    cast,
+)
 
 import anyio
+from anyio.streams.memory import MemoryObjectReceiveStream
 import httpx
 
 from .util import exp_wait, log
 
 T = TypeVar("T")
+InT = TypeVar("InT")
+OutT = TypeVar("OutT")
 
 DEEP_DEBUG = 5
-
 
 if sys.version_info[:2] >= (3, 10):
     # So aiter() can be re-exported without mypy complaining:
     from builtins import aiter as aiter
+    from contextlib import aclosing
 else:
+    from async_generator import aclosing
 
     def aiter(obj: AsyncIterable[T]) -> AsyncIterator[T]:
         return obj.__aiter__()
@@ -145,3 +161,38 @@ class MiniFuture(Generic[T]):
     async def get(self) -> T:
         await self.event.wait()
         return cast(T, self.value)
+
+
+@dataclass
+class PoolReport(Generic[InT, OutT]):
+    results: list[tuple[InT, OutT]] = field(default_factory=list)
+    failed: list[InT] = field(default_factory=list)
+
+
+async def pool_amap(
+    func: Callable[[InT], Awaitable[OutT]],
+    inputs: AsyncIterable[InT],
+    workers: int = 5,
+) -> PoolReport[InT, OutT]:
+    report: PoolReport[InT, OutT] = PoolReport()
+
+    async def dowork(rec: MemoryObjectReceiveStream[InT]) -> None:
+        async with rec:
+            async for inp in rec:
+                try:
+                    outp = await func(inp)
+                except Exception:
+                    log.exception("Job failed on input %r:", inp)
+                    report.failed.append(inp)
+                else:
+                    report.results.append((inp, outp))
+
+    async with anyio.create_task_group() as tg:
+        sender, receiver = anyio.create_memory_object_stream(math.inf)
+        async with receiver:
+            for _ in range(max(1, workers)):
+                tg.start_soon(dowork, receiver.clone())
+        async with sender, aclosing(inputs):
+            async for item in inputs:
+                await sender.send(item)
+    return report

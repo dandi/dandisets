@@ -39,6 +39,7 @@ class Config(BaseModel):
     # <https://github.com/samuelcolvin/pydantic/issues/2636>
     asset_filter: Optional[Pattern] = None
     jobs: int = DEFAULT_GIT_ANNEX_JOBS
+    workers: int = 5
     force: Optional[str] = None
     enable_tags: bool = True
 
