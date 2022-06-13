@@ -8,7 +8,6 @@ import json
 import logging
 import os
 from pathlib import Path
-import re
 import shlex
 import subprocess
 import sys
@@ -41,6 +40,7 @@ from datalad.support.json_py import dump
 import httpx
 from morecontext import envset
 
+from .config import Config, Remote
 from .consts import DEFAULT_BRANCH
 
 log = logging.getLogger("backups2datalad")
@@ -60,24 +60,6 @@ else:
 
 
 DEEP_DEBUG = 5
-
-
-@dataclass
-class Config:
-    asset_filter: Optional[re.Pattern[str]] = None
-    jobs: int = 10
-    force: Optional[str] = None
-    content_url_regex: str = r"amazonaws.com/.*blobs/"
-    s3bucket: str = "dandiarchive"
-    enable_tags: bool = True
-    backup_remote: Optional[str] = None
-    zarr_backup_remote: Optional[str] = None
-    gh_org: Optional[str] = None
-    zarr_gh_org: Optional[str] = None
-    zarr_target: Optional[Path] = None
-
-    def match_asset(self, asset_path: str) -> bool:
-        return bool(self.asset_filter is None or self.asset_filter.search(asset_path))
 
 
 @dataclass
@@ -448,13 +430,6 @@ async def arequest(client: httpx.AsyncClient, method: str, url: str) -> httpx.Re
         return r
 
 
-@dataclass
-class Remote:
-    name: str
-    prefix: str
-    uuid: str
-
-
 def init_dataset(
     ds: Dataset,
     desc: str,
@@ -476,16 +451,8 @@ def init_dataset(
     if backup_remote is not None:
         ds.repo.init_remote(
             backup_remote.name,
-            [
-                "type=external",
-                "externaltype=rclone",
-                "chunk=1GB",
-                f"target={backup_remote.name}",
-                f"prefix={backup_remote.prefix}",
-                "embedcreds=no",
-                f"uuid={backup_remote.uuid}",
-                "encryption=none",
-            ],
+            [f"type={backup_remote.type}"]
+            + [f"{k}={v}" for k, v in backup_remote.options.items()],
         )
         ds.repo.call_annex(["untrust", backup_remote.name])
         ds.repo.set_preferred_content(
@@ -500,7 +467,7 @@ def create_github_sibling(
     ds: Dataset,
     owner: str,
     name: str,
-    backup_remote: Optional[str],
+    backup_remote: Optional[Remote],
     *,
     existing: str = "skip",
 ) -> bool:
@@ -513,7 +480,7 @@ def create_github_sibling(
             name="github",
             access_protocol="https",
             github_organization=owner,
-            publish_depends=backup_remote,
+            publish_depends=backup_remote.name if backup_remote is not None else None,
         )
         ds.config.set(
             "remote.github.pushurl",

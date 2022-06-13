@@ -1,59 +1,32 @@
 #!/bin/bash
-
-set -eu
-
-export PS1='$ '
-PS4='> '
-#set -x
-
-ds=$(dirname "$0")
-ds=$(dirname "$ds")
-
-zarrds=/mnt/backup/dandi/dandizarrs
-
-source ~/.bashrc-miniconda
-conda activate dandisets
-
-cd "$ds"
-chronic pip install -r tools/backups2datalad.req.txt
-
-export DATALAD_LOG_LEVEL=WARNING  # otherwise too much of noise
-
-mkdir -p .git/tmp
-
-set -o pipefail
-set -x
+source "$(dirname "$0")"/backups2datalad-cron-common
 
 (
 eval python -m tools.backups2datalad \
    -l WARNING \
-   -J 5 \
-   --target "$ds" \
+   --backup-root "$backup_root" \
+   --config tools/backups2datalad.cfg.yaml \
    update-from-backup \
-   --zarr-target "$zarrds" \
-   --backup-remote dandi-dandisets-dropbox  \
-   --zarr-backup-remote dandi-dandizarrs-dropbox  \
-   --gh-org dandisets \
-   --zarr-gh-org dandizarrs \
    -e '000108$' \
    "$*" 2>&1 | grep -v 'nothing to save, working tree clean'
 
-git pull  
+git pull
 datalad push -J 5
 
 python -m tools.backups2datalad \
    -l DEBUG \
-   -J 5 \
-   --target "$ds" \
-   populate dandi-dandisets-dropbox "$@"
+   --backup-root "$backup_root" \
+   --config tools/backups2datalad.cfg.yaml \
+   populate "$@"
 
-git pull  
+git pull
 datalad push -J 5
 
 python -m tools.backups2datalad \
    -l DEBUG \
-   -J 5 \
-   populate-zarrs --zarr-target "$zarrds" dandi-dandizarrs-dropbox
+   --backup-root "$backup_root" \
+   --config tools/backups2datalad.cfg.yaml \
+   populate-zarrs
 
 git pull  # so we possibly merge changes on the server
 datalad push -J 5

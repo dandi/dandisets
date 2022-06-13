@@ -1,0 +1,33 @@
+dandi_instance: dandi
+s3bucket: dandiarchive
+jobs: 5
+
+dandisets:
+  path: dandisets
+  github_org: dandisets
+  remote:
+    name: dandi-dandisets-dropbox
+    type: external
+    options:
+      externaltype: rclone
+      chunk: 1GB
+      target: dandi-dandisets-dropbox
+      prefix: dandi-dandisets/annexstore
+      embedcreds: "no"
+      uuid: "727f466f-60c3-4778-90b2-b2332856c2f8"
+      encryption: "none"
+
+zarrs:
+  path: dandizarrs
+  github_org: dandizarrs
+  remote:
+    name: dandi-dandizarrs-dropbox
+    type: external
+    options:
+      externaltype: rclone
+      chunk: 1GB
+      target: dandi-dandizarrs-dropbox
+      prefix: dandi-dandizarrs/annexstore
+      embedcreds: "no"
+      uuid: "727f466f-60c3-4778-90b2-b2332856c2f9"
+      encryption: "none"

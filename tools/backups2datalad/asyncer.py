@@ -24,10 +24,10 @@ import httpx
 from identify.identify import tags_from_filename
 
 from .annex import AsyncAnnex
+from .config import Config
 from .consts import ZARR_LIMIT
 from .util import (
     AssetTracker,
-    Config,
     MiniFuture,
     Report,
     TextProcess,
@@ -212,13 +212,13 @@ class Downloader:
                     remotes = await self.annex.get_key_remotes(key)
                     if (
                         remotes is not None
-                        and self.config.backup_remote is not None
-                        and self.config.backup_remote not in remotes
+                        and self.config.dandisets.remote is not None
+                        and self.config.dandisets.remote.name not in remotes
                     ):
                         log.info(
-                            "%s: Not in backup remote %s",
+                            "%s: Not in backup remote %r",
                             asset.path,
-                            self.config.backup_remote,
+                            self.config.dandisets.remote.name,
                         )
                     self.tracker.finish_asset(asset.path)
                     self.report.registered += 1
@@ -248,13 +248,13 @@ class Downloader:
         self.last_timestamp = maxdatetime(self.last_timestamp, asset.created)
         if asset.zarr in self.zarrs:
             self.zarrs[asset.zarr].asset_paths.append(asset.path)
-        elif self.config.zarr_target is None:
+        elif self.config.zarr_root is None:
             raise RuntimeError(
                 f"Zarr encountered in Dandiset {self.dandiset_id} but"
-                " zarr_target not set"
+                " Zarr backups not configured in config file"
             )
         else:
-            zarr_dspath = self.config.zarr_target / asset.zarr
+            zarr_dspath = self.config.zarr_root / asset.zarr
             ts_fut: MiniFuture[Optional[datetime]] = MiniFuture()
             self.nursery.start_soon(
                 partial(sync_zarr, ts_fut=ts_fut),
@@ -437,8 +437,8 @@ async def async_assets(
                         if config.zarr_gh_org is not None:
                             src = f"https://github.com/{config.zarr_gh_org}/{zarr_id}"
                         else:
-                            assert config.zarr_target is not None
-                            src = str(config.zarr_target / zarr_id)
+                            assert config.zarr_root is not None
+                            src = str(config.zarr_root / zarr_id)
                         await anyio.to_thread.run_sync(
                             partial(clone, source=src, path=ds.pathobj / asset_path)
                         )

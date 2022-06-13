@@ -26,11 +26,10 @@ from morecontext import envset
 from packaging.version import Version
 from urllib3.util.retry import Retry
 
-from .consts import DANDISETS_REMOTE_PREFIX, DANDISETS_REMOTE_UUID, DEFAULT_BRANCH
+from .config import Config
+from .consts import DEFAULT_BRANCH
 from .syncer import Syncer
 from .util import (
-    Config,
-    Remote,
     assets_eq,
     create_github_sibling,
     custom_commit_date,
@@ -47,11 +46,10 @@ from .util import (
 @dataclass
 class DandiDatasetter:
     dandi_client: DandiAPIClient
-    target_path: Path
     config: Config
 
     def ensure_superdataset(self) -> Dataset:
-        superds = Dataset(self.target_path)
+        superds = Dataset(self.config.dandiset_root)
         if not superds.is_installed():
             log.info("Creating Datalad superdataset")
             with envset(
@@ -70,7 +68,7 @@ class DandiDatasetter:
         to_save: List[str] = []
         ds_stats: List[DandisetStats] = []
         for d in self.get_dandisets(dandiset_ids, exclude=exclude):
-            dsdir = self.target_path / d.identifier
+            dsdir = self.config.dandiset_root / d.identifier
             ds = self.init_dataset(
                 dsdir, dandiset_id=d.identifier, create_time=d.version.created
             )
@@ -94,20 +92,11 @@ class DandiDatasetter:
     ) -> Dataset:
         ds = Dataset(dsdir)
         if not ds.is_installed():
-            remote: Optional[Remote]
-            if self.config.backup_remote is not None:
-                remote = Remote(
-                    name=self.config.backup_remote,
-                    prefix=DANDISETS_REMOTE_PREFIX,
-                    uuid=DANDISETS_REMOTE_UUID,
-                )
-            else:
-                remote = None
             init_dataset(
                 ds,
                 desc=f"Dandiset {dandiset_id}",
                 commit_date=create_time,
-                backup_remote=remote,
+                backup_remote=self.config.dandisets.remote,
             )
         return ds
 
@@ -117,7 +106,7 @@ class DandiDatasetter:
                 ds,
                 owner=self.config.gh_org,
                 name=dandiset_id,
-                backup_remote=self.config.backup_remote,
+                backup_remote=self.config.dandisets.remote,
             ):
                 while True:
                     try:
@@ -192,10 +181,10 @@ class DandiDatasetter:
     ) -> None:
         ds_stats: List[DandisetStats] = []
         for d in self.get_dandisets(dandiset_ids, exclude=exclude):
-            ds = Dataset(self.target_path / d.identifier)
+            ds = Dataset(self.config.dandiset_root / d.identifier)
             ds_stats.append(self.set_dandiset_gh_metadata(d, ds))
         if not dandiset_ids and exclude is None:
-            superds = Dataset(self.target_path)
+            superds = Dataset(self.config.dandiset_root)
             self.set_superds_description(superds, ds_stats)
 
     def get_dandisets(
@@ -455,14 +444,14 @@ class DandiDatasetter:
             h.setLevel(screen_level)
         # Superdataset must exist before creating anything in the directory:
         self.ensure_superdataset()
-        logdir = self.target_path / ".git" / "dandi" / "backups2datalad"
+        logdir = self.config.dandiset_root / ".git" / "dandi" / "backups2datalad"
         logdir.mkdir(exist_ok=True, parents=True)
         filename = "{:%Y.%m.%d.%H.%M.%SZ}.log".format(datetime.utcnow())
         logfile = logdir / filename
         handler = logging.FileHandler(logfile, encoding="utf-8")
         handler.setLevel(logging.DEBUG)
         fmter = logging.Formatter(
-            fmt="%(asctime)s [%(levelname)-8s] %(name)s %(message)s",
+            fmt="%(asctime)s [%(levelname)-8s] %(name)s: %(message)s",
             datefmt="%Y-%m-%dT%H:%M:%S%z",
         )
         handler.setFormatter(fmter)

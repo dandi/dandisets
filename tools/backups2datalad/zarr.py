@@ -19,11 +19,9 @@ from datalad.api import Dataset
 from pydantic import BaseModel
 
 from .annex import AsyncAnnex
-from .consts import ZARRS_REMOTE_PREFIX, ZARRS_REMOTE_UUID
+from .config import Config, ResourceConfig
 from .util import (
-    Config,
     MiniFuture,
-    Remote,
     create_github_sibling,
     custom_commit_date,
     init_dataset,
@@ -401,18 +399,23 @@ async def sync_zarr(
         # construct a CapacityLimiter outside of an async context.
         limit = anyio.CapacityLimiter(1)
     async with limit:
+        assert config.zarrs is not None
         ds = Dataset(dsdir)
         if not ds.is_installed():
-            await anyio.to_thread.run_sync(init_zarr_dataset, ds, asset, config)
+            await anyio.to_thread.run_sync(init_zarr_dataset, ds, asset, config.zarrs)
         async with anyio.create_task_group() as nursery:
             async with AsyncAnnex(dsdir, nursery, digest_type="MD5") as annex:
+                if (r := config.zarrs.remote) is not None:
+                    backup_remote = r.name
+                else:
+                    backup_remote = None
                 zsync = ZarrSyncer(
                     api_url=asset.client.api_url,
                     zarr_id=asset.zarr,
                     repo=dsdir,
                     annex=annex,
                     s3bucket=config.s3bucket,
-                    backup_remote=config.backup_remote,
+                    backup_remote=backup_remote,
                     checksum=checksum,
                 )
                 # Don't use `nursery.start_soon(zsync.run)`, as then the annex
@@ -455,21 +458,14 @@ async def sync_zarr(
                 ts_fut.set(None)
 
 
-def init_zarr_dataset(ds: Dataset, asset: RemoteZarrAsset, config: Config) -> None:
-    remote: Optional[Remote]
-    if config.zarr_backup_remote is not None:
-        remote = Remote(
-            name=config.zarr_backup_remote,
-            prefix=ZARRS_REMOTE_PREFIX,
-            uuid=ZARRS_REMOTE_UUID,
-        )
-    else:
-        remote = None
+def init_zarr_dataset(
+    ds: Dataset, asset: RemoteZarrAsset, zcfg: ResourceConfig
+) -> None:
     init_dataset(
         ds,
         desc=f"Zarr {asset.zarr}",
         commit_date=asset.created,
-        backup_remote=remote,
+        backup_remote=zcfg.remote,
         backend="MD5E",
         cfg_proc=None,
     )
@@ -479,14 +475,9 @@ def init_zarr_dataset(ds: Dataset, asset: RemoteZarrAsset, config: Config) -> No
     )
     with custom_commit_date(asset.created):
         ds.save(message="Exclude .dandi/ from git-annex")
-    if config.zarr_gh_org is not None:
+    if (zgh := zcfg.github_org) is not None:
         log.debug("Zarr %s: Creating GitHub sibling", asset.zarr)
-        create_github_sibling(
-            ds,
-            owner=config.zarr_gh_org,
-            name=asset.zarr,
-            backup_remote=config.zarr_backup_remote,
-        )
+        create_github_sibling(ds, owner=zgh, name=asset.zarr, backup_remote=zcfg.remote)
     log.debug("Zarr %s: Finished initializing dataset", asset.zarr)
 
 
