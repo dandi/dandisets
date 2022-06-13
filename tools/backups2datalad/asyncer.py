@@ -11,18 +11,20 @@ import os.path
 from pathlib import Path, PurePosixPath
 import subprocess
 import sys
-from typing import AsyncIterator, Dict, List, Optional
+from typing import AsyncIterator, Optional
 from urllib.parse import urlparse, urlunparse
 
 import anyio
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
-from dandi.dandiapi import AssetType, RemoteAsset, RemoteDandiset, RemoteZarrAsset
+from dandi.dandiapi import AssetType, RemoteAsset, RemoteZarrAsset
 from dandi.exceptions import NotFoundError
 from dandischema.models import DigestType
-from datalad.api import Dataset, clone
+from datalad.api import clone
 import httpx
 from identify.identify import tags_from_filename
 
+from .adandi import RemoteDandiset
+from .adataset import AsyncDataset
 from .aioutil import MiniFuture, TextProcess, aiter, arequest, open_git_annex
 from .annex import AsyncAnnex
 from .config import Config
@@ -30,7 +32,6 @@ from .consts import ZARR_LIMIT
 from .util import (
     AssetTracker,
     Report,
-    custom_commit_date,
     format_errors,
     key2hash,
     log,
@@ -49,7 +50,7 @@ else:
 class ToDownload:
     path: str
     url: str
-    extra_urls: List[str]
+    extra_urls: list[str]
     sha256_digest: str
 
 
@@ -57,7 +58,7 @@ class ToDownload:
 class ZarrLink:
     zarr_dspath: Path
     timestamp_fut: MiniFuture[Optional[datetime]]
-    asset_paths: List[str]
+    asset_paths: list[str]
 
 
 @dataclass
@@ -72,10 +73,10 @@ class Downloader:
     nursery: anyio.abc.TaskGroup
     last_timestamp: Optional[datetime] = None
     report: Report = field(init=False, default_factory=Report)
-    in_progress: Dict[str, ToDownload] = field(init=False, default_factory=dict)
+    in_progress: dict[str, ToDownload] = field(init=False, default_factory=dict)
     download_sender: MemoryObjectSendStream[ToDownload] = field(init=False)
     download_receiver: MemoryObjectReceiveStream[ToDownload] = field(init=False)
-    zarrs: Dict[str, ZarrLink] = field(init=False, default_factory=dict)
+    zarrs: dict[str, ZarrLink] = field(init=False, default_factory=dict)
     zarr_limit: anyio.CapacityLimiter = field(init=False)
     need_add: list[str] = field(init=False, default_factory=list)
 
@@ -362,23 +363,14 @@ class Downloader:
 
 
 async def async_assets(
-    dandiset: RemoteDandiset, ds: Dataset, config: Config, tracker: AssetTracker
+    dandiset: RemoteDandiset, ds: AsyncDataset, config: Config, tracker: AssetTracker
 ) -> Report:
     done_flag = anyio.Event()
     total_report = Report()
-    async with aclosing(  # type: ignore[type-var]
-        aiterassets(dandiset, done_flag)
-    ) as aia:
+    async with aclosing(aiterassets(dandiset, done_flag)) as aia:
         while not done_flag.is_set():
-            # We need an outer nursery to use for creating git-annex processes,
-            # and we need an inner nursery for waiting for tasks to complete.
-            # We can't combine the two, because the processes need to outlive
-            # the `start_soon()` calls, so their scopes need to be outside the
-            # inner nursery, which means we have to have an outer nursery as
-            # well.
-            async with anyio.create_task_group() as annex_nursery:
-                async with await open_git_annex(
-                    annex_nursery,
+            try:
+                async with anyio.create_task_group() as nursery, await open_git_annex(
                     "addurl",
                     "--batch",
                     "--with-files",
@@ -390,32 +382,28 @@ async def async_assets(
                     "--raw",
                     path=ds.pathobj,
                 ) as p, AsyncAnnex(
-                    ds.pathobj, annex_nursery
+                    ds.pathobj
                 ) as annex, httpx.AsyncClient() as s3client:
-                    try:
-                        async with anyio.create_task_group() as nursery:
-                            dm = Downloader(
-                                dandiset_id=dandiset.identifier,
-                                addurl=p,
-                                repo=ds.pathobj,
-                                config=config,
-                                tracker=tracker,
-                                s3client=s3client,
-                                annex=annex,
-                                nursery=nursery,
-                            )
-                            nursery.start_soon(dm.asset_loop, aia)
-                            nursery.start_soon(dm.feed_addurl)
-                            nursery.start_soon(dm.read_addurl)
-                    finally:
-                        tracker.dump()
+                    dm = Downloader(
+                        dandiset_id=dandiset.identifier,
+                        addurl=p,
+                        repo=ds.pathobj,
+                        config=config,
+                        tracker=tracker,
+                        s3client=s3client,
+                        annex=annex,
+                        nursery=nursery,
+                    )
+                    nursery.start_soon(dm.asset_loop, aia)
+                    nursery.start_soon(dm.feed_addurl)
+                    nursery.start_soon(dm.read_addurl)
+            finally:
+                tracker.dump()
 
             for fpath in dm.need_add:
                 log.info("Manually running `git add %s`", fpath)
                 try:
-                    await anyio.run_process(
-                        ["git", "add", fpath], cwd=ds.path, stdout=None, stderr=None
-                    )
+                    await ds.call_git("add", fpath)
                 except subprocess.CalledProcessError:
                     log.error("Manual `git add %s` failed", fpath)
                     dm.report.failed += 1
@@ -447,15 +435,11 @@ async def async_assets(
                     elif ts is not None:
                         log.info("Zarr asset modified at %s; updating", asset_path)
                         dm.report.updated += 1
-                        zds = Dataset(ds.pathobj / asset_path)
+                        zds = AsyncDataset(ds.pathobj / asset_path)
                         if config.zarr_gh_org is not None:
-                            await anyio.to_thread.run_sync(
-                                partial(zds.update, how="ff-only", sibling="github")
-                            )
+                            await zds.update(how="ff-only", sibling="github")
                         else:
-                            await anyio.to_thread.run_sync(
-                                partial(zds.update, how="ff-only")
-                            )
+                            await zds.update(how="ff-only")
                         log.debug("Finished updating Zarr at %s", asset_path)
 
             if dandiset.version_id == "draft":
@@ -467,13 +451,13 @@ async def async_assets(
                         quantify(dm.report.downloaded, "asset"),
                     )
                     log.debug("Checking whether repository is dirty ...")
-                    if any(
-                        r["state"] != "clean" for r in ds.status(result_renderer=None)
-                    ):
+                    if await ds.is_unclean():
                         log.info("Committing changes")
                         assert timestamp is not None
-                        with custom_commit_date(timestamp):
-                            ds.save(message=dm.report.get_commit_message())
+                        await ds.save(
+                            message=dm.report.get_commit_message(),
+                            commit_date=timestamp,
+                        )
                         log.debug("Commit made")
                         total_report.commits += 1
                     else:
@@ -491,45 +475,29 @@ async def aiterassets(
 ) -> AsyncIterator[Optional[RemoteAsset]]:
     last_ts: Optional[datetime] = None
     if dandiset.version_id == "draft":
-        vs = [v for v in dandiset.get_versions() if v.identifier != "draft"]
+        vs = [v async for v in dandiset.aget_versions(include_draft=False)]
         vs.sort(key=attrgetter("created"))
         versions = deque(vs)
     else:
         versions = deque()
-    async with httpx.AsyncClient() as client:
-        url: Optional[
-            str
-        ] = f"{dandiset.client.api_url}{dandiset.version_api_path}assets/?order=created"
-        while url is not None:
-            r = await arequest(client, "GET", url)
-            data = r.json()
-            for item in data["results"]:
-                r = await arequest(
-                    client,
-                    "GET",
-                    f"{dandiset.client.api_url}/assets/{item['asset_id']}/",
-                )
-                metadata = r.json()
-                asset = RemoteAsset.from_data(dandiset, item, metadata)
-                assert last_ts is None or last_ts <= asset.created, (
-                    f"Asset {asset.path} created at {asset.created} but"
-                    f" returned after an asset created at {last_ts}!"
-                )
-                if (
-                    versions
-                    and (last_ts is None or last_ts < versions[0].created)
-                    and asset.created >= versions[0].created
-                ):
-                    log.info(
-                        "All assets up to creation of version %s found;"
-                        " will commit soon",
-                        versions[0].identifier,
-                    )
-                    versions.popleft()
-                    yield None
-                last_ts = asset.created
-                yield asset
-            url = data.get("next")
+    async for asset in dandiset.aget_assets():
+        assert last_ts is None or last_ts <= asset.created, (
+            f"Asset {asset.path} created at {asset.created} but"
+            f" returned after an asset created at {last_ts}!"
+        )
+        if (
+            versions
+            and (last_ts is None or last_ts < versions[0].created)
+            and asset.created >= versions[0].created
+        ):
+            log.info(
+                "All assets up to creation of version %s found; will commit soon",
+                versions[0].identifier,
+            )
+            versions.popleft()
+            yield None
+        last_ts = asset.created
+        yield asset
     log.info("Finished getting assets from API")
     done_flag.set()
 

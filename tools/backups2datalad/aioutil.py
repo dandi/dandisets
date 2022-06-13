@@ -7,10 +7,12 @@ import shlex
 import subprocess
 import sys
 from typing import (
+    Any,
     AsyncIterable,
     AsyncIterator,
     Awaitable,
     Callable,
+    Container,
     Generic,
     Optional,
     TypeVar,
@@ -105,11 +107,7 @@ class TextProcess(anyio.abc.AsyncResource):
                 yield line
 
 
-async def open_git_annex(
-    _nursery: anyio.abc.TaskGroup, *args: str, path: Optional[Path] = None
-) -> TextProcess:
-    # The `nursery` argument was necessary when using trio 0.20 and may become
-    # necessary in a future version of anyio.
+async def open_git_annex(*args: str, path: Optional[Path] = None) -> TextProcess:
     log.debug("Running git-annex %s", shlex.join(args))
     p = await anyio.open_process(
         ["git-annex", *args],
@@ -120,15 +118,24 @@ async def open_git_annex(
     return TextProcess(p, name=args[0])
 
 
-async def arequest(client: httpx.AsyncClient, method: str, url: str) -> httpx.Response:
+async def arequest(
+    client: httpx.AsyncClient,
+    method: str,
+    url: str,
+    json: Any = None,
+    retry_on: Container[int] = (),
+) -> httpx.Response:
     waits = exp_wait(attempts=10, base=1.8)
     while True:
         try:
-            r = await client.request(method, url, follow_redirects=True)
+            r = await client.request(method, url, follow_redirects=True, json=json)
             r.raise_for_status()
         except httpx.HTTPError as e:
             if isinstance(e, httpx.RequestError) or (
-                isinstance(e, httpx.HTTPStatusError) and e.response.status_code >= 500
+                isinstance(e, httpx.HTTPStatusError)
+                and (
+                    e.response.status_code >= 500 or e.response.status_code in retry_on
+                )
             ):
                 try:
                     delay = next(waits)
@@ -196,3 +203,22 @@ async def pool_amap(
             async for item in inputs:
                 await sender.send(item)
     return report
+
+
+async def aruncmd(
+    *args: str | Path, **kwargs: Any
+) -> subprocess.CompletedProcess[bytes]:
+    argstrs = [str(a) for a in args]
+    if (cwd := kwargs.get("cwd")) is not None:
+        attrs = f" [cwd={cwd}]"
+    else:
+        attrs = ""
+    log.debug("Running: %s%s", shlex.join(argstrs), attrs)
+    return await anyio.run_process(argstrs, **kwargs)
+
+
+async def areadcmd(*args: str | Path, **kwargs: Any) -> str:
+    kwargs["stdout"] = subprocess.PIPE
+    kwargs.setdefault("stderr", None)
+    r = await aruncmd(*args, **kwargs)
+    return r.stdout.decode("utf-8").strip()

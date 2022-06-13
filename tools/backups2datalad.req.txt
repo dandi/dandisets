@@ -3,7 +3,7 @@
 aiobotocore
 anyio ~= 3.6
 async_generator ~= 1.10; python_version < '3.10'
-click >= 8.0.1
+asyncclick >= 8.0.1
 click-loglevel ~= 0.2
 dandi >= 0.36.0
 dandischema
@@ -12,7 +12,5 @@ ghrepo ~= 0.1
 httpx ~= 0.22.0
 humanize
 identify ~= 2.0
-morecontext ~= 0.1
 packaging
 pydantic ~= 1.8
-PyGithub ~= 1.53

@@ -2,12 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from functools import partial
 import os
 from pathlib import Path
-import subprocess
 import sys
-from typing import TYPE_CHECKING, AsyncIterator, Iterator, Optional, Set, Tuple, cast
+from typing import TYPE_CHECKING, AsyncIterator, Iterator, Optional, cast
 from urllib.parse import quote
 
 from aiobotocore.session import get_session
@@ -15,22 +13,13 @@ import anyio
 from botocore import UNSIGNED
 from botocore.client import Config as BotoConfig
 from dandi.dandiapi import RemoteZarrAsset
-from datalad.api import Dataset
 from pydantic import BaseModel
 
+from .adataset import AsyncDataset
 from .aioutil import MiniFuture
 from .annex import AsyncAnnex
-from .config import Config, ResourceConfig
-from .util import (
-    create_github_sibling,
-    custom_commit_date,
-    init_dataset,
-    is_meta_file,
-    key2hash,
-    log,
-    maxdatetime,
-    quantify,
-)
+from .config import Config
+from .util import is_meta_file, key2hash, log, maxdatetime, quantify
 
 if sys.version_info[:2] >= (3, 10):
     from contextlib import aclosing
@@ -65,7 +54,7 @@ class ZarrEntry:
         return self.path
 
     @property
-    def parts(self) -> Tuple[str, ...]:
+    def parts(self) -> tuple[str, ...]:
         return tuple(self.path.split("/"))
 
     @property
@@ -272,7 +261,7 @@ class ZarrSyncer:
         (self.repo / SYNC_FILE).write_text(data.json(indent=4) + "\n")
 
     async def needs_sync(
-        self, client: S3Client, last_sync: Optional[datetime], local_paths: Set[str]
+        self, client: S3Client, last_sync: Optional[datetime], local_paths: set[str]
     ) -> bool:
         if last_sync is None:
             return True
@@ -316,7 +305,7 @@ class ZarrSyncer:
             return True
         return False
 
-    def rmtree(self, dirpath: Path, local_paths: Set[str]) -> None:
+    def rmtree(self, dirpath: Path, local_paths: set[str]) -> None:
         for p in list(dirpath.iterdir()):
             if p.is_dir():
                 self.rmtree(p, local_paths)
@@ -327,7 +316,7 @@ class ZarrSyncer:
                 local_paths.discard(p.relative_to(self.repo).as_posix())
         dirpath.rmdir()
 
-    def prune_deleted(self, local_paths: Set[str]) -> None:
+    def prune_deleted(self, local_paths: set[str]) -> None:
         log.info("Zarr %s: deleting extra files", self.zarr_id)
         for path in local_paths:
             log.info("Zarr %s: deleting %s", self.zarr_id, path)
@@ -400,27 +389,43 @@ async def sync_zarr(
         limit = anyio.CapacityLimiter(1)
     async with limit:
         assert config.zarrs is not None
-        ds = Dataset(dsdir)
-        if not ds.is_installed():
-            await anyio.to_thread.run_sync(init_zarr_dataset, ds, asset, config.zarrs)
-        async with anyio.create_task_group() as nursery:
-            async with AsyncAnnex(dsdir, nursery, digest_type="MD5") as annex:
-                if (r := config.zarrs.remote) is not None:
-                    backup_remote = r.name
-                else:
-                    backup_remote = None
-                zsync = ZarrSyncer(
-                    api_url=asset.client.api_url,
-                    zarr_id=asset.zarr,
-                    repo=dsdir,
-                    annex=annex,
-                    s3bucket=config.s3bucket,
-                    backup_remote=backup_remote,
-                    checksum=checksum,
+        ds = AsyncDataset(dsdir)
+        if await ds.ensure_installed(
+            desc=f"Zarr {asset.zarr}",
+            commit_date=asset.created,
+            backup_remote=config.zarrs.remote,
+            backend="MD5E",
+            cfg_proc=None,
+        ):
+            log.debug("Zarr %s: Excluding .dandi/ from git-annex", asset.zarr)
+            (ds.pathobj / ".dandi").mkdir(parents=True, exist_ok=True)
+            (ds.pathobj / ".dandi" / ".gitattributes").write_text(
+                "* annex.largefiles=nothing\n"
+            )
+            await ds.save(
+                message="Exclude .dandi/ from git-annex", commit_date=asset.created
+            )
+            if (zgh := config.zarrs.github_org) is not None:
+                log.debug("Zarr %s: Creating GitHub sibling", asset.zarr)
+                await ds.create_github_sibling(
+                    owner=zgh, name=asset.zarr, backup_remote=config.zarrs.remote
                 )
-                # Don't use `nursery.start_soon(zsync.run)`, as then the annex
-                # would be closed before the run() finished.
-                await zsync.run()
+            log.debug("Zarr %s: Finished initializing dataset", asset.zarr)
+        async with AsyncAnnex(dsdir, digest_type="MD5") as annex:
+            if (r := config.zarrs.remote) is not None:
+                backup_remote = r.name
+            else:
+                backup_remote = None
+            zsync = ZarrSyncer(
+                api_url=asset.client.api_url,
+                zarr_id=asset.zarr,
+                repo=dsdir,
+                annex=annex,
+                s3bucket=config.s3bucket,
+                backup_remote=backup_remote,
+                checksum=checksum,
+            )
+            await zsync.run()
         report = zsync.report
         if report:
             summary = report.get_summary()
@@ -429,26 +434,14 @@ async def sync_zarr(
                 commit_ts = asset.created
             else:
                 commit_ts = zsync.last_timestamp
-            await anyio.to_thread.run_sync(
-                save, ds, commit_ts, f"[backups2datalad] {summary}"
-            )
+            await ds.save(message=f"[backups2datalad] {summary}", commit_date=commit_ts)
             log.debug("Zarr %s: Commit made", asset.zarr)
             log.debug("Zarr %s: Running `git gc`", asset.zarr)
-            try:
-                await anyio.run_process(
-                    ["git", "gc"], cwd=ds.path, stdout=None, stderr=None
-                )
-            except subprocess.CalledProcessError as e:
-                if e.returncode == 128:
-                    log.warning("`git gc` in %s exited with code 128", ds.path)
-                else:
-                    raise
+            await ds.gc()
             log.debug("Zarr %s: Finished running `git gc`", asset.zarr)
             if config.zarr_gh_org is not None:
                 log.debug("Zarr %s: Pushing to GitHub", asset.zarr)
-                await anyio.to_thread.run_sync(
-                    partial(ds.push, to="github", jobs=config.jobs, data="nothing")
-                )
+                await ds.push(to="github", jobs=config.jobs, data="nothing")
                 log.debug("Zarr %s: Finished pushing to GitHub", asset.zarr)
             if ts_fut is not None:
                 ts_fut.set(commit_ts)
@@ -456,31 +449,3 @@ async def sync_zarr(
             log.info("Zarr %s: no changes; not committing", asset.zarr)
             if ts_fut is not None:
                 ts_fut.set(None)
-
-
-def init_zarr_dataset(
-    ds: Dataset, asset: RemoteZarrAsset, zcfg: ResourceConfig
-) -> None:
-    init_dataset(
-        ds,
-        desc=f"Zarr {asset.zarr}",
-        commit_date=asset.created,
-        backup_remote=zcfg.remote,
-        backend="MD5E",
-        cfg_proc=None,
-    )
-    log.debug("Zarr %s: Excluding .dandi/ from git-annex", asset.zarr)
-    ds.repo.set_gitattributes(
-        [("*", {"annex.largefiles": "nothing"})], attrfile=".dandi/.gitattributes"
-    )
-    with custom_commit_date(asset.created):
-        ds.save(message="Exclude .dandi/ from git-annex")
-    if (zgh := zcfg.github_org) is not None:
-        log.debug("Zarr %s: Creating GitHub sibling", asset.zarr)
-        create_github_sibling(ds, owner=zgh, name=asset.zarr, backup_remote=zcfg.remote)
-    log.debug("Zarr %s: Finished initializing dataset", asset.zarr)
-
-
-def save(ds: Dataset, commit_date: datetime, commit_msg: str) -> None:
-    with custom_commit_date(commit_date):
-        ds.save(message=commit_msg)

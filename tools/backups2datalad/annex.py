@@ -1,8 +1,10 @@
+from __future__ import annotations
+
 from collections import defaultdict
 from dataclasses import dataclass, field
 import json
 from pathlib import Path
-from typing import AsyncIterator, Dict, List, Optional
+from typing import AsyncIterator, Optional
 
 import anyio
 from anyio.streams.text import TextReceiveStream
@@ -14,13 +16,12 @@ from .util import format_errors, log
 @dataclass
 class AsyncAnnex(anyio.abc.AsyncResource):
     repo: Path
-    nursery: anyio.abc.TaskGroup
     digest_type: str = "SHA256"
     pfromkey: Optional[TextProcess] = None
     pexaminekey: Optional[TextProcess] = None
     pwhereis: Optional[TextProcess] = None
     pregisterurl: Optional[TextProcess] = None
-    locks: Dict[str, anyio.Lock] = field(
+    locks: dict[str, anyio.Lock] = field(
         init=False, default_factory=lambda: defaultdict(anyio.Lock)
     )
 
@@ -33,7 +34,6 @@ class AsyncAnnex(anyio.abc.AsyncResource):
         async with self.locks["fromkey"]:
             if self.pfromkey is None:
                 self.pfromkey = await open_git_annex(
-                    self.nursery,
                     "fromkey",
                     "--force",
                     "--batch",
@@ -57,7 +57,6 @@ class AsyncAnnex(anyio.abc.AsyncResource):
         async with self.locks["examinekey"]:
             if self.pexaminekey is None:
                 self.pexaminekey = await open_git_annex(
-                    self.nursery,
                     "examinekey",
                     "--batch",
                     f"--migrate-to-backend={self.digest_type}E",
@@ -69,12 +68,11 @@ class AsyncAnnex(anyio.abc.AsyncResource):
             ### TODO: Do something if readline() returns "" (signalling EOF)
             return (await self.pexaminekey.readline()).strip()
 
-    async def get_key_remotes(self, key: str) -> Optional[List[str]]:
+    async def get_key_remotes(self, key: str) -> Optional[list[str]]:
         # Returns None if key is not known to git-annex
         async with self.locks["whereis"]:
             if self.pwhereis is None:
                 self.pwhereis = await open_git_annex(
-                    self.nursery,
                     "whereis",
                     "--batch-keys",
                     "--json",
@@ -96,7 +94,6 @@ class AsyncAnnex(anyio.abc.AsyncResource):
         async with self.locks["registerurl"]:
             if self.pregisterurl is None:
                 self.pregisterurl = await open_git_annex(
-                    self.nursery,
                     "registerurl",
                     "--batch",
                     "--json",

@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Optional
+from dataclasses import dataclass
+from typing import Optional
 
-import anyio
 from dandi.dandiapi import RemoteDandiset
-from datalad.api import Dataset
 
+from .adatalad import AsyncDataset
 from .asyncer import async_assets
 from .config import Config
 from .util import AssetTracker, Report, log, quantify
@@ -16,26 +15,15 @@ from .util import AssetTracker, Report, log, quantify
 class Syncer:
     config: Config
     dandiset: RemoteDandiset
-    ds: Dataset
+    ds: AsyncDataset
+    tracker: AssetTracker
     deleted: int = 0
     report: Optional[Report] = None
-    tracker: AssetTracker = field(init=False)
 
-    def __post_init__(self) -> None:
-        self.tracker = AssetTracker.from_dataset(self.ds.pathobj)
-
-    def __enter__(self) -> Syncer:
-        return self
-
-    def __exit__(self, *_exc_info: Any) -> None:
-        # This used to do something, but now I'm mainly just keeping it around
-        # because the `with` block makes the code look nicer.
-        pass
-
-    def sync_assets(self) -> None:
+    async def sync_assets(self) -> None:
         log.info("Syncing assets...")
-        self.report = anyio.run(
-            async_assets, self.dandiset, self.ds, self.config, self.tracker
+        self.report = await async_assets(
+            self.dandiset, self.ds, self.config, self.tracker
         )
         log.info("Asset sync complete!")
         log.info("%s added", quantify(self.report.added, "asset"))
@@ -46,12 +34,12 @@ class Syncer:
         )
         self.report.check()
 
-    def prune_deleted(self) -> None:
+    async def prune_deleted(self) -> None:
         for asset_path in self.tracker.get_deleted(self.config):
             log.info(
                 "%s: Asset is in dataset but not in Dandiarchive; deleting", asset_path
             )
-            self.ds.repo.remove([asset_path])
+            await self.ds.remove(asset_path)
             self.deleted += 1
 
     def dump_asset_metadata(self) -> None:
