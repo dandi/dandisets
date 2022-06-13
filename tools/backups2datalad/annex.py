@@ -7,7 +7,8 @@ from typing import AsyncIterator, Dict, List, Optional
 import anyio
 from anyio.streams.text import TextReceiveStream
 
-from .util import TextProcess, format_errors, log, open_git_annex
+from .aioutil import TextProcess, open_git_annex
+from .util import format_errors, log
 
 
 @dataclass

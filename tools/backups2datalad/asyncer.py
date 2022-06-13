@@ -23,22 +23,18 @@ from datalad.api import Dataset, clone
 import httpx
 from identify.identify import tags_from_filename
 
+from .aioutil import MiniFuture, TextProcess, aiter, arequest, open_git_annex
 from .annex import AsyncAnnex
 from .config import Config
 from .consts import ZARR_LIMIT
 from .util import (
     AssetTracker,
-    MiniFuture,
     Report,
-    TextProcess,
-    aiter,
-    arequest,
     custom_commit_date,
     format_errors,
     key2hash,
     log,
     maxdatetime,
-    open_git_annex,
     quantify,
 )
 from .zarr import sync_zarr

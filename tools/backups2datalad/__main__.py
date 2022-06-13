@@ -16,9 +16,10 @@ from dandi.consts import DANDISET_ID_REGEX
 from dandi.dandiapi import DandiAPIClient
 from datalad.api import Dataset
 
+from .aioutil import TextProcess, aiter
 from .config import Config
 from .datasetter import DandiDatasetter
-from .util import TextProcess, aiter, format_errors, log, pdb_excepthook, quantify
+from .util import format_errors, log, pdb_excepthook, quantify
 
 
 @click.group()

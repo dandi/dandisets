@@ -18,10 +18,10 @@ from dandi.dandiapi import RemoteZarrAsset
 from datalad.api import Dataset
 from pydantic import BaseModel
 
+from .aioutil import MiniFuture
 from .annex import AsyncAnnex
 from .config import Config, ResourceConfig
 from .util import (
-    MiniFuture,
     create_github_sibling,
     custom_commit_date,
     init_dataset,
