@@ -362,6 +362,7 @@ async def call_annex_json(cmd: str, *args: str, path: Path) -> None:
         cmd_full,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
+        stderr=None,
         cwd=path,
     ) as p0, TextProcess(p0, name=cmd) as p:
         async for line in aiter(p):
