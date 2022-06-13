@@ -11,6 +11,8 @@ ZARR_LIMIT = 32
 
 USER_AGENT = (
     "backups2datalad (https://github.com/dandi/dandisets) httpx/{} {}/{}".format(
-        httpx.__version__, platform.python_implementation(), platform.python_version()
+        httpx.__version__,
+        platform.python_implementation(),
+        platform.python_version(),
     )
 )

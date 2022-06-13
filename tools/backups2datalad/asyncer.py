@@ -28,7 +28,7 @@ from .adataset import AsyncDataset
 from .aioutil import MiniFuture, TextProcess, aiter, arequest, open_git_annex
 from .annex import AsyncAnnex
 from .config import Config
-from .consts import ZARR_LIMIT
+from .consts import USER_AGENT, ZARR_LIMIT
 from .util import (
     AssetTracker,
     Report,
@@ -381,9 +381,9 @@ async def async_assets(
                     "--json-progress",
                     "--raw",
                     path=ds.pathobj,
-                ) as p, AsyncAnnex(
-                    ds.pathobj
-                ) as annex, httpx.AsyncClient() as s3client:
+                ) as p, AsyncAnnex(ds.pathobj) as annex, httpx.AsyncClient(
+                    headers={"User-Agent": USER_AGENT}
+                ) as s3client:
                     dm = Downloader(
                         dandiset_id=dandiset.identifier,
                         addurl=p,
