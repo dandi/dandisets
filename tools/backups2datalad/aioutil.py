@@ -114,6 +114,7 @@ async def open_git_annex(*args: str, path: Optional[Path] = None) -> TextProcess
         ["git-annex", *args],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
+        stderr=None,
         cwd=path,
     )
     return TextProcess(p, name=args[0])
@@ -215,6 +216,8 @@ async def aruncmd(
     else:
         attrs = ""
     log.debug("Running: %s%s", shlex.join(argstrs), attrs)
+    kwargs.setdefault("stdout", None)
+    kwargs.setdefault("stderr", None)
     return await anyio.run_process(argstrs, **kwargs)
 
 
