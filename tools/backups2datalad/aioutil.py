@@ -25,6 +25,7 @@ from anyio.streams.memory import MemoryObjectReceiveStream
 from anyio.streams.text import TextReceiveStream
 import httpx
 
+from .consts import DEFAULT_WORKERS
 from .logging import log
 from .util import exp_wait
 
@@ -195,7 +196,7 @@ class PoolReport(Generic[InT, OutT]):
 async def pool_amap(
     func: Callable[[InT], Awaitable[OutT]],
     inputs: AsyncIterable[InT],
-    workers: int = 5,
+    workers: int = DEFAULT_WORKERS,
 ) -> PoolReport[InT, OutT]:
     report: PoolReport[InT, OutT] = PoolReport()
 

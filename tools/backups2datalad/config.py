@@ -9,7 +9,7 @@ import anyio
 from dandi.utils import yaml_dump, yaml_load
 from pydantic import BaseModel, Field, root_validator
 
-from .consts import DEFAULT_GIT_ANNEX_JOBS, ZARR_LIMIT
+from .consts import DEFAULT_GIT_ANNEX_JOBS, DEFAULT_WORKERS, ZARR_LIMIT
 
 
 class Remote(BaseModel):
@@ -41,7 +41,7 @@ class BackupConfig(BaseModel):
     # <https://github.com/samuelcolvin/pydantic/issues/2636>
     asset_filter: Optional[Pattern] = None
     jobs: int = DEFAULT_GIT_ANNEX_JOBS
-    workers: int = 5
+    workers: int = DEFAULT_WORKERS
     force: Optional[str] = None
     enable_tags: bool = True
 
