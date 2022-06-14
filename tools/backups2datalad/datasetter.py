@@ -408,7 +408,7 @@ class DandiDatasetter(AsyncResource):
             await ds.call_git(
                 "tag",
                 "-m",
-                f"Version {dandiset.version_id} of Dandiset" f" {dandiset.identifier}",
+                f"Version {dandiset.version_id} of Dandiset {dandiset.identifier}",
                 dandiset.version_id,
                 env={
                     **os.environ,
