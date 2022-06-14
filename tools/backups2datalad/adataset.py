@@ -136,7 +136,7 @@ class AsyncDataset:
 
     async def add(self, path: str) -> None:
         # `path` must be relative to the root of the dataset
-        await self.call_git("add", path)
+        await self.call_annex("add", path)
 
     async def remove(self, path: str) -> None:
         # `path` must be relative to the root of the dataset
