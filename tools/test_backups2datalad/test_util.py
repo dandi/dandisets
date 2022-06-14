@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 import subprocess
-from typing import Any, cast
+from typing import Any, List, cast
 
 from backups2datalad.util import is_meta_file
 
@@ -90,8 +90,9 @@ class GitRepo:
         }
 
     def get_assets_json(self, commitish: str) -> list[dict]:
+        # We need to use typing.List here for Python 3.8 compatibility
         return cast(
-            list[dict], json.loads(self.get_blob(commitish, ".dandi/assets.json"))
+            List[dict], json.loads(self.get_blob(commitish, ".dandi/assets.json"))
         )
 
     def get_commit_count(self) -> int:
