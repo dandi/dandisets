@@ -112,6 +112,7 @@ async def main(
     default=None,
     help="Enable/disable creation of tags for releases  [default: enabled]",
 )
+@click.option("-w", "--workers", type=int, help="Number of workers to run in parallel")
 @click.argument("dandisets", nargs=-1)
 @click.pass_obj
 async def update_from_backup(
@@ -121,6 +122,7 @@ async def update_from_backup(
     tags: Optional[bool],
     asset_filter: Optional[re.Pattern[str]],
     force: Optional[str],
+    workers: Optional[int],
 ) -> None:
     async with datasetter:
         if asset_filter is not None:
@@ -129,6 +131,8 @@ async def update_from_backup(
             datasetter.config.force = force
         if tags is not None:
             datasetter.config.enable_tags = tags
+        if workers is not None:
+            datasetter.config.workers = workers
         await datasetter.update_from_backup(dandisets, exclude=exclude)
 
 
