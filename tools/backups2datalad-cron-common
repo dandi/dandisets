@@ -6,7 +6,7 @@ PS4='> '
 #set -x
 
 ds="$(dirname "$(dirname "$0")")"
-backup_root="$(dirname "$ds")"
+backup_root="$(realpath "$ds" | xargs dirname)"
 
 source ~/.bashrc-miniconda
 conda activate dandisets
