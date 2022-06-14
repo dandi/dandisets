@@ -126,7 +126,7 @@ class DandiDatasetter:
         # Returns true if any changes were committed to the repository
         log.info("Syncing Dandiset %s", dandiset.identifier)
         if ds.repo.dirty:
-            raise RuntimeError("Dirty repository; clean or save before running")
+            raise RuntimeError(f"Dirty {dandiset}; clean or save before running")
         with Syncer(config=self.config, dandiset=dandiset, ds=ds) as syncer:
             with dandi_logging(ds.pathobj) as logfile:
                 update_dandiset_metadata(dandiset, ds)
