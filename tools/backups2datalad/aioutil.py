@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import logging
 import math
 from pathlib import Path
 import shlex
@@ -21,6 +22,7 @@ from typing import (
 
 import anyio
 from anyio.streams.memory import MemoryObjectReceiveStream
+from anyio.streams.text import TextReceiveStream
 import httpx
 
 from .logging import log
@@ -46,34 +48,38 @@ else:
 @dataclass
 class TextProcess(anyio.abc.AsyncResource):
     p: anyio.abc.Process
-    name: str
+    desc: str
+    warn_on_fail: bool = True
     encoding: str = "utf-8"
     buff: bytes = b""
 
     async def aclose(self) -> None:
         if self.p.stdin is not None:
             await self.p.stdin.aclose()
+        log.debug("Waiting for %s to terminate", self.desc)
         rc = await self.p.wait()
-        if rc != 0 and self.name != "whereis":
-            log.warning(
-                "git-annex %s command exited with return code %d", self.name, rc
-            )
+        log.log(
+            logging.WARNING if rc != 0 and self.warn_on_fail else logging.DEBUG,
+            "%s command exited with return code %d",
+            self.desc,
+            rc,
+        )
 
     async def send(self, s: str) -> None:
         if self.p.returncode is not None:
             raise RuntimeError(
-                f"git-annex {self.name} command suddenly exited with return"
-                f" code {self.p.returncode}!"
+                f"{self.desc} command suddenly exited with return code"
+                f" {self.p.returncode}!"
             )
         assert self.p.stdin is not None
-        log.log(DEEP_DEBUG, "Sending to %s command: %r", self.name, s)
+        log.log(DEEP_DEBUG, "Sending to %s command: %r", self.desc, s)
         await self.p.stdin.send(s.encode(self.encoding))
 
     async def readline(self) -> str:
         if self.p.returncode is not None:
             raise RuntimeError(
-                f"git-annex {self.name} command suddenly exited with return"
-                f" code {self.p.returncode}!"
+                f"{self.desc} command suddenly exited with return code"
+                f" {self.p.returncode}!"
             )
         assert self.p.stdout is not None
         while True:
@@ -84,11 +90,11 @@ class TextProcess(anyio.abc.AsyncResource):
                     blob = await self.p.stdout.receive()
                 except anyio.EndOfStream:
                     # EOF
-                    log.log(DEEP_DEBUG, "%s command reached EOF", self.name)
+                    log.log(DEEP_DEBUG, "%s command reached EOF", self.desc)
                     line = self.buff.decode(self.encoding)
                     self.buff = b""
                     log.log(
-                        DEEP_DEBUG, "Decoded line from %s command: %r", self.name, line
+                        DEEP_DEBUG, "Decoded line from %s command: %r", self.desc, line
                     )
                     return line
                 else:
@@ -96,7 +102,7 @@ class TextProcess(anyio.abc.AsyncResource):
             else:
                 line = self.buff[: i + 1].decode(self.encoding)
                 self.buff = self.buff[i + 1 :]
-                log.log(DEEP_DEBUG, "Decoded line from %s command: %r", self.name, line)
+                log.log(DEEP_DEBUG, "Decoded line from %s command: %r", self.desc, line)
                 return line
 
     async def __aiter__(self) -> AsyncIterator[str]:
@@ -108,16 +114,24 @@ class TextProcess(anyio.abc.AsyncResource):
                 yield line
 
 
-async def open_git_annex(*args: str, path: Optional[Path] = None) -> TextProcess:
-    log.debug("Running git-annex %s", shlex.join(args))
+async def open_git_annex(
+    *args: str,
+    path: Optional[Path] = None,
+    use_stdin: bool = True,
+    warn_on_fail: bool = True,
+) -> TextProcess:
+    desc = f"`git-annex {shlex.join(args)}`"
+    if path is not None:
+        desc += f" [cwd={path}]"
+    log.debug("Opening pipe to %s", desc)
     p = await anyio.open_process(
         ["git-annex", *args],
-        stdin=subprocess.PIPE,
+        stdin=subprocess.PIPE if use_stdin else subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=None,
         cwd=path,
     )
-    return TextProcess(p, name=args[0])
+    return TextProcess(p, desc, warn_on_fail=warn_on_fail)
 
 
 async def arequest(
@@ -226,3 +240,38 @@ async def areadcmd(*args: str | Path, **kwargs: Any) -> str:
     kwargs.setdefault("stderr", None)
     r = await aruncmd(*args, **kwargs)
     return r.stdout.decode("utf-8").strip()
+
+
+async def stream_null_command(
+    *args: str | Path, cwd: Optional[Path] = None
+) -> AsyncIterator[str]:
+    argstrs = [str(a) for a in args]
+    if cwd is not None:
+        attrs = f" [cwd={cwd}]"
+    else:
+        attrs = ""
+    log.debug("Opening pipe to %s%s", shlex.join(argstrs), attrs)
+    async with await anyio.open_process(argstrs, cwd=cwd, stderr=None) as p:
+        buff = ""
+        assert p.stdout is not None
+        async for text in TextReceiveStream(p.stdout):
+            while True:
+                try:
+                    i = text.index("\0")
+                except ValueError:
+                    buff = text
+                    break
+                else:
+                    yield buff + text[:i]
+                    buff = ""
+                    text = text[i + 1 :]
+        if buff:
+            yield buff
+    log.log(
+        logging.DEBUG if p.returncode == 0 else logging.WARNING,
+        "Command `%s`%s exited with return code %d",
+        shlex.join(argstrs),
+        attrs,
+        p.returncode,
+    )
+    ### TODO: Raise an exception if p.returncode is nonzero?

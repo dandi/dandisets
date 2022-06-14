@@ -7,9 +7,8 @@ from pathlib import Path
 from typing import AsyncIterator, Optional
 
 import anyio
-from anyio.streams.text import TextReceiveStream
 
-from .aioutil import TextProcess, open_git_annex
+from .aioutil import TextProcess, open_git_annex, stream_null_command
 from .logging import log
 from .util import format_errors
 
@@ -79,6 +78,7 @@ class AsyncAnnex(anyio.abc.AsyncResource):
                     "--json",
                     "--json-error-messages",
                     path=self.repo,
+                    warn_on_fail=False,
                 )
             await self.pwhereis.send(f"{key}\n")
             ### TODO: Do something if readline() returns "" (signalling EOF)
@@ -114,24 +114,12 @@ class AsyncAnnex(anyio.abc.AsyncResource):
             ### TODO: Raise an exception?
 
     async def list_files(self) -> AsyncIterator[str]:
-        async with await anyio.open_process(
-            ["git", "ls-tree", "-r", "--name-only", "-z", "HEAD"],
+        return stream_null_command(
+            "git",
+            "ls-tree",
+            "-r",
+            "--name-only",
+            "-z",
+            "HEAD",
             cwd=self.repo,
-            stderr=None,
-        ) as p:
-            buff = ""
-            assert p.stdout is not None
-            async for text in TextReceiveStream(p.stdout):
-                while True:
-                    try:
-                        i = text.index("\0")
-                    except ValueError:
-                        buff = text
-                        break
-                    else:
-                        yield buff + text[:i]
-                        buff = ""
-                        text = text[i + 1 :]
-            if buff:
-                yield buff
-            ### TODO: Raise an exception if p.returncode is nonzero?
+        )

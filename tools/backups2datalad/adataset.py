@@ -7,17 +7,22 @@ from functools import partial
 from operator import attrgetter
 from pathlib import Path
 import subprocess
+import sys
 from typing import Any, AsyncIterator, Optional, Sequence, cast
 
 import anyio
-from anyio.streams.text import TextReceiveStream
 from datalad.api import Dataset
 
-from .aioutil import areadcmd, aruncmd
+from .aioutil import areadcmd, aruncmd, stream_null_command
 from .config import Remote
 from .consts import DEFAULT_BRANCH
 from .logging import log
 from .util import custom_commit_env
+
+if sys.version_info[:2] >= (3, 10):
+    from contextlib import aclosing
+else:
+    from async_generator import aclosing
 
 
 @dataclass
@@ -148,33 +153,18 @@ class AsyncDataset:
         )
 
     async def aiter_file_stats(self) -> AsyncIterator[FileStat]:
-        async with await anyio.open_process(
-            [
+        async with aclosing(
+            stream_null_command(
                 "git",
                 "ls-tree",
                 "-r",
                 "--format=%(objecttype):%(objectsize):%(path)",
                 "HEAD",
-            ],
-            cwd=self.path,
-            stderr=None,
+                cwd=self.pathobj,
+            )
         ) as p:
-            buff = ""
-            assert p.stdout is not None
-            async for text in TextReceiveStream(p.stdout):
-                while True:
-                    try:
-                        i = text.index("\0")
-                    except ValueError:
-                        buff = text
-                        break
-                    else:
-                        yield FileStat.from_entry(buff + text[:i])
-                        buff = ""
-                        text = text[i + 1 :]
-            if buff:
-                yield FileStat.from_entry(buff)
-            ### TODO: Raise an exception if p.returncode is nonzero?
+            async for entry in p:
+                yield FileStat.from_entry(entry)
 
     async def create_github_sibling(
         self,

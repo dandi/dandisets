@@ -5,12 +5,9 @@ import json
 import logging
 from pathlib import Path
 import re
-import shlex
-import subprocess
 import sys
 from typing import AsyncIterable, Optional, Sequence
 
-import anyio
 import asyncclick as click
 from click_loglevel import LogLevel
 from dandi.consts import DANDISET_ID_REGEX
@@ -18,7 +15,7 @@ from dandi.dandiapi import DandiAPIClient
 from datalad.api import Dataset
 
 from .adataset import AsyncDataset
-from .aioutil import TextProcess, aiter, pool_amap
+from .aioutil import aiter, open_git_annex, pool_amap
 from .config import Config
 from .datasetter import DandiDatasetter
 from .logging import log
@@ -342,17 +339,16 @@ async def populate(dirpath: Path, backup_remote: str, pathtype: str, jobs: int) 
 
 
 async def call_annex_json(cmd: str, *args: str, path: Path) -> None:
-    cmd_full = ["git-annex", cmd, *args, "--json", "--json-error-messages"]
-    log.debug("Running %s", shlex.join(cmd_full))
     success = 0
     failed = 0
-    async with await anyio.open_process(
-        cmd_full,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=None,
-        cwd=path,
-    ) as p0, TextProcess(p0, name=cmd) as p:
+    async with await open_git_annex(
+        cmd,
+        *args,
+        "--json",
+        "--json-error-messages",
+        use_stdin=False,
+        path=path,
+    ) as p:
         async for line in aiter(p):
             data = json.loads(line)
             if data["success"]:
