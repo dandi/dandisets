@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 from collections import deque
-from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 import json
-import logging
 import os
 from pathlib import Path
 import sys
@@ -165,29 +163,6 @@ def dataset_files(dspath: Path) -> Iterator[str]:
                 yield str(p.relative_to(dspath))
             else:
                 files.extend(p.iterdir())
-
-
-@contextmanager
-def dandi_logging(dandiset_path: Path) -> Iterator[Path]:
-    logdir = dandiset_path / ".git" / "dandi" / "logs"
-    logdir.mkdir(exist_ok=True, parents=True)
-    filename = "sync-{:%Y%m%d%H%M%SZ}-{}.log".format(datetime.utcnow(), os.getpid())
-    logfile = logdir / filename
-    handler = logging.FileHandler(logfile, encoding="utf-8")
-    fmter = logging.Formatter(
-        fmt="%(asctime)s [%(levelname)-8s] %(name)s %(message)s",
-        datefmt="%Y-%m-%dT%H:%M:%S%z",
-    )
-    handler.setFormatter(fmter)
-    root = logging.getLogger()
-    root.addHandler(handler)
-    try:
-        yield logfile
-    except Exception:
-        log.exception("Operation failed with exception:")
-        raise
-    finally:
-        root.removeHandler(handler)
 
 
 def is_interactive() -> bool:

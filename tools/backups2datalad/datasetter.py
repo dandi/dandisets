@@ -29,7 +29,6 @@ from .syncer import Syncer
 from .util import (
     AssetTracker,
     assets_eq,
-    dandi_logging,
     is_meta_file,
     quantify,
     update_dandiset_metadata,
@@ -125,11 +124,10 @@ class DandiDatasetter(AsyncResource):
         syncer = Syncer(
             config=self.config, dandiset=dandiset, ds=ds, tracker=tracker, log=dlog
         )
-        with dandi_logging(ds.pathobj) as logfile:  ### TODO!!!
-            await update_dandiset_metadata(dandiset, ds)
-            await syncer.sync_assets()
-            await syncer.prune_deleted()
-            syncer.dump_asset_metadata()
+        await update_dandiset_metadata(dandiset, ds)
+        await syncer.sync_assets()
+        await syncer.prune_deleted()
+        syncer.dump_asset_metadata()
         assert syncer.report is not None
         dlog.debug("Checking whether repository is dirty ...")
         if await ds.is_unclean():
@@ -143,8 +141,7 @@ class DandiDatasetter(AsyncResource):
         else:
             dlog.debug("Repository is clean")
             if syncer.report.commits == 0:
-                dlog.info("No changes made to repository; deleting logfile")
-                logfile.unlink()
+                dlog.info("No changes made to repository")
         dlog.debug("Running `git gc`")
         await ds.gc()
         dlog.debug("Finished running `git gc`")
