@@ -48,8 +48,8 @@ class AsyncAnnex(anyio.abc.AsyncResource):
                     path=self.repo,
                 )
             await self.pfromkey.send(f"{key} {path}\n")
-            ### TODO: Do something if readline() returns "" (signalling EOF)
-            r = json.loads(await self.pfromkey.readline())
+            ### TODO: Do something if receive() returns "" (signalling EOF)
+            r = json.loads(await self.pfromkey.receive())
         if not r["success"]:
             log.error(
                 "`git annex fromkey %s %s` call failed:%s",
@@ -71,8 +71,8 @@ class AsyncAnnex(anyio.abc.AsyncResource):
             await self.pexaminekey.send(
                 f"{self.digest_type}-s{size}--{digest} {filename}\n"
             )
-            ### TODO: Do something if readline() returns "" (signalling EOF)
-            return (await self.pexaminekey.readline()).strip()
+            ### TODO: Do something if receive() returns "" (signalling EOF)
+            return (await self.pexaminekey.receive()).strip()
 
     async def get_key_remotes(self, key: str) -> Optional[list[str]]:
         # Returns None if key is not known to git-annex
@@ -87,8 +87,8 @@ class AsyncAnnex(anyio.abc.AsyncResource):
                     warn_on_fail=False,
                 )
             await self.pwhereis.send(f"{key}\n")
-            ### TODO: Do something if readline() returns "" (signalling EOF)
-            whereis = json.loads(await self.pwhereis.readline())
+            ### TODO: Do something if receive() returns "" (signalling EOF)
+            whereis = json.loads(await self.pwhereis.receive())
         if whereis["success"]:
             return [
                 w["description"].strip("[]")
@@ -108,8 +108,8 @@ class AsyncAnnex(anyio.abc.AsyncResource):
                     path=self.repo,
                 )
             await self.pregisterurl.send(f"{key} {url}\n")
-            ### TODO: Do something if readline() returns "" (signalling EOF)
-            r = json.loads(await self.pregisterurl.readline())
+            ### TODO: Do something if receive() returns "" (signalling EOF)
+            r = json.loads(await self.pregisterurl.receive())
         if not r["success"]:
             log.error(
                 "`git annex registerurl %s %s` call failed:%s",

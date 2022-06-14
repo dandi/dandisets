@@ -10,8 +10,6 @@ import sys
 from typing import (
     Any,
     AsyncGenerator,
-    AsyncIterable,
-    AsyncIterator,
     Awaitable,
     Callable,
     Container,
@@ -37,23 +35,19 @@ OutT = TypeVar("OutT")
 DEEP_DEBUG = 5
 
 if sys.version_info[:2] >= (3, 10):
-    # So aiter() can be re-exported without mypy complaining:
-    from builtins import aiter as aiter
     from contextlib import aclosing
 else:
     from async_generator import aclosing
 
-    def aiter(obj: AsyncIterable[T]) -> AsyncIterator[T]:
-        return obj.__aiter__()
-
 
 @dataclass
-class TextProcess(anyio.abc.AsyncResource):
+class TextProcess(anyio.abc.ObjectStream[str]):
     p: anyio.abc.Process
     desc: str
     warn_on_fail: bool = True
     encoding: str = "utf-8"
     buff: bytes = b""
+    done: bool = False
 
     async def aclose(self) -> None:
         if self.p.stdin is not None:
@@ -77,7 +71,9 @@ class TextProcess(anyio.abc.AsyncResource):
         log.log(DEEP_DEBUG, "Sending to %s command: %r", self.desc, s)
         await self.p.stdin.send(s.encode(self.encoding))
 
-    async def readline(self) -> str:
+    async def receive(self) -> str:
+        if self.done:
+            raise anyio.EndOfStream()
         if self.p.returncode is not None:
             raise RuntimeError(
                 f"{self.desc} command suddenly exited with return code"
@@ -98,7 +94,11 @@ class TextProcess(anyio.abc.AsyncResource):
                     log.log(
                         DEEP_DEBUG, "Decoded line from %s command: %r", self.desc, line
                     )
-                    return line
+                    self.done = True
+                    if line:
+                        return line
+                    else:
+                        raise anyio.EndOfStream()
                 else:
                     self.buff += blob
             else:
@@ -107,13 +107,9 @@ class TextProcess(anyio.abc.AsyncResource):
                 log.log(DEEP_DEBUG, "Decoded line from %s command: %r", self.desc, line)
                 return line
 
-    async def __aiter__(self) -> AsyncIterator[str]:
-        while True:
-            line = await self.readline()
-            if line == "":
-                break
-            else:
-                yield line
+    async def send_eof(self) -> None:
+        if self.p.stdin is not None:
+            await self.p.stdin.aclose()
 
 
 async def open_git_annex(

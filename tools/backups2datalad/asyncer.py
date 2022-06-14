@@ -25,7 +25,7 @@ from identify.identify import tags_from_filename
 
 from .adandi import RemoteDandiset
 from .adataset import AsyncDataset
-from .aioutil import MiniFuture, TextProcess, aiter, arequest, open_git_annex
+from .aioutil import MiniFuture, TextProcess, arequest, open_git_annex
 from .annex import AsyncAnnex
 from .config import BackupConfig
 from .consts import USER_AGENT
@@ -300,7 +300,7 @@ class Downloader:
                 self.log.debug("Done feeding URLs to addurl")
 
     async def read_addurl(self) -> None:
-        async with aclosing(aiter(self.addurl)) as lineiter:  # type: ignore[type-var]
+        async with aclosing(self.addurl) as lineiter:
             async for line in lineiter:
                 data = json.loads(line)
                 if "byte-progress" in data:

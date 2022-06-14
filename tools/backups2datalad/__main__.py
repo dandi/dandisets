@@ -14,7 +14,7 @@ from datalad.api import Dataset
 
 from .adandi import AsyncDandiClient
 from .adataset import AsyncDataset
-from .aioutil import aiter, open_git_annex, pool_amap
+from .aioutil import open_git_annex, pool_amap
 from .config import BackupConfig
 from .datasetter import DandiDatasetter
 from .logging import log
@@ -349,7 +349,7 @@ async def call_annex_json(cmd: str, *args: str, path: Path) -> None:
         use_stdin=False,
         path=path,
     ) as p:
-        async for line in aiter(p):
+        async for line in p:
             data = json.loads(line)
             if data["success"]:
                 success += 1
