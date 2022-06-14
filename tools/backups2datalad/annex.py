@@ -10,7 +10,8 @@ import anyio
 from anyio.streams.text import TextReceiveStream
 
 from .aioutil import TextProcess, open_git_annex
-from .util import format_errors, log
+from .logging import log
+from .util import format_errors
 
 
 @dataclass

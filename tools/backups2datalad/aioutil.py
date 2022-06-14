@@ -23,7 +23,8 @@ import anyio
 from anyio.streams.memory import MemoryObjectReceiveStream
 import httpx
 
-from .util import exp_wait, log
+from .logging import log
+from .util import exp_wait
 
 T = TypeVar("T")
 InT = TypeVar("InT")

@@ -8,7 +8,8 @@ from dandi.dandiapi import RemoteDandiset
 from .adatalad import AsyncDataset
 from .asyncer import async_assets
 from .config import Config
-from .util import AssetTracker, Report, log, quantify
+from .logging import PrefixedLogger
+from .util import AssetTracker, Report, quantify
 
 
 @dataclass
@@ -17,26 +18,27 @@ class Syncer:
     dandiset: RemoteDandiset
     ds: AsyncDataset
     tracker: AssetTracker
+    log: PrefixedLogger
     deleted: int = 0
     report: Optional[Report] = None
 
     async def sync_assets(self) -> None:
-        log.info("Syncing assets...")
+        self.log.info("Syncing assets...")
         self.report = await async_assets(
-            self.dandiset, self.ds, self.config, self.tracker
+            self.dandiset, self.ds, self.config, self.tracker, self.log
         )
-        log.info("Asset sync complete!")
-        log.info("%s added", quantify(self.report.added, "asset"))
-        log.info("%s updated", quantify(self.report.updated, "asset"))
-        log.info("%s registered", quantify(self.report.registered, "asset"))
-        log.info(
+        self.log.info("Asset sync complete!")
+        self.log.info("%s added", quantify(self.report.added, "asset"))
+        self.log.info("%s updated", quantify(self.report.updated, "asset"))
+        self.log.info("%s registered", quantify(self.report.registered, "asset"))
+        self.log.info(
             "%s successfully downloaded", quantify(self.report.downloaded, "asset")
         )
         self.report.check()
 
     async def prune_deleted(self) -> None:
         for asset_path in self.tracker.get_deleted(self.config):
-            log.info(
+            self.log.info(
                 "%s: Asset is in dataset but not in Dandiarchive; deleting", asset_path
             )
             await self.ds.remove(asset_path)

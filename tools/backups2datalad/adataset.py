@@ -16,7 +16,8 @@ from datalad.api import Dataset
 from .aioutil import areadcmd, aruncmd
 from .config import Remote
 from .consts import DEFAULT_BRANCH
-from .util import custom_commit_env, log
+from .logging import log
+from .util import custom_commit_env
 
 
 @dataclass

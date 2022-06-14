@@ -21,7 +21,8 @@ from .adataset import AsyncDataset
 from .aioutil import TextProcess, aiter, pool_amap
 from .config import Config
 from .datasetter import DandiDatasetter
-from .util import format_errors, log, pdb_excepthook, quantify
+from .logging import log
+from .util import format_errors, pdb_excepthook, quantify
 
 
 @click.group()

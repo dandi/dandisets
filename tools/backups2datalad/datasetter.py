@@ -24,13 +24,13 @@ from .adataset import AsyncDataset, ObjectType
 from .aioutil import areadcmd, arequest, pool_amap
 from .config import Config
 from .consts import DEFAULT_BRANCH, USER_AGENT
+from .logging import log
 from .syncer import Syncer
 from .util import (
     AssetTracker,
     assets_eq,
     dandi_logging,
     is_meta_file,
-    log,
     quantify,
     update_dandiset_metadata,
 )
@@ -117,40 +117,43 @@ class DandiDatasetter(AsyncResource):
                 dandiset_id=dandiset.identifier,
                 create_time=dandiset.version.created,
             )
-        log.info("Syncing Dandiset %s", dandiset.identifier)
+        dlog = log.sublogger(f"Dandiset {dandiset.identifier}")
+        dlog.info("Syncing")
         if await ds.is_dirty():
             raise RuntimeError(f"Dirty {dandiset}; clean or save before running")
         tracker = await anyio.to_thread.run_sync(AssetTracker.from_dataset, ds.pathobj)
-        syncer = Syncer(config=self.config, dandiset=dandiset, ds=ds, tracker=tracker)
+        syncer = Syncer(
+            config=self.config, dandiset=dandiset, ds=ds, tracker=tracker, log=dlog
+        )
         with dandi_logging(ds.pathobj) as logfile:  ### TODO!!!
             await update_dandiset_metadata(dandiset, ds)
             await syncer.sync_assets()
             await syncer.prune_deleted()
             syncer.dump_asset_metadata()
         assert syncer.report is not None
-        log.debug("Checking whether repository is dirty ...")
+        dlog.debug("Checking whether repository is dirty ...")
         if await ds.is_unclean():
-            log.info("Committing changes")
+            dlog.info("Committing changes")
             await ds.save(
                 message=syncer.get_commit_message(),
                 commit_date=dandiset.version.modified,
             )
-            log.debug("Commit made")
+            dlog.debug("Commit made")
             syncer.report.commits += 1
         else:
-            log.debug("Repository is clean")
+            dlog.debug("Repository is clean")
             if syncer.report.commits == 0:
-                log.info("No changes made to repository; deleting logfile")
+                dlog.info("No changes made to repository; deleting logfile")
                 logfile.unlink()
-        log.debug("Running `git gc`")
+        dlog.debug("Running `git gc`")
         await ds.gc()
-        log.debug("Finished running `git gc`")
+        dlog.debug("Finished running `git gc`")
         changed = syncer.report.commits > 0
         await self.ensure_github_remote(ds, dandiset.identifier)
         await self.tag_releases(dandiset, ds, push=self.config.gh_org is not None)
         if self.config.gh_org is not None:
             if changed:
-                log.info("Pushing to sibling")
+                dlog.info("Pushing to sibling")
                 await ds.push(to="github", jobs=self.config.jobs, data="nothing")
             return await self.set_dandiset_gh_metadata(dandiset, ds)
         else:

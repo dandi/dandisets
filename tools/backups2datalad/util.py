@@ -20,8 +20,7 @@ from datalad.api import Dataset
 from datalad.support.json_py import dump
 
 from .config import Config
-
-log = logging.getLogger("backups2datalad")
+from .logging import log
 
 
 @dataclass
