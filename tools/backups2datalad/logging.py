@@ -13,30 +13,32 @@ class PrefixedLogger:
     def setLevel(self, level: int) -> None:
         self.logger.setLevel(level)
 
-    def log(self, level: int, msg: str, *args: Any, **kwargs: Any) -> None:
+    def log(
+        self, level: int, msg: str, *args: Any, stacklevel: int = 2, **kwargs: Any
+    ) -> None:
         if self.prefix:
             msg = f"%s: {msg}"
             args = (self.prefix, *args)
-        self.logger.log(level, msg, *args, **kwargs)
+        self.logger.log(level, msg, *args, stacklevel=stacklevel, **kwargs)
 
     def debug(self, msg: str, *args: Any, **kwargs: Any) -> None:
-        self.log(logging.DEBUG, msg, *args, **kwargs)
+        self.log(logging.DEBUG, msg, *args, stacklevel=3, **kwargs)
 
     def info(self, msg: str, *args: Any, **kwargs: Any) -> None:
-        self.log(logging.INFO, msg, *args, **kwargs)
+        self.log(logging.INFO, msg, *args, stacklevel=3, **kwargs)
 
     def warning(self, msg: str, *args: Any, **kwargs: Any) -> None:
-        self.log(logging.WARNING, msg, *args, **kwargs)
+        self.log(logging.WARNING, msg, *args, stacklevel=3, **kwargs)
 
     def error(self, msg: str, *args: Any, **kwargs: Any) -> None:
-        self.log(logging.ERROR, msg, *args, **kwargs)
+        self.log(logging.ERROR, msg, *args, stacklevel=3, **kwargs)
 
     def critical(self, msg: str, *args: Any, **kwargs: Any) -> None:
-        self.log(logging.CRITICAL, msg, *args, **kwargs)
+        self.log(logging.CRITICAL, msg, *args, stacklevel=3, **kwargs)
 
     def exception(self, msg: str, *args: Any, **kwargs: Any) -> None:
         kwargs["exc_info"] = True
-        self.log(logging.ERROR, msg, *args, **kwargs)
+        self.log(logging.ERROR, msg, *args, stacklevel=3, **kwargs)
 
     def sublogger(self, prefix: str) -> PrefixedLogger:
         if self.prefix is None:

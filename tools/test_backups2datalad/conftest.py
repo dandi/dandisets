@@ -1,13 +1,29 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
+from functools import partial
 import logging
 import os
 from pathlib import Path
-from typing import Any, Iterator, List, Optional, Union
+import sys
+from typing import Any, AsyncIterator, Optional
 
+import anyio
 from dandi.consts import dandiset_metadata_file
-from dandi.dandiapi import DandiAPIClient, RemoteDandiset
 from dandi.upload import upload
 import pytest
+
+from backups2datalad.adandi import AsyncDandiClient, RemoteDandiset
+
+if sys.version_info[:2] >= (3, 10):
+    from contextlib import aclosing
+else:
+    from async_generator import aclosing
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
 
 
 @pytest.fixture(autouse=True)
@@ -16,38 +32,43 @@ def capture_all_logs(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.DEBUG, logger="test_backups2datalad")
 
 
-@pytest.fixture(scope="session")
-def dandi_client() -> DandiAPIClient:
+@pytest.fixture
+async def dandi_client() -> AsyncIterator[AsyncDandiClient]:
     api_token = os.environ["DANDI_API_KEY"]
-    with DandiAPIClient.for_dandi_instance("dandi-staging", token=api_token) as client:
+    async with AsyncDandiClient.for_dandi_instance(
+        "dandi-staging", token=api_token
+    ) as client:
         yield client
 
 
 @dataclass
 class SampleDandiset:
-    client: DandiAPIClient
+    client: AsyncDandiClient
     dspath: Path
     dandiset: RemoteDandiset
     dandiset_id: str
 
-    def upload(
-        self, paths: Optional[List[Union[str, Path]]] = None, **kwargs: Any
+    async def upload(
+        self, paths: Optional[list[str | Path]] = None, **kwargs: Any
     ) -> None:
-        upload(
-            paths=paths or [self.dspath],
-            dandi_instance="dandi-staging",
-            devel_debug=True,
-            allow_any_path=True,
-            validation="skip",
-            **kwargs,
+        await anyio.to_thread.run_sync(
+            partial(
+                upload,
+                paths=paths or [self.dspath],
+                dandi_instance="dandi-staging",
+                devel_debug=True,
+                allow_any_path=True,
+                validation="skip",
+                **kwargs,
+            )
         )
 
 
 @pytest.fixture()
-def new_dandiset(
-    dandi_client: DandiAPIClient, tmp_path_factory: pytest.TempPathFactory
-) -> Iterator[SampleDandiset]:
-    d = dandi_client.create_dandiset(
+async def new_dandiset(
+    dandi_client: AsyncDandiClient, tmp_path_factory: pytest.TempPathFactory
+) -> AsyncIterator[SampleDandiset]:
+    d = await dandi_client.create_dandiset(
         "Dandiset for testing backups2datalad",
         {
             "name": "Dandiset for testing backups2datalad",
@@ -74,14 +95,14 @@ def new_dandiset(
     try:
         yield ds
     finally:
-        for v in d.get_versions():
-            if v.identifier != "draft":
-                dandi_client.delete(f"{d.api_path}versions/{v.identifier}/")
-        d.delete()
+        async with aclosing(d.aget_versions(include_draft=False)) as vit:
+            async for v in vit:
+                await dandi_client.delete(f"{d.api_path}versions/{v.identifier}/")
+        await d.adelete()
 
 
 @pytest.fixture()
-def text_dandiset(new_dandiset: SampleDandiset) -> SampleDandiset:
+async def text_dandiset(new_dandiset: SampleDandiset) -> SampleDandiset:
     (new_dandiset.dspath / "file.txt").write_text("This is test text.\n")
     (new_dandiset.dspath / "v0.txt").write_text("Version 0\n")
     (new_dandiset.dspath / "subdir1").mkdir()
@@ -89,5 +110,5 @@ def text_dandiset(new_dandiset: SampleDandiset) -> SampleDandiset:
     (new_dandiset.dspath / "subdir2").mkdir()
     (new_dandiset.dspath / "subdir2" / "banana.txt").write_text("Banana\n")
     (new_dandiset.dspath / "subdir2" / "coconut.txt").write_text("Coconut\n")
-    new_dandiset.upload()
+    await new_dandiset.upload()
     return new_dandiset

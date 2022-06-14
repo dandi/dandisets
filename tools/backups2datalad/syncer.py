@@ -5,7 +5,7 @@ from typing import Optional
 
 from dandi.dandiapi import RemoteDandiset
 
-from .adatalad import AsyncDataset
+from .adataset import AsyncDataset
 from .asyncer import async_assets
 from .config import BackupConfig
 from .logging import PrefixedLogger

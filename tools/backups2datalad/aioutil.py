@@ -9,6 +9,7 @@ import subprocess
 import sys
 from typing import (
     Any,
+    AsyncGenerator,
     AsyncIterable,
     AsyncIterator,
     Awaitable,
@@ -139,13 +140,13 @@ async def arequest(
     client: httpx.AsyncClient,
     method: str,
     url: str,
-    json: Any = None,
     retry_on: Container[int] = (),
+    **kwargs: Any,
 ) -> httpx.Response:
     waits = exp_wait(attempts=10, base=1.8)
     while True:
         try:
-            r = await client.request(method, url, follow_redirects=True, json=json)
+            r = await client.request(method, url, follow_redirects=True, **kwargs)
             r.raise_for_status()
         except httpx.HTTPError as e:
             if isinstance(e, httpx.RequestError) or (
@@ -195,7 +196,7 @@ class PoolReport(Generic[InT, OutT]):
 
 async def pool_amap(
     func: Callable[[InT], Awaitable[OutT]],
-    inputs: AsyncIterable[InT],
+    inputs: AsyncGenerator[InT, None],
     workers: int = DEFAULT_WORKERS,
 ) -> PoolReport[InT, OutT]:
     report: PoolReport[InT, OutT] = PoolReport()
@@ -245,7 +246,7 @@ async def areadcmd(*args: str | Path, **kwargs: Any) -> str:
 
 async def stream_null_command(
     *args: str | Path, cwd: Optional[Path] = None
-) -> AsyncIterator[str]:
+) -> AsyncGenerator[str, None]:
     argstrs = [str(a) for a in args]
     if cwd is not None:
         attrs = f" [cwd={cwd}]"

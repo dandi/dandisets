@@ -1,19 +1,20 @@
 from __future__ import annotations
 
-from dataclasses import InitVar, dataclass, field
+from dataclasses import InitVar, dataclass, field, replace
 from datetime import datetime
 from enum import Enum
 from functools import partial
+import json
 from operator import attrgetter
 from pathlib import Path
 import subprocess
 import sys
-from typing import Any, AsyncIterator, Optional, Sequence, cast
+from typing import Any, Optional, Sequence, cast
 
 import anyio
 from datalad.api import Dataset
 
-from .aioutil import areadcmd, aruncmd, stream_null_command
+from .aioutil import aiter, areadcmd, aruncmd, open_git_annex, stream_null_command
 from .config import Remote
 from .consts import DEFAULT_BRANCH
 from .logging import log
@@ -152,19 +153,30 @@ class AsyncDataset:
             partial(self.ds.update, how=how, sibling=sibling)
         )
 
-    async def aiter_file_stats(self) -> AsyncIterator[FileStat]:
+    async def get_file_stats(self) -> list[FileStat]:
+        filedict: dict[str, FileStat] = {}
         async with aclosing(
             stream_null_command(
                 "git",
                 "ls-tree",
                 "-r",
                 "--format=%(objecttype):%(objectsize):%(path)",
+                "-z",
                 "HEAD",
                 cwd=self.pathobj,
             )
         ) as p:
             async for entry in p:
-                yield FileStat.from_entry(entry)
+                fst = FileStat.from_entry(entry)
+                filedict[fst.path] = fst
+        async with await open_git_annex(
+            "find", "--include=*", "--json", use_stdin=False, path=self.pathobj
+        ) as p:
+            async for line in aiter(p):
+                data = json.loads(line)
+                path = cast(str, data["file"])
+                filedict[path] = replace(filedict[path], size=int(data["bytesize"]))
+        return list(filedict.values())
 
     async def create_github_sibling(
         self,

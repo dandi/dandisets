@@ -5,7 +5,7 @@ from datetime import datetime
 import os
 from pathlib import Path
 import sys
-from typing import TYPE_CHECKING, AsyncIterator, Iterator, Optional, cast
+from typing import TYPE_CHECKING, AsyncGenerator, Iterator, Optional, cast
 from urllib.parse import quote
 
 from aiobotocore.session import get_session
@@ -307,14 +307,16 @@ class ZarrSyncer:
                 d = d.parent
         self.log.info("finished deleting extra files")
 
-    async def aiter_objects(self, client: S3Client) -> AsyncIterator[dict]:
+    async def aiter_objects(self, client: S3Client) -> AsyncGenerator[dict, None]:
         async for page in client.get_paginator("list_objects_v2").paginate(
             Bucket=self.s3bucket, Prefix=self.s3prefix
         ):
             for obj in page.get("Contents", []):
                 yield cast(dict, obj)
 
-    async def aiter_file_entries(self, client: S3Client) -> AsyncIterator[ZarrEntry]:
+    async def aiter_file_entries(
+        self, client: S3Client
+    ) -> AsyncGenerator[ZarrEntry, None]:
         leadlen = len(self.s3prefix)
         async for page in client.get_paginator("list_object_versions").paginate(
             Bucket=self.s3bucket, Prefix=self.s3prefix

@@ -6,14 +6,13 @@ import logging
 from pathlib import Path
 import re
 import sys
-from typing import AsyncIterable, Optional, Sequence
+from typing import AsyncGenerator, Optional, Sequence
 
 import asyncclick as click
-from click_loglevel import LogLevel
 from dandi.consts import DANDISET_ID_REGEX
-from dandi.dandiapi import DandiAPIClient
 from datalad.api import Dataset
 
+from .adandi import AsyncDandiClient
 from .adataset import AsyncDataset
 from .aioutil import aiter, open_git_annex, pool_amap
 from .config import BackupConfig
@@ -42,9 +41,10 @@ from .util import format_errors, pdb_excepthook, quantify
 @click.option(
     "-l",
     "--log-level",
-    type=LogLevel(),
+    type=click.Choice(["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"]),
     default="INFO",
-    help="Set logging level  [default: INFO]",
+    help="Set logging level",
+    show_default=True,
 )
 @click.option("--pdb", is_flag=True, help="Drop into debugger if an error occurs")
 @click.option(
@@ -56,7 +56,7 @@ from .util import format_errors, pdb_excepthook, quantify
 async def main(
     ctx: click.Context,
     jobs: Optional[int],
-    log_level: int,
+    log_level: str,
     pdb: bool,
     quiet_debug: bool,
     backup_root: Path,
@@ -71,18 +71,18 @@ async def main(
     if jobs is not None:
         cfg.jobs = jobs
     ctx.obj = DandiDatasetter(
-        dandi_client=DandiAPIClient.for_dandi_instance(cfg.dandi_instance),
+        dandi_client=AsyncDandiClient.for_dandi_instance(cfg.dandi_instance),
         config=cfg,
     )
     if pdb:
         sys.excepthook = pdb_excepthook
     if quiet_debug:
         log.setLevel(logging.DEBUG)
-        log_level = logging.INFO
+        log_level = "INFO"
     logging.basicConfig(
         format="%(asctime)s [%(levelname)-8s] %(name)s: %(message)s",
         datefmt="%Y-%m-%dT%H:%M:%S%z",
-        level=log_level,
+        level=getattr(logging, log_level),
     )
     await ctx.obj.debug_logfile()
 
@@ -191,7 +191,7 @@ async def release(
             datasetter.config.asset_filter = asset_filter
         if force is not None:
             datasetter.config.force = force
-        dandiset_obj = await datasetter.dandi_client.aget_dandiset(dandiset, version)
+        dandiset_obj = await datasetter.dandi_client.get_dandiset(dandiset, version)
         dataset = AsyncDataset(datasetter.config.dandiset_root / dandiset)
         await datasetter.mkrelease(
             dandiset_obj, dataset, commitish=commitish, push=push
@@ -371,7 +371,7 @@ async def call_annex_json(cmd: str, *args: str, path: Path) -> None:
         raise RuntimeError(f"git-annex {cmd} failed for {quantify(failed, 'file')}")
 
 
-async def afilter_installed(datasets: list[Path]) -> AsyncIterable[Path]:
+async def afilter_installed(datasets: list[Path]) -> AsyncGenerator[Path, None]:
     for p in datasets:
         ds = Dataset(p)
         if not ds.is_installed():

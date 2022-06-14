@@ -11,7 +11,7 @@ import os.path
 from pathlib import Path, PurePosixPath
 import subprocess
 import sys
-from typing import AsyncIterator, Optional
+from typing import AsyncGenerator, AsyncIterator, Optional
 from urllib.parse import urlparse, urlunparse
 
 import anyio
@@ -379,7 +379,7 @@ async def async_assets(
     async with aclosing(aiterassets(dandiset, done_flag)) as aia:
         while not done_flag.is_set():
             try:
-                async with anyio.create_task_group() as nursery, await open_git_annex(
+                async with await open_git_annex(
                     "addurl",
                     "--batch",
                     "--with-files",
@@ -392,7 +392,7 @@ async def async_assets(
                     path=ds.pathobj,
                 ) as p, AsyncAnnex(ds.pathobj) as annex, httpx.AsyncClient(
                     headers={"User-Agent": USER_AGENT}
-                ) as s3client:
+                ) as s3client, anyio.create_task_group() as nursery:
                     dm = Downloader(
                         dandiset_id=dandiset.identifier,
                         addurl=p,
@@ -482,7 +482,7 @@ async def async_assets(
 
 async def aiterassets(
     dandiset: RemoteDandiset, done_flag: anyio.Event
-) -> AsyncIterator[Optional[RemoteAsset]]:
+) -> AsyncGenerator[Optional[RemoteAsset], None]:
     last_ts: Optional[datetime] = None
     if dandiset.version_id == "draft":
         vs = [v async for v in dandiset.aget_versions(include_draft=False)]

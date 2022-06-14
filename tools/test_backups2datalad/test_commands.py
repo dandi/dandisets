@@ -4,18 +4,21 @@ import os
 from pathlib import Path
 from traceback import format_exception
 
-from click.testing import CliRunner, Result
+from asyncclick.testing import CliRunner, Result
 from conftest import SampleDandiset
 from dandi.consts import dandiset_metadata_file
 from dandi.utils import find_files
 from datalad.api import Dataset
 from datalad.tests.utils import assert_repo_status
 import numpy as np
+import pytest
 import zarr
 
 from backups2datalad.__main__ import main
-from backups2datalad.config import Config, Remote, ResourceConfig
+from backups2datalad.config import BackupConfig, Remote, ResourceConfig
 from backups2datalad.util import is_meta_file
+
+pytestmark = pytest.mark.anyio
 
 
 def show_result(r: Result) -> str:
@@ -26,7 +29,7 @@ def show_result(r: Result) -> str:
         return r.output
 
 
-def test_backup_command(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
+async def test_backup_command(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
     cfgfile = tmp_path / "config.yaml"
     cfgfile.write_text(
         "dandi_instance: dandi-staging\n"
@@ -34,7 +37,7 @@ def test_backup_command(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
         "dandisets:\n"
         "  path: ds\n"
     )
-    r = CliRunner().invoke(
+    r = await CliRunner().invoke(
         main,
         [
             "--backup-root",
@@ -70,7 +73,7 @@ def test_backup_command(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
     assert not any(ds.repo.is_under_annex(list(sync_files)))
 
 
-def test_populate(new_dandiset: SampleDandiset, tmp_path: Path) -> None:
+async def test_populate(new_dandiset: SampleDandiset, tmp_path: Path) -> None:
     TEXT_FILES = {
         "file.txt": "This is test text.\n",
         "fruit/apple.txt": "Apple\n",
@@ -122,7 +125,7 @@ def test_populate(new_dandiset: SampleDandiset, tmp_path: Path) -> None:
             exclude_vcs=False,
         )
     }
-    new_dandiset.upload()
+    await new_dandiset.upload()
 
     backup_root = tmp_path / "backup"
     remote_root = tmp_path / "remote"
@@ -130,7 +133,7 @@ def test_populate(new_dandiset: SampleDandiset, tmp_path: Path) -> None:
     (remote_root / "zarr").mkdir(parents=True, exist_ok=True)
 
     cfgfile = tmp_path / "config.yaml"
-    cfg = Config(
+    cfg = BackupConfig(
         dandi_instance="dandi-staging",
         s3bucket="dandi-api-staging-dandisets",
         backup_root=backup_root,
@@ -159,7 +162,7 @@ def test_populate(new_dandiset: SampleDandiset, tmp_path: Path) -> None:
     )
     cfg.dump_yaml(cfgfile)
 
-    r = CliRunner().invoke(
+    r = await CliRunner().invoke(
         main,
         ["-c", str(cfgfile), "update-from-backup", new_dandiset.dandiset_id],
         standalone_mode=False,
@@ -189,8 +192,8 @@ def test_populate(new_dandiset: SampleDandiset, tmp_path: Path) -> None:
         assert p.is_symlink() and not p.exists()
         keys2blobs[Path(os.readlink(p)).name] = blob
 
-    sample_zarr_asset = new_dandiset.dandiset.get_asset_by_path("z/sample.zarr")
-    eye_zarr_asset = new_dandiset.dandiset.get_asset_by_path("z/eye.zarr")
+    sample_zarr_asset = await new_dandiset.dandiset.aget_asset_by_path("z/sample.zarr")
+    eye_zarr_asset = await new_dandiset.dandiset.aget_asset_by_path("z/eye.zarr")
     zarr_keys2blobs: dict[str, bytes] = {}
     for zarr_id, entries in [
         (sample_zarr_asset.zarr, SAMPLE_ZARR_ENTRIES),
@@ -207,7 +210,7 @@ def test_populate(new_dandiset: SampleDandiset, tmp_path: Path) -> None:
             assert p.is_symlink() and not p.exists()
             zarr_keys2blobs[Path(os.readlink(p)).name] = blob
 
-    r = CliRunner().invoke(
+    r = await CliRunner().invoke(
         main, ["-c", str(cfgfile), "populate"], standalone_mode=False
     )
     assert r.exit_code == 0, show_result(r)
@@ -225,7 +228,7 @@ def test_populate(new_dandiset: SampleDandiset, tmp_path: Path) -> None:
     for key, blob in keys2blobs.items():
         assert remote_files[key].read_bytes() == blob
 
-    r = CliRunner().invoke(
+    r = await CliRunner().invoke(
         main, ["-c", str(cfgfile), "populate-zarrs"], standalone_mode=False
     )
     assert r.exit_code == 0, show_result(r)

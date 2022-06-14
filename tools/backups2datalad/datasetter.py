@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 import re
 import sys
-from typing import Any, AsyncIterator, Optional, Sequence
+from typing import Any, AsyncGenerator, Optional, Sequence
 
 import anyio
 from anyio.abc import AsyncResource
@@ -24,7 +24,7 @@ from .adataset import AsyncDataset, ObjectType
 from .aioutil import areadcmd, arequest, pool_amap
 from .config import BackupConfig
 from .consts import DEFAULT_BRANCH, USER_AGENT
-from .logging import log
+from .logging import PrefixedLogger, log
 from .syncer import Syncer
 from .util import (
     AssetTracker,
@@ -63,7 +63,7 @@ class DandiDatasetter(AsyncResource):
     ) -> None:
         superds = await self.ensure_superdataset()
         report = await pool_amap(
-            self.sync_dataset,
+            self.update_dandiset,
             self.get_dandisets(dandiset_ids, exclude=exclude),
             workers=self.config.workers,
         )
@@ -107,7 +107,7 @@ class DandiDatasetter(AsyncResource):
                     homepage=f"https://identifiers.org/DANDI:{dandiset_id}",
                 )
 
-    async def sync_dataset(
+    async def update_dandiset(
         self, dandiset: RemoteDandiset, ds: Optional[AsyncDataset] = None
     ) -> Optional[DandisetStats]:
         if ds is None:
@@ -117,6 +117,21 @@ class DandiDatasetter(AsyncResource):
                 create_time=dandiset.version.created,
             )
         dlog = log.sublogger(f"Dandiset {dandiset.identifier}")
+        changed = await self.sync_dataset(dandiset, ds, dlog)
+        await self.ensure_github_remote(ds, dandiset.identifier)
+        await self.tag_releases(dandiset, ds, push=self.config.gh_org is not None)
+        if self.config.gh_org is not None:
+            if changed:
+                dlog.info("Pushing to sibling")
+                await ds.push(to="github", jobs=self.config.jobs, data="nothing")
+            return await self.set_dandiset_gh_metadata(dandiset, ds)
+        else:
+            return None
+
+    async def sync_dataset(
+        self, dandiset: RemoteDandiset, ds: AsyncDataset, dlog: PrefixedLogger
+    ) -> bool:
+        # Returns true if any changes were committed to the repository
         dlog.info("Syncing")
         if await ds.is_dirty():
             raise RuntimeError(f"Dirty {dandiset}; clean or save before running")
@@ -145,16 +160,7 @@ class DandiDatasetter(AsyncResource):
         dlog.debug("Running `git gc`")
         await ds.gc()
         dlog.debug("Finished running `git gc`")
-        changed = syncer.report.commits > 0
-        await self.ensure_github_remote(ds, dandiset.identifier)
-        await self.tag_releases(dandiset, ds, push=self.config.gh_org is not None)
-        if self.config.gh_org is not None:
-            if changed:
-                dlog.info("Pushing to sibling")
-                await ds.push(to="github", jobs=self.config.jobs, data="nothing")
-            return await self.set_dandiset_gh_metadata(dandiset, ds)
-        else:
-            return None
+        return syncer.report.commits > 0
 
     async def get_remote_url(self, ds: AsyncDataset) -> str:
         upstream = await ds.get_repo_config(f"branch.{DEFAULT_BRANCH}.remote")
@@ -186,7 +192,7 @@ class DandiDatasetter(AsyncResource):
 
     async def get_dandisets(
         self, dandiset_ids: Sequence[str], exclude: Optional[re.Pattern[str]]
-    ) -> AsyncIterator[RemoteDandiset]:
+    ) -> AsyncGenerator[RemoteDandiset, None]:
         if dandiset_ids:
             diter = self.dandi_client.get_dandisets_by_ids(dandiset_ids)
         else:
@@ -204,27 +210,24 @@ class DandiDatasetter(AsyncResource):
         files = 0
         size = 0
         substats: dict[str, DandisetStats] = {}
-        async with aclosing(ds.aiter_file_stats()) as ait:
-            async for filestat in ait:
-                path = Path(ait.path)
-                if not is_meta_file(path.parts[0], dandiset=True):
-                    if ait.type is ObjectType.COMMIT:
-                        zarr_ds = AsyncDataset(ds.pathobj / path)
-                        zarr_id = Path(await self.get_remote_url(zarr_ds)).name
-                        try:
-                            zarr_stat = substats[zarr_id]
-                        except KeyError:
-                            zarr_stat, subsubstats = await self.get_dandiset_stats(
-                                zarr_ds
-                            )
-                            assert not subsubstats
-                            substats[zarr_id] = zarr_stat
-                        files += zarr_stat.files
-                        size += zarr_stat.size
-                    else:
-                        files += 1
-                        assert filestat.size is not None
-                        size += filestat.size
+        for filestat in await ds.get_file_stats():
+            path = Path(filestat.path)
+            if not is_meta_file(path.parts[0], dandiset=True):
+                if filestat.type is ObjectType.COMMIT:
+                    zarr_ds = AsyncDataset(ds.pathobj / path)
+                    zarr_id = Path(await self.get_remote_url(zarr_ds)).name
+                    try:
+                        zarr_stat = substats[zarr_id]
+                    except KeyError:
+                        zarr_stat, subsubstats = await self.get_dandiset_stats(zarr_ds)
+                        assert not subsubstats
+                        substats[zarr_id] = zarr_stat
+                    files += zarr_stat.files
+                    size += zarr_stat.size
+                else:
+                    files += 1
+                    assert filestat.size is not None
+                    size += filestat.size
         return (DandisetStats(files=files, size=size), substats)
 
     async def set_dandiset_gh_metadata(
@@ -371,7 +374,7 @@ class DandiDatasetter(AsyncResource):
                 candidates.append(cmt.split()[-1])
         else:
             candidates = [commitish]
-        matching = list(filter(commit_has_assets, candidates))
+        matching = [c for c in candidates if await commit_has_assets(c)]
         assert len(matching) < 2, (
             f"Commits both before and after {dandiset.version.created} have"
             " matching asset metadata"
@@ -401,19 +404,21 @@ class DandiDatasetter(AsyncResource):
             await ds.call_git(
                 "checkout", "-b", f"release-{dandiset.version_id}", candidates[0]
             )
-            await self.sync_dataset(dandiset, ds)
-            await ds.call_git(
-                "tag",
-                "-m",
-                f"Version {dandiset.version_id} of Dandiset {dandiset.identifier}",
-                dandiset.version_id,
-                env={
-                    **os.environ,
-                    "GIT_COMMITTER_NAME": "DANDI User",
-                    "GIT_COMMITTER_EMAIL": "info@dandiarchive.org",
-                    "GIT_COMMITTER_DATE": str(dandiset.version.created),
-                },
+            await self.sync_dataset(
+                dandiset, ds, log.sublogger(f"Dandiset {dandiset.identifier}")
             )
+        await ds.call_git(
+            "tag",
+            "-m",
+            f"Version {dandiset.version_id} of Dandiset {dandiset.identifier}",
+            dandiset.version_id,
+            env={
+                **os.environ,
+                "GIT_COMMITTER_NAME": "DANDI User",
+                "GIT_COMMITTER_EMAIL": "info@dandiarchive.org",
+                "GIT_COMMITTER_DATE": str(dandiset.version.created),
+            },
+        )
         await ds.call_git("checkout", DEFAULT_BRANCH)
         await ds.call_git("branch", "-D", f"release-{dandiset.version_id}")
         if push:

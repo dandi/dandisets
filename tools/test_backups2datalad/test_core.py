@@ -1,8 +1,10 @@
+from __future__ import annotations
+
 from datetime import datetime, timezone
 import logging
 from pathlib import Path
-from time import sleep
 
+import anyio
 from conftest import SampleDandiset
 from dandi.consts import dandiset_metadata_file
 from dandi.dandiapi import Version
@@ -13,19 +15,21 @@ from datalad.tests.utils import assert_repo_status, ok_file_under_git
 import pytest
 from test_util import GitRepo
 
-from backups2datalad.config import Config
+from backups2datalad.adataset import AsyncDataset
+from backups2datalad.config import BackupConfig
 from backups2datalad.consts import DEFAULT_BRANCH
 from backups2datalad.datasetter import DandiDatasetter
-from backups2datalad.util import custom_commit_date
 
 log = logging.getLogger("test_backups2datalad.test_core")
 
+pytestmark = pytest.mark.anyio
 
-def test_1(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
+
+async def test_1(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
     # TODO: move pre-setup into a fixture, e.g. local_setup1 or make code work without?
     di = DandiDatasetter(
         dandi_client=text_dandiset.client,
-        config=Config(
+        config=BackupConfig(
             backup_root=tmp_path,
             dandi_instance="dandi-staging",
             s3bucket="dandi-api-staging-dandisets",
@@ -36,7 +40,7 @@ def test_1(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
 
     with pytest.raises(Exception):
         log.info("test_1: Testing sync of nonexistent Dandiset")
-        di.update_from_backup(["999999"])
+        await di.update_from_backup(["999999"])
     assert not (dandisets_root / "999999").exists()
 
     # Since we are using text_dandiset, that immediately creates us a dandiset
@@ -47,7 +51,7 @@ def test_1(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
 
     dandiset_id = text_dandiset.dandiset_id
     log.info("test_1: Syncing test dandiset")
-    di.update_from_backup([dandiset_id])
+    await di.update_from_backup([dandiset_id])
 
     ds = Dataset(dandisets_root / dandiset_id)  # but we should get the super-dataset?
     assert_repo_status(ds.path)  # that all is clean etc
@@ -55,10 +59,10 @@ def test_1(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
 
     (text_dandiset.dspath / "new.txt").write_text("This is a new file.\n")
     log.info("test_1: Updating test dandiset on server")
-    text_dandiset.upload()
+    await text_dandiset.upload()
     assert_repo_status(ds.path)  # no side-effects somehow
     log.info("test_1: Syncing test dandiset")
-    di.update_from_backup([dandiset_id])
+    await di.update_from_backup([dandiset_id])
     assert_repo_status(ds.path)  # that all is clean etc
     assert (ds.pathobj / "new.txt").read_text() == "This is a new file.\n"
 
@@ -87,12 +91,12 @@ def test_1(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
         assert metadata.get("doi")
 
     log.info("test_1: Waiting for Dandiset to become valid")
-    text_dandiset.dandiset.wait_until_valid(65)
+    await text_dandiset.dandiset.await_until_valid(65)
     log.info("test_1: Publishing Dandiset")
-    v1 = text_dandiset.dandiset.publish().version
+    v1 = (await text_dandiset.dandiset.apublish()).version
     version1 = v1.identifier
     log.info("test_1: Syncing test dandiset")
-    di.update_from_backup([dandiset_id])
+    await di.update_from_backup([dandiset_id])
     assert_repo_status(ds.path)  # that all is clean etc
     tags = {t["name"]: t["hexsha"] for t in ds.repo.get_tags()}
     assert version1 in tags
@@ -103,21 +107,21 @@ def test_1(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
         "This file's contents were changed.\n"
     )
     log.info("test_1: Updating test dandiset on server")
-    text_dandiset.upload()
+    await text_dandiset.upload()
     log.info("test_1: Syncing test dandiset")
-    di.update_from_backup([dandiset_id])
+    await di.update_from_backup([dandiset_id])
     assert_repo_status(ds.path)  # that all is clean etc
     assert (
         ds.pathobj / "new.txt"
     ).read_text() == "This file's contents were changed.\n"
 
     log.info("test_1: Waiting for Dandiset to become valid")
-    text_dandiset.dandiset.wait_until_valid(65)
+    await text_dandiset.dandiset.await_until_valid(65)
     log.info("test_1: Publishing Dandiset")
-    v2 = text_dandiset.dandiset.publish().version
+    v2 = (await text_dandiset.dandiset.apublish()).version
     version2 = v2.identifier
     log.info("test_1: Syncing test dandiset")
-    di.update_from_backup([dandiset_id])
+    await di.update_from_backup([dandiset_id])
     assert_repo_status(ds.path)  # that all is clean etc
     tags = {t["name"]: t["hexsha"] for t in ds.repo.get_tags()}
     assert version1 in tags
@@ -138,7 +142,7 @@ def test_1(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
         }
 
 
-def test_2(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
+async def test_2(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
     """
     Test of adding in version-tagging after backups have already been taken.
 
@@ -147,7 +151,7 @@ def test_2(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
     """
     di = DandiDatasetter(
         dandi_client=text_dandiset.client,
-        config=Config(
+        config=BackupConfig(
             backup_root=tmp_path,
             dandi_instance="dandi-staging",
             s3bucket="dandi-api-staging-dandisets",
@@ -159,7 +163,7 @@ def test_2(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
     dspath = text_dandiset.dspath
     dandiset = text_dandiset.dandiset
     log.info("test_2: Creating new backup of Dandiset")
-    di.update_from_backup([dandiset_id])
+    await di.update_from_backup([dandiset_id])
     backupdir = tmp_path / "dandisets" / dandiset_id
     repo = GitRepo(backupdir)
 
@@ -168,21 +172,23 @@ def test_2(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
         (dspath / "counter.txt").write_text(f"{i}\n")
         for vn in dspath.glob("v*.txt"):
             vn.unlink()
-            dandiset.get_asset_by_path(vn.name).delete()
+            asset = await dandiset.aget_asset_by_path(vn.name)
+            await text_dandiset.client.delete(asset.api_path)
         if i > 1:
-            sleep(2)  # Ensure v{i}.txt has a timestamp after the last version
+            # Ensure v{i}.txt has a timestamp after the last version
+            await anyio.sleep(2)
         (dspath / f"v{i}.txt").write_text(f"Version {i}\n")
         # Something goes wrong with the download if v{i} and w{i} have the same
         # content.
         (dspath / f"w{i}.txt").write_text(f"Wersion {i}\n")
-        text_dandiset.upload()
+        await text_dandiset.upload()
         log.info("test_2: Publishing version #%s", i)
-        dandiset.wait_until_valid(65)
-        v = dandiset.publish().version
+        await dandiset.await_until_valid(65)
+        v = (await dandiset.apublish()).version
         log.info(
             "test_2: Updating backup (release-tagging disabled) for version #%s", i
         )
-        di.update_from_backup([dandiset_id])
+        await di.update_from_backup([dandiset_id])
         assert repo.get_tags() == []
         assert (backupdir / "counter.txt").read_text() == f"{i}\n"
         assert list(backupdir.glob("v*.txt")) == [backupdir / f"v{i}.txt"]
@@ -195,7 +201,7 @@ def test_2(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
 
     di.config.enable_tags = True
     log.info("test_2: Updating backup, now with release-tagging enabled")
-    di.update_from_backup([dandiset_id])
+    await di.update_from_backup([dandiset_id])
 
     for i, (v, base) in enumerate(versions, start=1):
         assert (
@@ -214,7 +220,7 @@ def test_2(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
         }
 
 
-def test_3(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
+async def test_3(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
     """
     Test of "debouncing" (GH-89, GH-97).
 
@@ -222,7 +228,7 @@ def test_3(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
     """
     di = DandiDatasetter(
         dandi_client=text_dandiset.client,
-        config=Config(
+        config=BackupConfig(
             backup_root=tmp_path,
             dandi_instance="dandi-staging",
             s3bucket="dandi-api-staging-dandisets",
@@ -237,16 +243,18 @@ def test_3(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
         (dspath / "counter.txt").write_text(f"{i}\n")
         for vn in dspath.glob("v*.txt"):
             vn.unlink()
-            dandiset.get_asset_by_path(vn.name).delete()
+            asset = await dandiset.aget_asset_by_path(vn.name)
+            await text_dandiset.client.delete(asset.api_path)
         if i > 1:
-            sleep(2)  # Ensure v{i}.txt has a timestamp after the last version
+            # Ensure v{i}.txt has a timestamp after the last version
+            await anyio.sleep(2)
         (dspath / f"v{i}.txt").write_text(f"Version {i}\n")
         # Something goes wrong with the download if v{i} and w{i} have the same
         # content.
         (dspath / f"w{i}.txt").write_text(f"Wersion {i}\n")
-        text_dandiset.upload()
+        await text_dandiset.upload()
         log.info("test_3: Publishing version #%s", i)
-        dandiset.wait_until_valid(65)
+        await dandiset.await_until_valid(65)
         if i < 3:
             status = {
                 ".dandi/assets.json": "M",
@@ -256,9 +264,10 @@ def test_3(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
             }
         else:
             status = {"dandiset.yaml": "M"}
-        versions.append((dandiset.publish().version, status))
+        versions.append(((await dandiset.apublish()).version, status))
     log.info("test_3: Creating backup of Dandiset")
-    di.update_from_backup([dandiset_id])
+    await di.update_from_backup([dandiset_id])
+
     repo = GitRepo(tmp_path / "dandisets" / dandiset_id)
     for i, (v, status) in enumerate(versions, start=1):
         assert repo.parent_is_ancestor(
@@ -294,13 +303,13 @@ def test_3(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
         }
 
 
-def test_4(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
+async def test_4(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
     """
     This test creates several versions and takes a backup after each one.
     """
     di = DandiDatasetter(
         dandi_client=text_dandiset.client,
-        config=Config(
+        config=BackupConfig(
             backup_root=tmp_path,
             dandi_instance="dandi-staging",
             s3bucket="dandi-api-staging-dandisets",
@@ -315,19 +324,21 @@ def test_4(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
         (dspath / "counter.txt").write_text(f"{i}\n")
         for vn in dspath.glob("v*.txt"):
             vn.unlink()
-            dandiset.get_asset_by_path(vn.name).delete()
+            asset = await dandiset.aget_asset_by_path(vn.name)
+            await text_dandiset.client.delete(asset.api_path)
         if i > 1:
-            sleep(2)  # Ensure v{i}.txt has a timestamp after the last version
+            # Ensure v{i}.txt has a timestamp after the last version
+            await anyio.sleep(2)
         (dspath / f"v{i}.txt").write_text(f"Version {i}\n")
         # Something goes wrong with the download if v{i} and w{i} have the same
         # content.
         (dspath / f"w{i}.txt").write_text(f"Wersion {i}\n")
-        text_dandiset.upload()
+        await text_dandiset.upload()
         log.info("test_4: Publishing version #%s", i)
-        dandiset.wait_until_valid(65)
-        v = dandiset.publish().version
+        await dandiset.await_until_valid(65)
+        v = (await dandiset.apublish()).version
         log.info("test_4: Creating backup of Dandiset")
-        di.update_from_backup([dandiset_id])
+        await di.update_from_backup([dandiset_id])
         assert (
             repo.get_commit_subject(v.identifier)
             == "[backups2datalad] dandiset.yaml updated"
@@ -342,10 +353,10 @@ def test_4(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
         }
 
 
-def test_binary(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
+async def test_binary(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
     di = DandiDatasetter(
         dandi_client=text_dandiset.client,
-        config=Config(
+        config=BackupConfig(
             backup_root=tmp_path,
             dandi_instance="dandi-staging",
             s3bucket="dandi-api-staging-dandisets",
@@ -355,9 +366,9 @@ def test_binary(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
     dandiset_id = text_dandiset.dandiset_id
     dspath = text_dandiset.dspath
     (dspath / "data.dat").write_bytes(b"\0\1\2\3\4\5")
-    text_dandiset.upload()
+    await text_dandiset.upload()
     log.info("test_binary: Syncing test dandiset")
-    di.update_from_backup([dandiset_id])
+    await di.update_from_backup([dandiset_id])
     backup = tmp_path / "dandisets" / dandiset_id
     annex = AnnexRepo(backup)
     data_backup = backup / "data.dat"
@@ -365,12 +376,14 @@ def test_binary(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
     assert annex.is_under_annex([data_backup]) == [True]
 
 
-def test_custom_commit_date(tmp_path: Path) -> None:
-    ds = Dataset(tmp_path)
-    ds.create(cfg_proc="text2git")
+async def test_custom_commit_date(tmp_path: Path) -> None:
+    ds = AsyncDataset(tmp_path)
+    assert await ds.ensure_installed("Test dataset")
     (tmp_path / "file.txt").write_text("This is test text.\n")
-    with custom_commit_date(datetime(2021, 6, 1, 12, 34, 56, tzinfo=timezone.utc)):
-        ds.save(message="Add a file")
+    await ds.save(
+        message="Add a file",
+        commit_date=datetime(2021, 6, 1, 12, 34, 56, tzinfo=timezone.utc),
+    )
     repo = GitRepo(tmp_path)
     assert repo.get_commit_date("HEAD") == "2021-06-01T12:34:56+00:00"
     assert repo.get_commit_author("HEAD") == "DANDI User <info@dandiarchive.org>"

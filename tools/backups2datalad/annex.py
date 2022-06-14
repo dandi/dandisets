@@ -4,13 +4,19 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 import json
 from pathlib import Path
-from typing import AsyncIterator, Optional
+import sys
+from typing import AsyncGenerator, Optional
 
 import anyio
 
 from .aioutil import TextProcess, open_git_annex, stream_null_command
 from .logging import log
 from .util import format_errors
+
+if sys.version_info[:2] >= (3, 10):
+    from contextlib import aclosing
+else:
+    from async_generator import aclosing
 
 
 @dataclass
@@ -113,13 +119,17 @@ class AsyncAnnex(anyio.abc.AsyncResource):
             )
             ### TODO: Raise an exception?
 
-    async def list_files(self) -> AsyncIterator[str]:
-        return stream_null_command(
-            "git",
-            "ls-tree",
-            "-r",
-            "--name-only",
-            "-z",
-            "HEAD",
-            cwd=self.repo,
-        )
+    async def list_files(self) -> AsyncGenerator[str, None]:
+        async with aclosing(
+            stream_null_command(
+                "git",
+                "ls-tree",
+                "-r",
+                "--name-only",
+                "-z",
+                "HEAD",
+                cwd=self.repo,
+            )
+        ) as p:
+            async for fname in p:
+                yield fname
