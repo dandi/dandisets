@@ -165,11 +165,14 @@ class RemoteDandiset(SyncRemoteDandiset):
                     yield Version.parse_obj(v)
 
     async def aget_assets(self) -> AsyncGenerator[RemoteAsset, None]:
-        async for item in self.aclient.paginate(
-            f"{self.version_api_path}assets/", params={"order": "created"}
-        ):
-            metadata = await self.aclient.get(f"/assets/{item['asset_id']}/")
-            yield RemoteAsset.from_data(self, item, metadata)
+        async with aclosing(
+            self.aclient.paginate(
+                f"{self.version_api_path}assets/", params={"order": "created"}
+            )
+        ) as ait:
+            async for item in ait:
+                metadata = await self.aclient.get(f"/assets/{item['asset_id']}/")
+                yield RemoteAsset.from_data(self, item, metadata)
 
     async def aget_asset_by_path(self, path: str) -> RemoteAsset:
         async with aclosing(
