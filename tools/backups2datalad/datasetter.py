@@ -22,7 +22,7 @@ from packaging.version import Version as PkgVersion
 from .adandi import AsyncDandiClient, RemoteDandiset
 from .adataset import AsyncDataset, ObjectType
 from .aioutil import areadcmd, arequest, pool_amap
-from .config import Config
+from .config import BackupConfig
 from .consts import DEFAULT_BRANCH, USER_AGENT
 from .logging import log
 from .syncer import Syncer
@@ -44,7 +44,7 @@ else:
 @dataclass
 class DandiDatasetter(AsyncResource):
     dandi_client: AsyncDandiClient
-    config: Config
+    config: BackupConfig
     gh: Optional[httpx.AsyncClient] = None
 
     async def aclose(self) -> None:

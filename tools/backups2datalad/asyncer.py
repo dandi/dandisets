@@ -27,8 +27,8 @@ from .adandi import RemoteDandiset
 from .adataset import AsyncDataset
 from .aioutil import MiniFuture, TextProcess, aiter, arequest, open_git_annex
 from .annex import AsyncAnnex
-from .config import Config
-from .consts import USER_AGENT, ZARR_LIMIT
+from .config import BackupConfig
+from .consts import USER_AGENT
 from .logging import PrefixedLogger, log
 from .util import AssetTracker, Report, format_errors, key2hash, maxdatetime, quantify
 from .zarr import sync_zarr
@@ -59,7 +59,7 @@ class Downloader:
     dandiset_id: str
     addurl: TextProcess
     repo: Path
-    config: Config
+    config: BackupConfig
     tracker: AssetTracker
     s3client: httpx.AsyncClient
     annex: AsyncAnnex
@@ -71,7 +71,6 @@ class Downloader:
     download_sender: MemoryObjectSendStream[ToDownload] = field(init=False)
     download_receiver: MemoryObjectReceiveStream[ToDownload] = field(init=False)
     zarrs: dict[str, ZarrLink] = field(init=False, default_factory=dict)
-    zarr_limit: anyio.CapacityLimiter = field(init=False)
     need_add: list[str] = field(init=False, default_factory=list)
 
     def __post_init__(self) -> None:
@@ -79,7 +78,6 @@ class Downloader:
             self.download_sender,
             self.download_receiver,
         ) = anyio.create_memory_object_stream(0)
-        self.zarr_limit = anyio.CapacityLimiter(ZARR_LIMIT)
 
     async def asset_loop(self, aia: AsyncIterator[Optional[RemoteAsset]]) -> None:
         now = datetime.now(timezone.utc)
@@ -254,7 +252,6 @@ class Downloader:
                 zarr_dspath,
                 self.config,
                 self.log.sublogger(f"Zarr {asset.zarr}"),
-                self.zarr_limit,
             )
             self.zarrs[asset.zarr] = ZarrLink(
                 zarr_dspath=zarr_dspath,
@@ -373,7 +370,7 @@ class Downloader:
 async def async_assets(
     dandiset: RemoteDandiset,
     ds: AsyncDataset,
-    config: Config,
+    config: BackupConfig,
     tracker: AssetTracker,
     log: PrefixedLogger,
 ) -> Report:

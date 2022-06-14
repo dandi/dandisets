@@ -11,14 +11,14 @@ from urllib.parse import quote
 from aiobotocore.session import get_session
 import anyio
 from botocore import UNSIGNED
-from botocore.client import Config as BotoConfig
+from botocore.client import Config
 from dandi.dandiapi import RemoteZarrAsset
 from pydantic import BaseModel
 
 from .adataset import AsyncDataset
 from .aioutil import MiniFuture
 from .annex import AsyncAnnex
-from .config import Config
+from .config import BackupConfig
 from .logging import PrefixedLogger
 from .util import is_meta_file, key2hash, maxdatetime, quantify
 
@@ -117,7 +117,7 @@ class ZarrSyncer:
         async with aclosing(self.annex.list_files()) as fileiter:
             local_paths = {f async for f in fileiter if not is_meta_file(f)}
         async with get_session().create_client(
-            "s3", config=BotoConfig(signature_version=UNSIGNED)
+            "s3", config=Config(signature_version=UNSIGNED)
         ) as client:
             if not await self.needs_sync(client, last_sync, local_paths):
                 self.log.info("backup up to date")
@@ -357,16 +357,11 @@ async def sync_zarr(
     asset: RemoteZarrAsset,
     checksum: str,
     dsdir: Path,
-    config: Config,
+    config: BackupConfig,
     log: PrefixedLogger,
-    limit: Optional[anyio.CapacityLimiter] = None,
     ts_fut: Optional[MiniFuture[Optional[datetime]]] = None,
 ) -> None:
-    if limit is None:
-        # For use when calling sync_zarr() directly from a test, where we can't
-        # construct a CapacityLimiter outside of an async context.
-        limit = anyio.CapacityLimiter(1)
-    async with limit:
+    async with config.zarr_limit:
         assert config.zarrs is not None
         ds = AsyncDataset(dsdir)
         if await ds.ensure_installed(

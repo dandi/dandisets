@@ -19,7 +19,7 @@ from dandi.dandiset import APIDandiset
 from datalad.api import Dataset
 from datalad.support.json_py import dump
 
-from .config import Config
+from .config import BackupConfig
 from .logging import log
 
 
@@ -124,7 +124,7 @@ class AssetTracker:
     def mark_future(self, asset: RemoteAsset) -> None:
         self.future_assets.add(asset.path)
 
-    def get_deleted(self, config: Config) -> Iterator[str]:
+    def get_deleted(self, config: BackupConfig) -> Iterator[str]:
         """
         Yields paths of deleted assets and removes their metadata from
         `asset_metadata`

@@ -16,7 +16,7 @@ from datalad.api import Dataset
 
 from .adataset import AsyncDataset
 from .aioutil import aiter, open_git_annex, pool_amap
-from .config import Config
+from .config import BackupConfig
 from .datasetter import DandiDatasetter
 from .logging import log
 from .util import format_errors, pdb_excepthook, quantify
@@ -63,9 +63,9 @@ async def main(
     config: Optional[Path],
 ) -> None:
     if config is None:
-        cfg = Config()
+        cfg = BackupConfig()
     else:
-        cfg = Config.load_yaml(config)
+        cfg = BackupConfig.load_yaml(config)
     if backup_root is not None:
         cfg.backup_root = backup_root
     if jobs is not None:

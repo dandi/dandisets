@@ -7,14 +7,14 @@ from dandi.dandiapi import RemoteDandiset
 
 from .adatalad import AsyncDataset
 from .asyncer import async_assets
-from .config import Config
+from .config import BackupConfig
 from .logging import PrefixedLogger
 from .util import AssetTracker, Report, quantify
 
 
 @dataclass
 class Syncer:
-    config: Config
+    config: BackupConfig
     dandiset: RemoteDandiset
     ds: AsyncDataset
     tracker: AssetTracker
