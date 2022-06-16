@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+from functools import cached_property
 import json
 from pathlib import Path
 from typing import Any, Dict, Optional, Pattern
 
+import anyio
 from dandi.utils import yaml_dump, yaml_load
 from pydantic import BaseModel, Field, root_validator
 
-from .consts import DEFAULT_GIT_ANNEX_JOBS
+from .consts import DEFAULT_GIT_ANNEX_JOBS, DEFAULT_WORKERS, ZARR_LIMIT
 
 
 class Remote(BaseModel):
@@ -23,7 +25,7 @@ class ResourceConfig(BaseModel):
     remote: Optional[Remote] = None
 
 
-class Config(BaseModel):
+class BackupConfig(BaseModel):
     # Give everything a default so we can construct an "empty" config when no
     # config file is given
     dandi_instance: str = "dandi"
@@ -39,8 +41,14 @@ class Config(BaseModel):
     # <https://github.com/samuelcolvin/pydantic/issues/2636>
     asset_filter: Optional[Pattern] = None
     jobs: int = DEFAULT_GIT_ANNEX_JOBS
+    workers: int = DEFAULT_WORKERS
     force: Optional[str] = None
     enable_tags: bool = True
+
+    class Config:
+        # <https://github.com/samuelcolvin/pydantic/issues/1241>
+        arbitrary_types_allowed = True
+        keep_untouched = (cached_property,)
 
     @root_validator
     def _validate(cls, values: dict[str, Any]) -> dict[str, Any]:  # noqa: B902, U100
@@ -58,7 +66,7 @@ class Config(BaseModel):
         return values
 
     @classmethod
-    def load_yaml(cls, filepath: Path) -> Config:
+    def load_yaml(cls, filepath: Path) -> BackupConfig:
         with filepath.open("r") as fp:
             data = yaml_load(fp)
         return cls.parse_obj(data)
@@ -87,6 +95,10 @@ class Config(BaseModel):
             return self.zarrs.github_org
         else:
             return None
+
+    @cached_property
+    def zarr_limit(self) -> anyio.CapacityLimiter:
+        return anyio.CapacityLimiter(ZARR_LIMIT)
 
     def match_asset(self, asset_path: str) -> bool:
         return self.asset_filter is None or bool(self.asset_filter.search(asset_path))

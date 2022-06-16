@@ -11,36 +11,26 @@ import os.path
 from pathlib import Path, PurePosixPath
 import subprocess
 import sys
-from typing import AsyncIterator, Dict, List, Optional
+from typing import AsyncGenerator, AsyncIterator, Optional
 from urllib.parse import urlparse, urlunparse
 
 import anyio
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
-from dandi.dandiapi import AssetType, RemoteAsset, RemoteDandiset, RemoteZarrAsset
+from dandi.dandiapi import AssetType, RemoteAsset, RemoteZarrAsset
 from dandi.exceptions import NotFoundError
 from dandischema.models import DigestType
-from datalad.api import Dataset, clone
+from datalad.api import clone
 import httpx
 from identify.identify import tags_from_filename
 
+from .adandi import RemoteDandiset
+from .adataset import AsyncDataset
+from .aioutil import MiniFuture, TextProcess, arequest, open_git_annex
 from .annex import AsyncAnnex
-from .config import Config
-from .consts import ZARR_LIMIT
-from .util import (
-    AssetTracker,
-    MiniFuture,
-    Report,
-    TextProcess,
-    aiter,
-    arequest,
-    custom_commit_date,
-    format_errors,
-    key2hash,
-    log,
-    maxdatetime,
-    open_git_annex,
-    quantify,
-)
+from .config import BackupConfig
+from .consts import USER_AGENT
+from .logging import PrefixedLogger, log
+from .util import AssetTracker, Report, format_errors, key2hash, maxdatetime, quantify
 from .zarr import sync_zarr
 
 if sys.version_info[:2] >= (3, 10):
@@ -53,7 +43,7 @@ else:
 class ToDownload:
     path: str
     url: str
-    extra_urls: List[str]
+    extra_urls: list[str]
     sha256_digest: str
 
 
@@ -61,7 +51,7 @@ class ToDownload:
 class ZarrLink:
     zarr_dspath: Path
     timestamp_fut: MiniFuture[Optional[datetime]]
-    asset_paths: List[str]
+    asset_paths: list[str]
 
 
 @dataclass
@@ -69,18 +59,18 @@ class Downloader:
     dandiset_id: str
     addurl: TextProcess
     repo: Path
-    config: Config
+    config: BackupConfig
     tracker: AssetTracker
     s3client: httpx.AsyncClient
     annex: AsyncAnnex
     nursery: anyio.abc.TaskGroup
+    log: PrefixedLogger
     last_timestamp: Optional[datetime] = None
     report: Report = field(init=False, default_factory=Report)
-    in_progress: Dict[str, ToDownload] = field(init=False, default_factory=dict)
+    in_progress: dict[str, ToDownload] = field(init=False, default_factory=dict)
     download_sender: MemoryObjectSendStream[ToDownload] = field(init=False)
     download_receiver: MemoryObjectReceiveStream[ToDownload] = field(init=False)
-    zarrs: Dict[str, ZarrLink] = field(init=False, default_factory=dict)
-    zarr_limit: anyio.CapacityLimiter = field(init=False)
+    zarrs: dict[str, ZarrLink] = field(init=False, default_factory=dict)
     need_add: list[str] = field(init=False, default_factory=list)
 
     def __post_init__(self) -> None:
@@ -88,7 +78,6 @@ class Downloader:
             self.download_sender,
             self.download_receiver,
         ) = anyio.create_memory_object_stream(0)
-        self.zarr_limit = anyio.CapacityLimiter(ZARR_LIMIT)
 
     async def asset_loop(self, aia: AsyncIterator[Optional[RemoteAsset]]) -> None:
         now = datetime.now(timezone.utc)
@@ -102,7 +91,7 @@ class Downloader:
                         try:
                             zarr_digest = asset.get_digest().value
                         except NotFoundError:
-                            log.info(
+                            self.log.info(
                                 "%s: Zarr checksum has not been computed yet;"
                                 " not downloading any more assets",
                                 asset.path,
@@ -119,7 +108,7 @@ class Downloader:
                         try:
                             sha256_digest = asset.get_raw_digest(DigestType.sha2_256)
                         except NotFoundError:
-                            log.info(
+                            self.log.info(
                                 "%s: SHA256 has not been computed yet;"
                                 " not downloading any more assets",
                                 asset.path,
@@ -136,7 +125,7 @@ class Downloader:
                 # Not `else`, as we want to "fall through" if `downloading`
                 # is negated above.
                 if not downloading:
-                    log.info("%s: Will download in a future run", asset.path)
+                    self.log.info("%s: Will download in a future run", asset.path)
                     self.tracker.mark_future(asset)
                     if (
                         asset.asset_type == AssetType.BLOB
@@ -145,7 +134,7 @@ class Downloader:
                         try:
                             asset.get_raw_digest(DigestType.sha2_256)
                         except NotFoundError:
-                            log.error(
+                            self.log.error(
                                 "%s: Asset created more than a day ago"
                                 " but SHA256 digest has not yet been computed",
                                 asset.path,
@@ -162,34 +151,34 @@ class Downloader:
             self.last_timestamp = maxdatetime(self.last_timestamp, asset.created)
             dest = self.repo / asset.path
             if not self.tracker.register_asset(asset, force=self.config.force):
-                log.debug(
+                self.log.debug(
                     "%s: metadata unchanged; not taking any further action",
                     asset.path,
                 )
                 self.tracker.finish_asset(asset.path)
                 return
             if not self.config.match_asset(asset.path):
-                log.debug("%s: Skipping asset", asset.path)
+                self.log.debug("%s: Skipping asset", asset.path)
                 self.tracker.finish_asset(asset.path)
                 return
-            log.info("%s: Syncing", asset.path)
+            self.log.info("%s: Syncing", asset.path)
             dest.parent.mkdir(parents=True, exist_ok=True)
             to_update = False
             if not (dest.exists() or dest.is_symlink()):
-                log.info("%s: Not in dataset; will add", asset.path)
+                self.log.info("%s: Not in dataset; will add", asset.path)
                 to_update = True
                 self.report.added += 1
             else:
-                log.debug("%s: About to fetch hash from annex", asset.path)
+                self.log.debug("%s: About to fetch hash from annex", asset.path)
                 if sha256_digest == await self.get_annex_hash(dest):
-                    log.info(
+                    self.log.info(
                         "%s: Asset in dataset, and hash shows no modification;"
                         " will not update",
                         asset.path,
                     )
                     self.tracker.finish_asset(asset.path)
                 else:
-                    log.info(
+                    self.log.info(
                         "%s: Asset in dataset, and hash shows modification;"
                         " will update",
                         asset.path,
@@ -200,7 +189,7 @@ class Downloader:
                 bucket_url = await self.get_file_bucket_url(asset)
                 dest.unlink(missing_ok=True)
                 if "text" not in tags_from_filename(asset.path):
-                    log.info(
+                    self.log.info(
                         "%s: File is binary; registering key with git-annex", asset.path
                     )
                     key = await self.annex.mkkey(
@@ -215,7 +204,7 @@ class Downloader:
                         and self.config.dandisets.remote is not None
                         and self.config.dandisets.remote.name not in remotes
                     ):
-                        log.info(
+                        self.log.info(
                             "%s: Not in backup remote %r",
                             asset.path,
                             self.config.dandisets.remote.name,
@@ -227,7 +216,7 @@ class Downloader:
                         f"{asset.path} identified as text but is {asset.size} bytes!"
                     )
                 else:
-                    log.info(
+                    self.log.info(
                         "%s: File is text; sending off for download from %s",
                         asset.path,
                         bucket_url,
@@ -262,7 +251,7 @@ class Downloader:
                 zarr_digest,
                 zarr_dspath,
                 self.config,
-                self.zarr_limit,
+                self.log.sublogger(f"Zarr {asset.zarr}"),
             )
             self.zarrs[asset.zarr] = ZarrLink(
                 zarr_dspath=zarr_dspath,
@@ -271,11 +260,11 @@ class Downloader:
             )
 
     async def get_file_bucket_url(self, asset: RemoteAsset) -> str:
-        log.debug("%s: Fetching bucket URL", asset.path)
+        self.log.debug("%s: Fetching bucket URL", asset.path)
         aws_url = asset.get_content_url(self.config.content_url_regex)
         urlbits = urlparse(aws_url)
         key = urlbits.path.lstrip("/")
-        log.debug("%s: About to query S3", asset.path)
+        self.log.debug("%s: About to query S3", asset.path)
         r = await arequest(
             self.s3client,
             "HEAD",
@@ -283,7 +272,7 @@ class Downloader:
         )
         r.raise_for_status()
         version_id = r.headers["x-amz-version-id"]
-        log.debug("%s: Got bucket URL", asset.path)
+        self.log.debug("%s: Got bucket URL", asset.path)
         return urlunparse(urlbits._replace(query=f"versionId={version_id}"))
 
     async def get_annex_hash(self, filepath: Path) -> str:
@@ -295,10 +284,10 @@ class Downloader:
         if os.path.islink(filepath) and ".git/annex/object" in realpath:
             return key2hash(os.path.basename(realpath))
         else:
-            log.debug(
+            self.log.debug(
                 "%s: Not under annex; calculating sha256 digest ourselves", filepath
             )
-            return await asha256(filepath)
+            return await self.asha256(filepath)
 
     async def feed_addurl(self) -> None:
         assert self.addurl.p.stdin is not None
@@ -306,17 +295,17 @@ class Downloader:
             async with self.download_receiver:
                 async for td in self.download_receiver:
                     self.in_progress[td.path] = td
-                    log.info("%s: Downloading from %s", td.path, td.url)
+                    self.log.info("%s: Downloading from %s", td.path, td.url)
                     await self.addurl.send(f"{td.url} {td.path}\n")
-                log.debug("Done feeding URLs to addurl")
+                self.log.debug("Done feeding URLs to addurl")
 
     async def read_addurl(self) -> None:
-        async with aclosing(aiter(self.addurl)) as lineiter:  # type: ignore[type-var]
+        async with aclosing(self.addurl) as lineiter:
             async for line in lineiter:
                 data = json.loads(line)
                 if "byte-progress" in data:
                     # Progress message
-                    log.info(
+                    self.log.info(
                         "%s: Downloaded %d / %s bytes (%s)",
                         data["action"]["file"],
                         data["byte-progress"],
@@ -325,10 +314,10 @@ class Downloader:
                     )
                 elif not data["success"]:
                     msg = format_errors(data["error-messages"])
-                    log.error("%s: download failed:%s", data["file"], msg)
+                    self.log.error("%s: download failed:%s", data["file"], msg)
                     self.in_progress.pop(data["file"])
                     if "exited 123" in msg:
-                        log.info(
+                        self.log.info(
                             "Will try `git add`ing %s manually later", data["file"]
                         )
                         self.need_add.append(data["file"])
@@ -337,7 +326,7 @@ class Downloader:
                 else:
                     path = data["file"]
                     key = data.get("key")
-                    log.info("%s: Finished downloading (key = %s)", path, key)
+                    self.log.info("%s: Finished downloading (key = %s)", path, key)
                     self.report.downloaded += 1
                     dl = self.in_progress.pop(path)
                     self.tracker.finish_asset(dl.path)
@@ -347,16 +336,16 @@ class Downloader:
                         dl.sha256_digest,
                         name=f"check_unannexed_hash:{dl.path}",
                     )
-        log.debug("Done reading from addurl")
+        self.log.debug("Done reading from addurl")
 
     async def register_url(self, path: str, key: str, url: str) -> None:
-        log.info("%s: Registering URL %s", path, url)
+        self.log.info("%s: Registering URL %s", path, url)
         await self.annex.register_url(key, url)
 
     async def check_unannexed_hash(self, asset_path: str, sha256_digest: str) -> None:
-        annex_hash = await asha256(self.repo / asset_path)
+        annex_hash = await self.asha256(self.repo / asset_path)
         if sha256_digest != annex_hash:
-            log.error(
+            self.log.error(
                 "%s: Hash mismatch!  Dandiarchive reports %s, local file has %s",
                 asset_path,
                 sha256_digest,
@@ -364,25 +353,33 @@ class Downloader:
             )
             self.report.hash_mismatches += 1
 
+    async def asha256(self, path: Path) -> str:
+        self.log.debug("Starting to compute sha256 digest of %s", path)
+        tp = anyio.Path(path)
+        digester = hashlib.sha256()
+        async with await tp.open("rb") as fp:
+            while True:
+                blob = await fp.read(65535)
+                if blob == b"":
+                    break
+                digester.update(blob)
+        self.log.debug("Finished computing sha256 digest of %s", path)
+        return digester.hexdigest()
+
 
 async def async_assets(
-    dandiset: RemoteDandiset, ds: Dataset, config: Config, tracker: AssetTracker
+    dandiset: RemoteDandiset,
+    ds: AsyncDataset,
+    config: BackupConfig,
+    tracker: AssetTracker,
+    log: PrefixedLogger,
 ) -> Report:
     done_flag = anyio.Event()
     total_report = Report()
-    async with aclosing(  # type: ignore[type-var]
-        aiterassets(dandiset, done_flag)
-    ) as aia:
+    async with aclosing(aiterassets(dandiset, done_flag)) as aia:
         while not done_flag.is_set():
-            # We need an outer nursery to use for creating git-annex processes,
-            # and we need an inner nursery for waiting for tasks to complete.
-            # We can't combine the two, because the processes need to outlive
-            # the `start_soon()` calls, so their scopes need to be outside the
-            # inner nursery, which means we have to have an outer nursery as
-            # well.
-            async with anyio.create_task_group() as annex_nursery:
+            try:
                 async with await open_git_annex(
-                    annex_nursery,
                     "addurl",
                     "--batch",
                     "--with-files",
@@ -393,33 +390,30 @@ async def async_assets(
                     "--json-progress",
                     "--raw",
                     path=ds.pathobj,
-                ) as p, AsyncAnnex(
-                    ds.pathobj, annex_nursery
-                ) as annex, httpx.AsyncClient() as s3client:
-                    try:
-                        async with anyio.create_task_group() as nursery:
-                            dm = Downloader(
-                                dandiset_id=dandiset.identifier,
-                                addurl=p,
-                                repo=ds.pathobj,
-                                config=config,
-                                tracker=tracker,
-                                s3client=s3client,
-                                annex=annex,
-                                nursery=nursery,
-                            )
-                            nursery.start_soon(dm.asset_loop, aia)
-                            nursery.start_soon(dm.feed_addurl)
-                            nursery.start_soon(dm.read_addurl)
-                    finally:
-                        tracker.dump()
+                ) as p, AsyncAnnex(ds.pathobj) as annex, httpx.AsyncClient(
+                    headers={"User-Agent": USER_AGENT}
+                ) as s3client, anyio.create_task_group() as nursery:
+                    dm = Downloader(
+                        dandiset_id=dandiset.identifier,
+                        addurl=p,
+                        repo=ds.pathobj,
+                        config=config,
+                        tracker=tracker,
+                        s3client=s3client,
+                        annex=annex,
+                        nursery=nursery,
+                        log=log,
+                    )
+                    nursery.start_soon(dm.asset_loop, aia)
+                    nursery.start_soon(dm.feed_addurl)
+                    nursery.start_soon(dm.read_addurl)
+            finally:
+                tracker.dump()
 
             for fpath in dm.need_add:
                 log.info("Manually running `git add %s`", fpath)
                 try:
-                    await anyio.run_process(
-                        ["git", "add", fpath], cwd=ds.path, stdout=None, stderr=None
-                    )
+                    await ds.call_git("add", fpath)
                 except subprocess.CalledProcessError:
                     log.error("Manual `git add %s` failed", fpath)
                     dm.report.failed += 1
@@ -451,15 +445,11 @@ async def async_assets(
                     elif ts is not None:
                         log.info("Zarr asset modified at %s; updating", asset_path)
                         dm.report.updated += 1
-                        zds = Dataset(ds.pathobj / asset_path)
+                        zds = AsyncDataset(ds.pathobj / asset_path)
                         if config.zarr_gh_org is not None:
-                            await anyio.to_thread.run_sync(
-                                partial(zds.update, how="ff-only", sibling="github")
-                            )
+                            await zds.update(how="ff-only", sibling="github")
                         else:
-                            await anyio.to_thread.run_sync(
-                                partial(zds.update, how="ff-only")
-                            )
+                            await zds.update(how="ff-only")
                         log.debug("Finished updating Zarr at %s", asset_path)
 
             if dandiset.version_id == "draft":
@@ -471,13 +461,13 @@ async def async_assets(
                         quantify(dm.report.downloaded, "asset"),
                     )
                     log.debug("Checking whether repository is dirty ...")
-                    if any(
-                        r["state"] != "clean" for r in ds.status(result_renderer=None)
-                    ):
+                    if await ds.is_unclean():
                         log.info("Committing changes")
                         assert timestamp is not None
-                        with custom_commit_date(timestamp):
-                            ds.save(message=dm.report.get_commit_message())
+                        await ds.save(
+                            message=dm.report.get_commit_message(),
+                            commit_date=timestamp,
+                        )
                         log.debug("Commit made")
                         total_report.commits += 1
                     else:
@@ -492,61 +482,33 @@ async def async_assets(
 
 async def aiterassets(
     dandiset: RemoteDandiset, done_flag: anyio.Event
-) -> AsyncIterator[Optional[RemoteAsset]]:
+) -> AsyncGenerator[Optional[RemoteAsset], None]:
     last_ts: Optional[datetime] = None
     if dandiset.version_id == "draft":
-        vs = [v for v in dandiset.get_versions() if v.identifier != "draft"]
+        vs = [v async for v in dandiset.aget_versions(include_draft=False)]
         vs.sort(key=attrgetter("created"))
         versions = deque(vs)
     else:
         versions = deque()
-    async with httpx.AsyncClient() as client:
-        url: Optional[
-            str
-        ] = f"{dandiset.client.api_url}{dandiset.version_api_path}assets/?order=created"
-        while url is not None:
-            r = await arequest(client, "GET", url)
-            data = r.json()
-            for item in data["results"]:
-                r = await arequest(
-                    client,
-                    "GET",
-                    f"{dandiset.client.api_url}/assets/{item['asset_id']}/",
-                )
-                metadata = r.json()
-                asset = RemoteAsset.from_data(dandiset, item, metadata)
-                assert last_ts is None or last_ts <= asset.created, (
-                    f"Asset {asset.path} created at {asset.created} but"
-                    f" returned after an asset created at {last_ts}!"
-                )
-                if (
-                    versions
-                    and (last_ts is None or last_ts < versions[0].created)
-                    and asset.created >= versions[0].created
-                ):
-                    log.info(
-                        "All assets up to creation of version %s found;"
-                        " will commit soon",
-                        versions[0].identifier,
-                    )
-                    versions.popleft()
-                    yield None
-                last_ts = asset.created
-                yield asset
-            url = data.get("next")
-    log.info("Finished getting assets from API")
+    async for asset in dandiset.aget_assets():
+        assert last_ts is None or last_ts <= asset.created, (
+            f"Asset {asset.path} created at {asset.created} but"
+            f" returned after an asset created at {last_ts}!"
+        )
+        if (
+            versions
+            and (last_ts is None or last_ts < versions[0].created)
+            and asset.created >= versions[0].created
+        ):
+            log.info(
+                "Dandiset %s: All assets up to creation of version %s found;"
+                " will commit soon",
+                dandiset.identifier,
+                versions[0].identifier,
+            )
+            versions.popleft()
+            yield None
+        last_ts = asset.created
+        yield asset
+    log.info("Dandiset %s: Finished getting assets from API", dandiset.identifier)
     done_flag.set()
-
-
-async def asha256(path: Path) -> str:
-    log.debug("Starting to compute sha256 digest of %s", path)
-    tp = anyio.Path(path)
-    digester = hashlib.sha256()
-    async with await tp.open("rb") as fp:
-        while True:
-            blob = await fp.read(65535)
-            if blob == b"":
-                break
-            digester.update(blob)
-    log.debug("Finished computing sha256 digest of %s", path)
-    return digester.hexdigest()

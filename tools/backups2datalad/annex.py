@@ -1,25 +1,33 @@
+from __future__ import annotations
+
 from collections import defaultdict
 from dataclasses import dataclass, field
 import json
 from pathlib import Path
-from typing import AsyncIterator, Dict, List, Optional
+import sys
+from typing import AsyncGenerator, Optional
 
 import anyio
-from anyio.streams.text import TextReceiveStream
 
-from .util import TextProcess, format_errors, log, open_git_annex
+from .aioutil import TextProcess, open_git_annex, stream_null_command
+from .logging import log
+from .util import format_errors
+
+if sys.version_info[:2] >= (3, 10):
+    from contextlib import aclosing
+else:
+    from async_generator import aclosing
 
 
 @dataclass
 class AsyncAnnex(anyio.abc.AsyncResource):
     repo: Path
-    nursery: anyio.abc.TaskGroup
     digest_type: str = "SHA256"
     pfromkey: Optional[TextProcess] = None
     pexaminekey: Optional[TextProcess] = None
     pwhereis: Optional[TextProcess] = None
     pregisterurl: Optional[TextProcess] = None
-    locks: Dict[str, anyio.Lock] = field(
+    locks: dict[str, anyio.Lock] = field(
         init=False, default_factory=lambda: defaultdict(anyio.Lock)
     )
 
@@ -32,7 +40,6 @@ class AsyncAnnex(anyio.abc.AsyncResource):
         async with self.locks["fromkey"]:
             if self.pfromkey is None:
                 self.pfromkey = await open_git_annex(
-                    self.nursery,
                     "fromkey",
                     "--force",
                     "--batch",
@@ -41,8 +48,8 @@ class AsyncAnnex(anyio.abc.AsyncResource):
                     path=self.repo,
                 )
             await self.pfromkey.send(f"{key} {path}\n")
-            ### TODO: Do something if readline() returns "" (signalling EOF)
-            r = json.loads(await self.pfromkey.readline())
+            ### TODO: Do something if receive() returns "" (signalling EOF)
+            r = json.loads(await self.pfromkey.receive())
         if not r["success"]:
             log.error(
                 "`git annex fromkey %s %s` call failed:%s",
@@ -56,7 +63,6 @@ class AsyncAnnex(anyio.abc.AsyncResource):
         async with self.locks["examinekey"]:
             if self.pexaminekey is None:
                 self.pexaminekey = await open_git_annex(
-                    self.nursery,
                     "examinekey",
                     "--batch",
                     f"--migrate-to-backend={self.digest_type}E",
@@ -65,24 +71,24 @@ class AsyncAnnex(anyio.abc.AsyncResource):
             await self.pexaminekey.send(
                 f"{self.digest_type}-s{size}--{digest} {filename}\n"
             )
-            ### TODO: Do something if readline() returns "" (signalling EOF)
-            return (await self.pexaminekey.readline()).strip()
+            ### TODO: Do something if receive() returns "" (signalling EOF)
+            return (await self.pexaminekey.receive()).strip()
 
-    async def get_key_remotes(self, key: str) -> Optional[List[str]]:
+    async def get_key_remotes(self, key: str) -> Optional[list[str]]:
         # Returns None if key is not known to git-annex
         async with self.locks["whereis"]:
             if self.pwhereis is None:
                 self.pwhereis = await open_git_annex(
-                    self.nursery,
                     "whereis",
                     "--batch-keys",
                     "--json",
                     "--json-error-messages",
                     path=self.repo,
+                    warn_on_fail=False,
                 )
             await self.pwhereis.send(f"{key}\n")
-            ### TODO: Do something if readline() returns "" (signalling EOF)
-            whereis = json.loads(await self.pwhereis.readline())
+            ### TODO: Do something if receive() returns "" (signalling EOF)
+            whereis = json.loads(await self.pwhereis.receive())
         if whereis["success"]:
             return [
                 w["description"].strip("[]")
@@ -95,7 +101,6 @@ class AsyncAnnex(anyio.abc.AsyncResource):
         async with self.locks["registerurl"]:
             if self.pregisterurl is None:
                 self.pregisterurl = await open_git_annex(
-                    self.nursery,
                     "registerurl",
                     "--batch",
                     "--json",
@@ -103,8 +108,8 @@ class AsyncAnnex(anyio.abc.AsyncResource):
                     path=self.repo,
                 )
             await self.pregisterurl.send(f"{key} {url}\n")
-            ### TODO: Do something if readline() returns "" (signalling EOF)
-            r = json.loads(await self.pregisterurl.readline())
+            ### TODO: Do something if receive() returns "" (signalling EOF)
+            r = json.loads(await self.pregisterurl.receive())
         if not r["success"]:
             log.error(
                 "`git annex registerurl %s %s` call failed:%s",
@@ -114,25 +119,17 @@ class AsyncAnnex(anyio.abc.AsyncResource):
             )
             ### TODO: Raise an exception?
 
-    async def list_files(self) -> AsyncIterator[str]:
-        async with await anyio.open_process(
-            ["git", "ls-tree", "-r", "--name-only", "-z", "HEAD"],
-            cwd=self.repo,
-            stderr=None,
+    async def list_files(self) -> AsyncGenerator[str, None]:
+        async with aclosing(
+            stream_null_command(
+                "git",
+                "ls-tree",
+                "-r",
+                "--name-only",
+                "-z",
+                "HEAD",
+                cwd=self.repo,
+            )
         ) as p:
-            buff = ""
-            assert p.stdout is not None
-            async for text in TextReceiveStream(p.stdout):
-                while True:
-                    try:
-                        i = text.index("\0")
-                    except ValueError:
-                        buff = text
-                        break
-                    else:
-                        yield buff + text[:i]
-                        buff = ""
-                        text = text[i + 1 :]
-            if buff:
-                yield buff
-            ### TODO: Raise an exception if p.returncode is nonzero?
+            async for fname in p:
+                yield fname

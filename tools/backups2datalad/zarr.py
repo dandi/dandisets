@@ -2,35 +2,25 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from functools import partial
 import os
 from pathlib import Path
-import subprocess
 import sys
-from typing import TYPE_CHECKING, AsyncIterator, Iterator, Optional, Set, Tuple, cast
+from typing import TYPE_CHECKING, AsyncGenerator, Iterator, Optional, cast
 from urllib.parse import quote
 
 from aiobotocore.session import get_session
 import anyio
 from botocore import UNSIGNED
-from botocore.client import Config as BotoConfig
+from botocore.client import Config
 from dandi.dandiapi import RemoteZarrAsset
-from datalad.api import Dataset
 from pydantic import BaseModel
 
+from .adataset import AsyncDataset
+from .aioutil import MiniFuture
 from .annex import AsyncAnnex
-from .config import Config, ResourceConfig
-from .util import (
-    MiniFuture,
-    create_github_sibling,
-    custom_commit_date,
-    init_dataset,
-    is_meta_file,
-    key2hash,
-    log,
-    maxdatetime,
-    quantify,
-)
+from .config import BackupConfig
+from .logging import PrefixedLogger
+from .util import is_meta_file, key2hash, maxdatetime, quantify
 
 if sys.version_info[:2] >= (3, 10):
     from contextlib import aclosing
@@ -65,7 +55,7 @@ class ZarrEntry:
         return self.path
 
     @property
-    def parts(self) -> Tuple[str, ...]:
+    def parts(self) -> tuple[str, ...]:
         return tuple(self.path.split("/"))
 
     @property
@@ -115,6 +105,7 @@ class ZarrSyncer:
     s3prefix: str = field(init=False)
     backup_remote: Optional[str]
     checksum: str
+    log: PrefixedLogger
     last_timestamp: Optional[datetime] = None
     report: ZarrReport = field(default_factory=ZarrReport)
 
@@ -126,12 +117,12 @@ class ZarrSyncer:
         async with aclosing(self.annex.list_files()) as fileiter:
             local_paths = {f async for f in fileiter if not is_meta_file(f)}
         async with get_session().create_client(
-            "s3", config=BotoConfig(signature_version=UNSIGNED)
+            "s3", config=Config(signature_version=UNSIGNED)
         ) as client:
             if not await self.needs_sync(client, last_sync, local_paths):
-                log.info("Zarr %s: backup up to date", self.zarr_id)
+                self.log.info("backup up to date")
                 return
-            log.info("Zarr %s: sync needed", self.zarr_id)
+            self.log.info("sync needed")
             async with aclosing(self.aiter_file_entries(client)) as ait:
                 async for entry in ait:
                     if is_meta_file(str(entry)):
@@ -139,22 +130,17 @@ class ZarrSyncer:
                             f"Zarr {self.zarr_id} contains file at meta path"
                             f" {str(entry)!r}"
                         )
-                    log.info("Zarr %s: %s: Syncing", self.zarr_id, entry)
+                    self.log.info("%s: Syncing", entry)
                     local_paths.discard(str(entry))
                     if last_sync is not None and entry.last_modified < last_sync:
-                        log.info(
-                            "Zarr %s: %s: file not modified since last backup",
-                            self.zarr_id,
-                            entry,
-                        )
+                        self.log.info("%s: file not modified since last backup", entry)
                         continue
                     dest = self.repo / str(entry)
                     if dest.is_dir():
                         # File path is replacing a directory, which needs to be
                         # deleted
-                        log.info(
-                            "Zarr %s: %s: deleting conflicting directory at same path",
-                            self.zarr_id,
+                        self.log.info(
+                            "%s: deleting conflicting directory at same path",
                             entry,
                         )
                         await anyio.to_thread.run_sync(self.rmtree, dest, local_paths)
@@ -162,11 +148,10 @@ class ZarrSyncer:
                         for ep in entry.parents:
                             pp = self.repo / ep
                             if pp.is_file() or pp.is_symlink():
-                                # Annexed file at parent path of `entry` needs to
-                                # be replaced with a directory
-                                log.info(
-                                    "Zarr %s: %s: deleting conflicting file path %s",
-                                    self.zarr_id,
+                                # Annexed file at parent path of `entry` needs
+                                # to be replaced with a directory
+                                self.log.info(
+                                    "%s: deleting conflicting file path %s",
                                     entry,
                                     ep,
                                 )
@@ -178,29 +163,21 @@ class ZarrSyncer:
                                 break
                     to_update = False
                     if not (dest.exists() or dest.is_symlink()):
-                        log.info(
-                            "Zarr %s: %s: Not in dataset; will add", self.zarr_id, entry
-                        )
+                        self.log.info("%s: Not in dataset; will add", entry)
                         to_update = True
                         self.report.added += 1
                     else:
-                        log.debug(
-                            "Zarr %s: %s: About to fetch hash from annex",
-                            self.zarr_id,
-                            entry,
-                        )
+                        self.log.debug("%s: About to fetch hash from annex", entry)
                         if entry.md5_digest == self.get_annex_hash(dest):
-                            log.info(
-                                "Zarr %s: %s: File in dataset, and hash shows no"
+                            self.log.info(
+                                "%s: File in dataset, and hash shows no"
                                 " modification; will not update",
-                                self.zarr_id,
                                 entry,
                             )
                         else:
-                            log.info(
-                                "Zarr %s: %s: Asset in dataset, and hash shows"
+                            self.log.info(
+                                "%s: Asset in dataset, and hash shows"
                                 " modification; will update",
-                                self.zarr_id,
                                 entry,
                             )
                             to_update = True
@@ -223,11 +200,8 @@ class ZarrSyncer:
                             and self.backup_remote is not None
                             and self.backup_remote not in remotes
                         ):
-                            log.info(
-                                "Zarr %s: %s: Not in backup remote %s",
-                                self.zarr_id,
-                                entry,
-                                self.backup_remote,
+                            self.log.info(
+                                "%s: Not in backup remote %s", entry, self.backup_remote
                             )
         old_checksum: Optional[str]
         try:
@@ -235,7 +209,7 @@ class ZarrSyncer:
         except FileNotFoundError:
             old_checksum = None
         if old_checksum != self.checksum:
-            log.info("Zarr %s: Updating checksum file", self.zarr_id)
+            self.log.info("Updating checksum file")
             (self.repo / CHECKSUM_FILE).parent.mkdir(exist_ok=True)
             (self.repo / CHECKSUM_FILE).write_text(f"{self.checksum}\n")
             self.report.checksum = True
@@ -272,7 +246,7 @@ class ZarrSyncer:
         (self.repo / SYNC_FILE).write_text(data.json(indent=4) + "\n")
 
     async def needs_sync(
-        self, client: S3Client, last_sync: Optional[datetime], local_paths: Set[str]
+        self, client: S3Client, last_sync: Optional[datetime], local_paths: set[str]
     ) -> bool:
         if last_sync is None:
             return True
@@ -291,46 +265,39 @@ class ZarrSyncer:
                 try:
                     local_paths.remove(path)
                 except KeyError:
-                    log.info(
-                        "Zarr %s: %s on server but not in backup",
-                        self.zarr_id,
-                        path,
-                    )
+                    self.log.info("%s on server but not in backup", path)
                     return True
                 if obj["LastModified"] > last_sync:
-                    log.info(
-                        "Zarr %s: %s was modified on server at %s, after last"
-                        " sync at %s",
-                        self.zarr_id,
+                    self.log.info(
+                        "%s was modified on server at %s, after last sync at %s",
                         path,
                         obj["LastModified"],
                         last_sync,
                     )
                     return True
         if local_paths:
-            log.info(
-                "Zarr %s: %s in local backup but no longer on server",
-                self.zarr_id,
+            self.log.info(
+                "%s in local backup but no longer on server",
                 quantify(len(local_paths), "file"),
             )
             return True
         return False
 
-    def rmtree(self, dirpath: Path, local_paths: Set[str]) -> None:
+    def rmtree(self, dirpath: Path, local_paths: set[str]) -> None:
         for p in list(dirpath.iterdir()):
             if p.is_dir():
                 self.rmtree(p, local_paths)
             else:
-                log.info("Zarr %s: deleting %s", self.zarr_id, p)
+                self.log.info("deleting %s", p)
                 p.unlink()
                 self.report.deleted += 1
                 local_paths.discard(p.relative_to(self.repo).as_posix())
         dirpath.rmdir()
 
-    def prune_deleted(self, local_paths: Set[str]) -> None:
-        log.info("Zarr %s: deleting extra files", self.zarr_id)
+    def prune_deleted(self, local_paths: set[str]) -> None:
+        self.log.info("deleting extra files")
         for path in local_paths:
-            log.info("Zarr %s: deleting %s", self.zarr_id, path)
+            self.log.info("deleting %s", path)
             p = self.repo / path
             p.unlink(missing_ok=True)
             self.report.deleted += 1
@@ -338,16 +305,18 @@ class ZarrSyncer:
             while d != self.repo and not any(d.iterdir()):
                 d.rmdir()
                 d = d.parent
-        log.info("Zarr %s: finished deleting extra files", self.zarr_id)
+        self.log.info("finished deleting extra files")
 
-    async def aiter_objects(self, client: S3Client) -> AsyncIterator[dict]:
+    async def aiter_objects(self, client: S3Client) -> AsyncGenerator[dict, None]:
         async for page in client.get_paginator("list_objects_v2").paginate(
             Bucket=self.s3bucket, Prefix=self.s3prefix
         ):
             for obj in page.get("Contents", []):
                 yield cast(dict, obj)
 
-    async def aiter_file_entries(self, client: S3Client) -> AsyncIterator[ZarrEntry]:
+    async def aiter_file_entries(
+        self, client: S3Client
+    ) -> AsyncGenerator[ZarrEntry, None]:
         leadlen = len(self.s3prefix)
         async for page in client.get_paginator("list_object_versions").paginate(
             Bucket=self.s3bucket, Prefix=self.s3prefix
@@ -382,7 +351,7 @@ class ZarrSyncer:
             raise RuntimeError(f"{filepath} unexpectedly not under git-annex")
 
     async def register_url(self, path: str, key: str, url: str) -> None:
-        log.info("Zarr %s: %s: Registering URL %s", self.zarr_id, path, url)
+        self.log.info("%s: Registering URL %s", path, url)
         await self.annex.register_url(key, url)
 
 
@@ -390,97 +359,70 @@ async def sync_zarr(
     asset: RemoteZarrAsset,
     checksum: str,
     dsdir: Path,
-    config: Config,
-    limit: Optional[anyio.CapacityLimiter] = None,
+    config: BackupConfig,
+    log: PrefixedLogger,
     ts_fut: Optional[MiniFuture[Optional[datetime]]] = None,
 ) -> None:
-    if limit is None:
-        # For use when calling sync_zarr() directly from a test, where we can't
-        # construct a CapacityLimiter outside of an async context.
-        limit = anyio.CapacityLimiter(1)
-    async with limit:
+    async with config.zarr_limit:
         assert config.zarrs is not None
-        ds = Dataset(dsdir)
-        if not ds.is_installed():
-            await anyio.to_thread.run_sync(init_zarr_dataset, ds, asset, config.zarrs)
-        async with anyio.create_task_group() as nursery:
-            async with AsyncAnnex(dsdir, nursery, digest_type="MD5") as annex:
-                if (r := config.zarrs.remote) is not None:
-                    backup_remote = r.name
-                else:
-                    backup_remote = None
-                zsync = ZarrSyncer(
-                    api_url=asset.client.api_url,
-                    zarr_id=asset.zarr,
-                    repo=dsdir,
-                    annex=annex,
-                    s3bucket=config.s3bucket,
-                    backup_remote=backup_remote,
-                    checksum=checksum,
+        ds = AsyncDataset(dsdir)
+        if await ds.ensure_installed(
+            desc=f"Zarr {asset.zarr}",
+            commit_date=asset.created,
+            backup_remote=config.zarrs.remote,
+            backend="MD5E",
+            cfg_proc=None,
+        ):
+            log.debug("Excluding .dandi/ from git-annex")
+            (ds.pathobj / ".dandi").mkdir(parents=True, exist_ok=True)
+            (ds.pathobj / ".dandi" / ".gitattributes").write_text(
+                "* annex.largefiles=nothing\n"
+            )
+            await ds.save(
+                message="Exclude .dandi/ from git-annex", commit_date=asset.created
+            )
+            if (zgh := config.zarrs.github_org) is not None:
+                log.debug("Creating GitHub sibling")
+                await ds.create_github_sibling(
+                    owner=zgh, name=asset.zarr, backup_remote=config.zarrs.remote
                 )
-                # Don't use `nursery.start_soon(zsync.run)`, as then the annex
-                # would be closed before the run() finished.
-                await zsync.run()
+            log.debug("Finished initializing dataset")
+        async with AsyncAnnex(dsdir, digest_type="MD5") as annex:
+            if (r := config.zarrs.remote) is not None:
+                backup_remote = r.name
+            else:
+                backup_remote = None
+            zsync = ZarrSyncer(
+                api_url=asset.client.api_url,
+                zarr_id=asset.zarr,
+                repo=dsdir,
+                annex=annex,
+                s3bucket=config.s3bucket,
+                backup_remote=backup_remote,
+                checksum=checksum,
+                log=log,
+            )
+            await zsync.run()
         report = zsync.report
         if report:
             summary = report.get_summary()
-            log.info("Zarr %s: %s; committing", asset.zarr, summary)
+            log.info("%s; committing", summary)
             if zsync.last_timestamp is None:
                 commit_ts = asset.created
             else:
                 commit_ts = zsync.last_timestamp
-            await anyio.to_thread.run_sync(
-                save, ds, commit_ts, f"[backups2datalad] {summary}"
-            )
-            log.debug("Zarr %s: Commit made", asset.zarr)
-            log.debug("Zarr %s: Running `git gc`", asset.zarr)
-            try:
-                await anyio.run_process(
-                    ["git", "gc"], cwd=ds.path, stdout=None, stderr=None
-                )
-            except subprocess.CalledProcessError as e:
-                if e.returncode == 128:
-                    log.warning("`git gc` in %s exited with code 128", ds.path)
-                else:
-                    raise
-            log.debug("Zarr %s: Finished running `git gc`", asset.zarr)
+            await ds.save(message=f"[backups2datalad] {summary}", commit_date=commit_ts)
+            log.debug("Commit made")
+            log.debug("Running `git gc`")
+            await ds.gc()
+            log.debug("Finished running `git gc`")
             if config.zarr_gh_org is not None:
-                log.debug("Zarr %s: Pushing to GitHub", asset.zarr)
-                await anyio.to_thread.run_sync(
-                    partial(ds.push, to="github", jobs=config.jobs, data="nothing")
-                )
-                log.debug("Zarr %s: Finished pushing to GitHub", asset.zarr)
+                log.debug("Pushing to GitHub")
+                await ds.push(to="github", jobs=config.jobs, data="nothing")
+                log.debug("Finished pushing to GitHub")
             if ts_fut is not None:
                 ts_fut.set(commit_ts)
         else:
-            log.info("Zarr %s: no changes; not committing", asset.zarr)
+            log.info("no changes; not committing")
             if ts_fut is not None:
                 ts_fut.set(None)
-
-
-def init_zarr_dataset(
-    ds: Dataset, asset: RemoteZarrAsset, zcfg: ResourceConfig
-) -> None:
-    init_dataset(
-        ds,
-        desc=f"Zarr {asset.zarr}",
-        commit_date=asset.created,
-        backup_remote=zcfg.remote,
-        backend="MD5E",
-        cfg_proc=None,
-    )
-    log.debug("Zarr %s: Excluding .dandi/ from git-annex", asset.zarr)
-    ds.repo.set_gitattributes(
-        [("*", {"annex.largefiles": "nothing"})], attrfile=".dandi/.gitattributes"
-    )
-    with custom_commit_date(asset.created):
-        ds.save(message="Exclude .dandi/ from git-annex")
-    if (zgh := zcfg.github_org) is not None:
-        log.debug("Zarr %s: Creating GitHub sibling", asset.zarr)
-        create_github_sibling(ds, owner=zgh, name=asset.zarr, backup_remote=zcfg.remote)
-    log.debug("Zarr %s: Finished initializing dataset", asset.zarr)
-
-
-def save(ds: Dataset, commit_date: datetime, commit_msg: str) -> None:
-    with custom_commit_date(commit_date):
-        ds.save(message=commit_msg)

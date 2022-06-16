@@ -1,24 +1,30 @@
+from __future__ import annotations
+
 import logging
 from operator import itemgetter
 from pathlib import Path
 from shutil import rmtree
 from typing import Optional
 
-import anyio
 from conftest import SampleDandiset
 from dandi.utils import find_files
 from datalad.api import Dataset
 from datalad.tests.utils import assert_repo_status
 import numpy as np
+import pytest
 from test_util import GitRepo
 import zarr
 
-from backups2datalad.config import Config, ResourceConfig
+from backups2datalad.adataset import AsyncDataset
+from backups2datalad.config import BackupConfig, ResourceConfig
 from backups2datalad.datasetter import DandiDatasetter, DandisetStats
+from backups2datalad.logging import log as plog
 from backups2datalad.util import is_meta_file
 from backups2datalad.zarr import CHECKSUM_FILE, sync_zarr
 
 log = logging.getLogger("test_backups2datalad.test_zarr")
+
+pytestmark = pytest.mark.anyio
 
 
 def check_zarr(
@@ -50,28 +56,29 @@ def check_zarr(
     assert zarrds.repo.is_under_annex([str(CHECKSUM_FILE)]) == [False]
 
 
-def test_sync_zarr(new_dandiset: SampleDandiset, tmp_path: Path) -> None:
+async def test_sync_zarr(new_dandiset: SampleDandiset, tmp_path: Path) -> None:
     zarr_path = new_dandiset.dspath / "sample.zarr"
     zarr.save(zarr_path, np.arange(1000), np.arange(1000, 0, -1))
-    new_dandiset.upload()
-    asset = new_dandiset.dandiset.get_asset_by_path("sample.zarr")
+    await new_dandiset.upload()
+    asset = await new_dandiset.dandiset.aget_asset_by_path("sample.zarr")
     checksum = asset.get_digest().value
-    config = Config(
+    config = BackupConfig(
         s3bucket="dandi-api-staging-dandisets", zarrs=ResourceConfig(path="zarrs")
     )
-    anyio.run(sync_zarr, asset, checksum, tmp_path, config)
+    await sync_zarr(asset, checksum, tmp_path, config, plog)
     check_zarr(zarr_path, Dataset(tmp_path), checksum)
 
 
-def test_backup_zarr(new_dandiset: SampleDandiset, tmp_path: Path) -> None:
+async def test_backup_zarr(new_dandiset: SampleDandiset, tmp_path: Path) -> None:
     zarr_path = new_dandiset.dspath / "sample.zarr"
     zarr.save(zarr_path, np.arange(1000), np.arange(1000, 0, -1))
     (new_dandiset.dspath / "file.txt").write_text("This is test text.\n")
-    new_dandiset.upload()
-    asset = new_dandiset.dandiset.get_asset_by_path("sample.zarr")
+    await new_dandiset.upload()
+    asset = await new_dandiset.dandiset.aget_asset_by_path("sample.zarr")
+
     di = DandiDatasetter(
         dandi_client=new_dandiset.client,
-        config=Config(
+        config=BackupConfig(
             backup_root=tmp_path,
             dandi_instance="dandi-staging",
             s3bucket="dandi-api-staging-dandisets",
@@ -81,7 +88,7 @@ def test_backup_zarr(new_dandiset: SampleDandiset, tmp_path: Path) -> None:
     )
     dandiset_id = new_dandiset.dandiset_id
     log.info("test_backup_zarr: Syncing Zarr dandiset")
-    di.update_from_backup([dandiset_id])
+    await di.update_from_backup([dandiset_id])
 
     zarrds = Dataset(tmp_path / "zarrs" / asset.zarr)
     check_zarr(zarr_path, zarrds, checksum=asset.get_digest().value)
@@ -105,13 +112,13 @@ def test_backup_zarr(new_dandiset: SampleDandiset, tmp_path: Path) -> None:
         "sample.zarr",
     }
 
-    assert di.get_dandiset_stats(ds) == (
+    assert await di.get_dandiset_stats(AsyncDataset(ds.pathobj)) == (
         DandisetStats(files=6, size=1535),
         {asset.zarr: DandisetStats(files=5, size=1516)},
     )
 
     log.info("test_backup_zarr: Syncing unmodified Zarr dandiset")
-    di.update_from_backup([dandiset_id])
+    await di.update_from_backup([dandiset_id])
 
     check_zarr(zarr_path, zarrds, checksum=asset.get_digest().value)
     (submod,) = ds.repo.get_submodules_()
@@ -140,11 +147,11 @@ def test_backup_zarr(new_dandiset: SampleDandiset, tmp_path: Path) -> None:
 
     rmtree(zarr_path)
     zarr.save(zarr_path, np.eye(5))
-    new_dandiset.upload()
+    await new_dandiset.upload()
     log.info("test_backup_zarr: Syncing modified Zarr dandiset")
-    di.update_from_backup([dandiset_id])
+    await di.update_from_backup([dandiset_id])
 
-    asset = new_dandiset.dandiset.get_asset_by_path("sample.zarr")
+    asset = await new_dandiset.dandiset.aget_asset_by_path("sample.zarr")
     check_zarr(zarr_path, zarrds, checksum=asset.get_digest().value)
     (submod,) = ds.repo.get_submodules_()
     assert submod["path"] == ds.pathobj / "sample.zarr"
@@ -160,7 +167,7 @@ def test_backup_zarr(new_dandiset: SampleDandiset, tmp_path: Path) -> None:
     assert zarrgit.get_commit_count() == 4
 
 
-def test_backup_zarr_entry_conflicts(
+async def test_backup_zarr_entry_conflicts(
     new_dandiset: SampleDandiset, tmp_path: Path
 ) -> None:
     zarr_path = new_dandiset.dspath / "sample.zarr"
@@ -168,11 +175,11 @@ def test_backup_zarr_entry_conflicts(
     (zarr_path / "changed01").mkdir()
     (zarr_path / "changed01" / "file.txt").write_text("This is test text.\n")
     (zarr_path / "changed02").write_text("This is also test text.\n")
-    new_dandiset.upload()
+    await new_dandiset.upload()
 
     di = DandiDatasetter(
         dandi_client=new_dandiset.client,
-        config=Config(
+        config=BackupConfig(
             backup_root=tmp_path,
             dandi_instance="dandi-staging",
             s3bucket="dandi-api-staging-dandisets",
@@ -182,9 +189,9 @@ def test_backup_zarr_entry_conflicts(
     )
     dandiset_id = new_dandiset.dandiset_id
     log.info("test_backup_zarr_entry_conflicts: Syncing Zarr dandiset")
-    di.update_from_backup([dandiset_id])
+    await di.update_from_backup([dandiset_id])
 
-    asset = new_dandiset.dandiset.get_asset_by_path("sample.zarr")
+    asset = await new_dandiset.dandiset.aget_asset_by_path("sample.zarr")
     zarrds = Dataset(tmp_path / "zarrs" / asset.zarr)
     check_zarr(zarr_path, zarrds, checksum=asset.get_digest().value)
 
@@ -195,23 +202,25 @@ def test_backup_zarr_entry_conflicts(
     (zarr_path / "changed02" / "file.txt").write_text(
         "The parent is now a directory.\n"
     )
-    new_dandiset.upload()
+    await new_dandiset.upload()
 
     log.info("test_backup_zarr_entry_conflicts: Syncing modified Zarr dandiset")
-    di.update_from_backup([dandiset_id])
+    await di.update_from_backup([dandiset_id])
 
-    asset = new_dandiset.dandiset.get_asset_by_path("sample.zarr")
+    asset = await new_dandiset.dandiset.aget_asset_by_path("sample.zarr")
     check_zarr(zarr_path, zarrds, checksum=asset.get_digest().value)
 
 
-def test_backup_zarr_delete_zarr(new_dandiset: SampleDandiset, tmp_path: Path) -> None:
+async def test_backup_zarr_delete_zarr(
+    new_dandiset: SampleDandiset, tmp_path: Path
+) -> None:
     zarr_path = new_dandiset.dspath / "sample.zarr"
     zarr.save(zarr_path, np.arange(1000), np.arange(1000, 0, -1))
-    new_dandiset.upload()
+    await new_dandiset.upload()
 
     di = DandiDatasetter(
         dandi_client=new_dandiset.client,
-        config=Config(
+        config=BackupConfig(
             backup_root=tmp_path,
             dandi_instance="dandi-staging",
             s3bucket="dandi-api-staging-dandisets",
@@ -219,46 +228,51 @@ def test_backup_zarr_delete_zarr(new_dandiset: SampleDandiset, tmp_path: Path) -
             zarrs=ResourceConfig(path="zarrs"),
         ),
     )
+
     dandiset_id = new_dandiset.dandiset_id
 
     log.info("test_backup_zarr_delete_zarr: Syncing Zarr dandiset")
-    di.update_from_backup([dandiset_id])
+    await di.update_from_backup([dandiset_id])
 
-    asset = new_dandiset.dandiset.get_asset_by_path("sample.zarr")
-    asset.delete()
+    asset = await new_dandiset.dandiset.aget_asset_by_path("sample.zarr")
+    await new_dandiset.client.delete(asset.api_path)
 
     log.info("test_backup_zarr_delete_zarr: Syncing Zarr dandiset after deleting Zarr")
-    di.update_from_backup([dandiset_id])
+    await di.update_from_backup([dandiset_id])
     assert not (tmp_path / "ds" / dandiset_id / "sample.zarr").exists()
     gitrepo = GitRepo(tmp_path / "ds" / dandiset_id)
     assert gitrepo.get_commit_subject("HEAD") == "[backups2datalad] 1 file deleted"
 
 
-def test_backup_zarr_pathological(new_dandiset: SampleDandiset, tmp_path: Path) -> None:
+async def test_backup_zarr_pathological(
+    new_dandiset: SampleDandiset, tmp_path: Path
+) -> None:
     zarr_path = new_dandiset.dspath / "sample.zarr"
     zarr.save(zarr_path, np.arange(1000), np.arange(1000, 0, -1))
-    new_dandiset.upload()
+    await new_dandiset.upload()
 
     client = new_dandiset.client
     dandiset_id = new_dandiset.dandiset_id
-    asset = new_dandiset.dandiset.get_asset_by_path("sample.zarr")
+    asset = await new_dandiset.dandiset.aget_asset_by_path("sample.zarr")
     sample_zarr_id = asset.zarr
 
-    client.post(
+    await client.post(
         f"{new_dandiset.dandiset.version_api_path}assets/",
         json={"metadata": {"path": "link.zarr"}, "zarr_id": sample_zarr_id},
     )
 
-    r = client.post("/zarr/", json={"name": "empty.zarr", "dandiset": dandiset_id})
+    r = await client.post(
+        "/zarr/", json={"name": "empty.zarr", "dandiset": dandiset_id}
+    )
     empty_zarr_id = r["zarr_id"]
-    client.post(
+    await client.post(
         f"{new_dandiset.dandiset.version_api_path}assets/",
         json={"metadata": {"path": "empty.zarr"}, "zarr_id": empty_zarr_id},
     )
 
     di = DandiDatasetter(
         dandi_client=new_dandiset.client,
-        config=Config(
+        config=BackupConfig(
             backup_root=tmp_path,
             dandi_instance="dandi-staging",
             s3bucket="dandi-api-staging-dandisets",
@@ -268,7 +282,7 @@ def test_backup_zarr_pathological(new_dandiset: SampleDandiset, tmp_path: Path) 
     )
 
     log.info("test_backup_zarr_pathological: Syncing Zarr dandiset")
-    di.update_from_backup([dandiset_id])
+    await di.update_from_backup([dandiset_id])
 
     sample_zarrds = Dataset(tmp_path / "zarrs" / sample_zarr_id)
     check_zarr(zarr_path, sample_zarrds, checksum=asset.get_digest().value)

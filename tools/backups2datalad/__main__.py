@@ -1,24 +1,24 @@
 from __future__ import annotations
 
+from functools import partial
 import json
 import logging
 from pathlib import Path
 import re
-import shlex
-import subprocess
 import sys
-from typing import Optional, Sequence
+from typing import AsyncGenerator, Optional, Sequence
 
-import anyio
-import click
-from click_loglevel import LogLevel
+import asyncclick as click
 from dandi.consts import DANDISET_ID_REGEX
-from dandi.dandiapi import DandiAPIClient
 from datalad.api import Dataset
 
-from .config import Config
+from .adandi import AsyncDandiClient
+from .adataset import AsyncDataset
+from .aioutil import open_git_annex, pool_amap
+from .config import BackupConfig
 from .datasetter import DandiDatasetter
-from .util import TextProcess, aiter, format_errors, log, pdb_excepthook, quantify
+from .logging import log
+from .util import format_errors, pdb_excepthook, quantify
 
 
 @click.group()
@@ -41,9 +41,10 @@ from .util import TextProcess, aiter, format_errors, log, pdb_excepthook, quanti
 @click.option(
     "-l",
     "--log-level",
-    type=LogLevel(),
+    type=click.Choice(["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"]),
     default="INFO",
-    help="Set logging level  [default: INFO]",
+    help="Set logging level",
+    show_default=True,
 )
 @click.option("--pdb", is_flag=True, help="Drop into debugger if an error occurs")
 @click.option(
@@ -52,40 +53,38 @@ from .util import TextProcess, aiter, format_errors, log, pdb_excepthook, quanti
     help="Log backups2datalad at DEBUG and all other loggers at INFO",
 )
 @click.pass_context
-def main(
+async def main(
     ctx: click.Context,
     jobs: Optional[int],
-    log_level: int,
+    log_level: str,
     pdb: bool,
     quiet_debug: bool,
     backup_root: Path,
     config: Optional[Path],
 ) -> None:
     if config is None:
-        cfg = Config()
+        cfg = BackupConfig()
     else:
-        cfg = Config.load_yaml(config)
+        cfg = BackupConfig.load_yaml(config)
     if backup_root is not None:
         cfg.backup_root = backup_root
     if jobs is not None:
         cfg.jobs = jobs
     ctx.obj = DandiDatasetter(
-        dandi_client=ctx.with_resource(
-            DandiAPIClient.for_dandi_instance(cfg.dandi_instance)
-        ),
+        dandi_client=AsyncDandiClient.for_dandi_instance(cfg.dandi_instance),
         config=cfg,
     )
     if pdb:
         sys.excepthook = pdb_excepthook
     if quiet_debug:
         log.setLevel(logging.DEBUG)
-        log_level = logging.INFO
+        log_level = "INFO"
     logging.basicConfig(
         format="%(asctime)s [%(levelname)-8s] %(name)s: %(message)s",
         datefmt="%Y-%m-%dT%H:%M:%S%z",
-        level=log_level,
+        level=getattr(logging, log_level),
     )
-    ctx.obj.debug_logfile()
+    await ctx.obj.debug_logfile()
 
 
 @main.command()
@@ -113,23 +112,28 @@ def main(
     default=None,
     help="Enable/disable creation of tags for releases  [default: enabled]",
 )
+@click.option("-w", "--workers", type=int, help="Number of workers to run in parallel")
 @click.argument("dandisets", nargs=-1)
 @click.pass_obj
-def update_from_backup(
+async def update_from_backup(
     datasetter: DandiDatasetter,
     dandisets: Sequence[str],
     exclude: Optional[re.Pattern[str]],
     tags: Optional[bool],
     asset_filter: Optional[re.Pattern[str]],
     force: Optional[str],
+    workers: Optional[int],
 ) -> None:
-    if asset_filter is not None:
-        datasetter.config.asset_filter = asset_filter
-    if force is not None:
-        datasetter.config.force = force
-    if tags is not None:
-        datasetter.config.enable_tags = tags
-    datasetter.update_from_backup(dandisets, exclude=exclude)
+    async with datasetter:
+        if asset_filter is not None:
+            datasetter.config.asset_filter = asset_filter
+        if force is not None:
+            datasetter.config.force = force
+        if tags is not None:
+            datasetter.config.enable_tags = tags
+        if workers is not None:
+            datasetter.config.workers = workers
+        await datasetter.update_from_backup(dandisets, exclude=exclude)
 
 
 @main.command()
@@ -142,7 +146,7 @@ def update_from_backup(
 )
 @click.argument("dandisets", nargs=-1)
 @click.pass_obj
-def update_github_metadata(
+async def update_github_metadata(
     datasetter: DandiDatasetter,
     dandisets: Sequence[str],
     exclude: Optional[re.Pattern[str]],
@@ -155,7 +159,8 @@ def update_github_metadata(
     `--target` must point to a clone of the superdataset in which every
     Dandiset subdataset is installed.
     """
-    datasetter.update_github_metadata(dandisets, exclude=exclude)
+    async with datasetter:
+        await datasetter.update_github_metadata(dandisets, exclude=exclude)
 
 
 @main.command()
@@ -176,7 +181,7 @@ def update_github_metadata(
 @click.argument("dandiset")
 @click.argument("version")
 @click.pass_obj
-def release(
+async def release(
     datasetter: DandiDatasetter,
     dandiset: str,
     version: str,
@@ -185,15 +190,18 @@ def release(
     asset_filter: Optional[re.Pattern[str]],
     force: Optional[str],
 ) -> None:
-    if asset_filter is not None:
-        datasetter.config.asset_filter = asset_filter
-    if force is not None:
-        datasetter.config.force = force
-    dandiset_obj = datasetter.dandi_client.get_dandiset(dandiset, version)
-    dataset = Dataset(datasetter.config.dandiset_root / dandiset)
-    datasetter.mkrelease(dandiset_obj, dataset, commitish=commitish, push=push)
-    if push:
-        dataset.push(to="github", jobs=datasetter.config.jobs)
+    async with datasetter:
+        if asset_filter is not None:
+            datasetter.config.asset_filter = asset_filter
+        if force is not None:
+            datasetter.config.force = force
+        dandiset_obj = await datasetter.dandi_client.get_dandiset(dandiset, version)
+        dataset = AsyncDataset(datasetter.config.dandiset_root / dandiset)
+        await datasetter.mkrelease(
+            dandiset_obj, dataset, commitish=commitish, push=push
+        )
+        if push:
+            await dataset.push(to="github", jobs=datasetter.config.jobs)
 
 
 @main.command("populate")
@@ -204,76 +212,94 @@ def release(
     metavar="REGEX",
     type=re.compile,
 )
+@click.option("-w", "--workers", type=int, help="Number of workers to run in parallel")
 @click.argument("dandisets", nargs=-1)
 @click.pass_obj
-def populate_cmd(
+async def populate_cmd(
     datasetter: DandiDatasetter,
     dandisets: Sequence[str],
     exclude: Optional[re.Pattern[str]],
+    workers: Optional[int],
 ) -> None:
-    if (r := datasetter.config.dandisets.remote) is not None:
-        backup_remote = r.name
-    else:
-        raise click.UsageError("dandisets.remote not set in config file")
-    if dandisets:
-        dirs = [datasetter.config.dandiset_root / d for d in dandisets]
-    else:
-        dirs = list(datasetter.config.dandiset_root.iterdir())
-    for p in dirs:
-        if p.is_dir() and re.fullmatch(DANDISET_ID_REGEX, p.name):
-            if exclude is not None and exclude.search(p.name):
-                log.debug("Skipping dandiset %s", p.name)
-            else:
-                ds = Dataset(p)
-                if not ds.is_installed():
-                    log.info("Dataset %s is not installed; skipping", p.name)
-                else:
-                    anyio.run(
-                        populate,
-                        ds.pathobj,
-                        backup_remote,
-                        f"Dandiset {p.name}",
-                        datasetter.config.jobs,
-                    )
+    async with datasetter:
+        if (r := datasetter.config.dandisets.remote) is not None:
+            backup_remote = r.name
         else:
-            log.debug("Skipping non-Dandiset node %s", p.name)
+            raise click.UsageError("dandisets.remote not set in config file")
+        if workers is not None:
+            datasetter.config.workers = workers
+        if dandisets:
+            diriter = (datasetter.config.dandiset_root / d for d in dandisets)
+        else:
+            diriter = datasetter.config.dandiset_root.iterdir()
+        dirs: list[Path] = []
+        for p in diriter:
+            if p.is_dir() and re.fullmatch(DANDISET_ID_REGEX, p.name):
+                if exclude is not None and exclude.search(p.name):
+                    log.debug("Skipping dandiset %s", p.name)
+                else:
+                    dirs.append(p)
+            else:
+                log.debug("Skipping non-Dandiset node %s", p.name)
+        report = await pool_amap(
+            partial(
+                populate,
+                backup_remote=backup_remote,
+                pathtype="Dandiset",
+                jobs=datasetter.config.jobs,
+            ),
+            afilter_installed(dirs),
+            workers=datasetter.config.workers,
+        )
+        if report.failed:
+            sys.exit(f"{quantify(len(report.failed), 'populate job')} failed")
 
 
 @main.command()
+@click.option("-w", "--workers", type=int, help="Number of workers to run in parallel")
 @click.argument("zarrs", nargs=-1)
 @click.pass_obj
-def populate_zarrs(datasetter: DandiDatasetter, zarrs: Sequence[str]) -> None:
-    zcfg = datasetter.config.zarrs
-    if zcfg is None:
-        raise click.UsageError("Zarr backups not configured in config file")
-    if (r := zcfg.remote) is not None:
-        backup_remote = r.name
-    else:
-        raise click.UsageError("zarrs.remote not set in config file")
-    zarr_root = datasetter.config.zarr_root
-    assert zarr_root is not None
-    if zarrs:
-        dirs = [zarr_root / z for z in zarrs]
-    else:
-        dirs = list(zarr_root.iterdir())
-    for p in dirs:
-        if p.is_dir() and p.name not in (".git", ".datalad"):
-            ds = Dataset(p)
-            if not ds.is_installed():
-                log.info("Zarr %s is not installed; skipping", p.name)
-            else:
-                anyio.run(
-                    populate,
-                    ds.pathobj,
-                    backup_remote,
-                    f"Zarr {p.name}",
-                    datasetter.config.jobs,
-                )
+async def populate_zarrs(
+    datasetter: DandiDatasetter, zarrs: Sequence[str], workers: Optional[int]
+) -> None:
+    async with datasetter:
+        zcfg = datasetter.config.zarrs
+        if zcfg is None:
+            raise click.UsageError("Zarr backups not configured in config file")
+        if (r := zcfg.remote) is not None:
+            backup_remote = r.name
         else:
-            log.debug("Skipping non-Zarr node %s", p.name)
+            raise click.UsageError("zarrs.remote not set in config file")
+        if workers is not None:
+            datasetter.config.workers = workers
+        zarr_root = datasetter.config.zarr_root
+        assert zarr_root is not None
+        if zarrs:
+            diriter = (zarr_root / z for z in zarrs)
+        else:
+            diriter = zarr_root.iterdir()
+        dirs: list[Path] = []
+        for p in diriter:
+            if p.is_dir() and p.name not in (".git", ".datalad"):
+                dirs.append(p)
+            else:
+                log.debug("Skipping non-Zarr node %s", p.name)
+        report = await pool_amap(
+            partial(
+                populate,
+                backup_remote=backup_remote,
+                pathtype="Zarr",
+                jobs=datasetter.config.jobs,
+            ),
+            afilter_installed(dirs),
+            workers=datasetter.config.workers,
+        )
+        if report.failed:
+            sys.exit(f"{quantify(len(report.failed), 'populate-zarr job')} failed")
 
 
-async def populate(dirpath: Path, backup_remote: str, desc: str, jobs: int) -> None:
+async def populate(dirpath: Path, backup_remote: str, pathtype: str, jobs: int) -> None:
+    desc = f"{pathtype} {dirpath.name}"
     log.info("Downloading files for %s", desc)
     await call_annex_json(
         "get",
@@ -317,18 +343,17 @@ async def populate(dirpath: Path, backup_remote: str, desc: str, jobs: int) -> N
 
 
 async def call_annex_json(cmd: str, *args: str, path: Path) -> None:
-    cmd_full = ["git-annex", cmd, *args, "--json", "--json-error-messages"]
-    log.debug("Running %s", shlex.join(cmd_full))
     success = 0
     failed = 0
-    async with await anyio.open_process(
-        cmd_full,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=None,
-        cwd=path,
-    ) as p0, TextProcess(p0, name=cmd) as p:
-        async for line in aiter(p):
+    async with await open_git_annex(
+        cmd,
+        *args,
+        "--json",
+        "--json-error-messages",
+        use_stdin=False,
+        path=path,
+    ) as p:
+        async for line in p:
             data = json.loads(line)
             if data["success"]:
                 success += 1
@@ -350,5 +375,14 @@ async def call_annex_json(cmd: str, *args: str, path: Path) -> None:
         raise RuntimeError(f"git-annex {cmd} failed for {quantify(failed, 'file')}")
 
 
+async def afilter_installed(datasets: list[Path]) -> AsyncGenerator[Path, None]:
+    for p in datasets:
+        ds = Dataset(p)
+        if not ds.is_installed():
+            log.info("Dataset %s is not installed; skipping", p.name)
+        else:
+            yield p
+
+
 if __name__ == "__main__":
-    main()
+    main(_anyio_backend="asyncio")
