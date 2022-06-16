@@ -7,6 +7,7 @@ eval python -m tools.backups2datalad \
    -l WARNING \
    --backup-root "$backup_root" \
    --config tools/backups2datalad.cfg.yaml \
+   --workers 5 \
    update-from-backup \
    -e '000108$' \
    "$*" 2>&1 | grep -v 'nothing to save, working tree clean'
