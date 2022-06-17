@@ -159,9 +159,7 @@ class AsyncDataset:
             stream_null_command(
                 "git",
                 "ls-tree",
-                "-r",
-                "--format=%(objecttype):%(objectsize):%(path)",
-                "-z",
+                "-lrz",
                 "HEAD",
                 cwd=self.pathobj,
             )
@@ -228,7 +226,8 @@ class FileStat:
 
     @classmethod
     def from_entry(cls, entry: str) -> FileStat:
-        typename, sizestr, path = entry.split(":", maxsplit=2)
+        stats, _, path = entry.partition("\t")
+        _, typename, _, sizestr = stats.split()
         return cls(
             path=path,
             type=ObjectType(typename),
