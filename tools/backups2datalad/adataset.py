@@ -13,6 +13,7 @@ from typing import Any, Optional, Sequence, cast
 
 import anyio
 from datalad.api import Dataset
+from datalad.runner.exception import CommandError
 
 from .aioutil import areadcmd, aruncmd, open_git_annex, stream_null_command
 from .config import Remote
@@ -126,10 +127,26 @@ class AsyncDataset:
         )
 
     async def push(self, to: str, jobs: int, data: Optional[str] = None) -> None:
-        # TODO: Improve
-        await anyio.to_thread.run_sync(
-            partial(self.ds.push, to=to, jobs=jobs, data=data)
-        )
+        i = 0
+        while True:
+            try:
+                # TODO: Improve
+                await anyio.to_thread.run_sync(
+                    partial(self.ds.push, to=to, jobs=jobs, data=data)
+                )
+            except CommandError as e:
+                if "unexpected disconnect" in str(e):
+                    i += 1
+                    if i < 3:
+                        log.warning(
+                            "Push of dataset at %s failed with unexpected"
+                            " disconnect; retrying",
+                            self.path,
+                        )
+                        continue
+                raise
+            else:
+                break
 
     async def gc(self) -> None:
         try:
@@ -159,9 +176,7 @@ class AsyncDataset:
             stream_null_command(
                 "git",
                 "ls-tree",
-                "-r",
-                "--format=%(objecttype):%(objectsize):%(path)",
-                "-z",
+                "-lrz",
                 "HEAD",
                 cwd=self.pathobj,
             )
@@ -228,7 +243,8 @@ class FileStat:
 
     @classmethod
     def from_entry(cls, entry: str) -> FileStat:
-        typename, sizestr, path = entry.split(":", maxsplit=2)
+        stats, _, path = entry.partition("\t")
+        _, typename, _, sizestr = stats.split()
         return cls(
             path=path,
             type=ObjectType(typename),
