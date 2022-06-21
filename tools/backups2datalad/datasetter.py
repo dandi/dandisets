@@ -74,15 +74,16 @@ class DandiDatasetter(AsyncResource):
             if self.config.gh_org:
                 assert stats is not None
                 ds_stats.append(stats)
-        log.debug("Committing superdataset")
-        await superds.save(message="CRON update", path=to_save)
-        log.debug("Superdataset committed")
-        if self.config.gh_org is not None and not dandiset_ids and exclude is None:
-            await self.set_superds_description(superds, ds_stats)
+        if to_save:
+            log.debug("Committing superdataset")
+            await superds.save(message="CRON update", path=to_save)
+            log.debug("Superdataset committed")
         if report.failed:
             raise RuntimeError(
                 f"Backups for {quantify(len(report.failed), 'Dandiset')} failed"
             )
+        elif self.config.gh_org is not None and not dandiset_ids and exclude is None:
+            await self.set_superds_description(superds, ds_stats)
 
     async def init_dataset(
         self, dsdir: Path, dandiset_id: str, create_time: datetime
