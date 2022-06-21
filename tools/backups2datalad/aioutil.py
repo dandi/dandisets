@@ -74,7 +74,7 @@ class TextProcess(anyio.abc.ObjectStream[str]):
     async def receive(self) -> str:
         if self.done:
             raise anyio.EndOfStream()
-        if self.p.returncode is not None:
+        if self.p.returncode not in (None, 0):
             raise RuntimeError(
                 f"{self.desc} command suddenly exited with return code"
                 f" {self.p.returncode}!"
