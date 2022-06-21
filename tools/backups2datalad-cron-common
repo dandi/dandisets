@@ -5,8 +5,8 @@ export PS1='$ '
 PS4='> '
 #set -x
 
-ds="$(dirname "$(dirname "$0")")"
-backup_root="$(realpath "$ds" | xargs dirname)"
+ds="$(realpath "$(dirname "$0")"/..)"
+backup_root="$(dirname "$ds")"
 
 source ~/.bashrc-miniconda
 conda activate dandisets
