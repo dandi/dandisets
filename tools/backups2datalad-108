@@ -1,0 +1,64 @@
+#!/bin/bash
+
+set -eu
+
+export PS1='$ '
+PS4='> '
+#set -x
+
+ds=$(dirname "$0")
+ds=$(dirname "$ds")
+
+zarrds=/mnt/backup/dandi/dandizarrs
+
+source ~/.bashrc-miniconda
+conda activate dandisets
+
+cd "$ds"
+chronic pip install -r tools/backups2datalad.req.txt
+
+export DATALAD_LOG_LEVEL=WARNING  # otherwise too much of noise
+
+mkdir -p .git/tmp
+
+set -o pipefail
+set -x
+
+(
+eval python -m tools.backups2datalad \
+   -l WARNING \
+   -J 5 \
+   --target "$ds" \
+   update-from-backup \
+   --zarr-target "$zarrds" \
+   --backup-remote dandi-dandisets-dropbox  \
+   --zarr-backup-remote dandi-dandizarrs-dropbox  \
+   --gh-org dandisets \
+   --zarr-gh-org dandizarrs \
+   000108 2>&1 | grep -v 'nothing to save, working tree clean'
+
+echo "we do not care about the rest in this one"
+exit 0
+
+python -m tools.backups2datalad \
+   -l DEBUG \
+   -J 5 \
+   --target "$ds" \
+   populate dandi-dandisets-dropbox 000108
+
+python -m tools.backups2datalad \
+   -l DEBUG \
+   -J 5 \
+   populate-zarrs --zarr-target "$zarrds" dandi-dandizarrs-dropbox
+
+git pull  # so we possibly merge changes on the server
+datalad push -J 5
+) 2>|.git/tmp/stderr
+
+if [ -s .git/tmp/stderr ]; then
+	echo "There was stderr from backup/datalad invocations:"
+	cat .git/tmp/stderr
+fi
+
+# we must be clean
+git diff --exit-code

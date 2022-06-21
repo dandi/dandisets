@@ -1,0 +1,21 @@
+#!/bin/bash
+source "$(dirname "$0")"/backups2datalad-cron-common
+
+(
+
+python -m tools.backups2datalad \
+   -l DEBUG \
+   --backup-root "$backup_root" \
+   --config tools/backups2datalad.cfg.yaml \
+   populate-zarrs "$@"
+
+# they aren't subdatasets, we might need to use straight GNU parallel
+
+#datalad foreach-dataset -s -r -R 1 -J 5 --chpwd pwd --cmd-type eval 'ds.push(to="github")'
+
+) 2>|.git/tmp/stderr-pz
+
+if [ -s .git/tmp/stderr-pz ]; then
+	echo "There was stderr from backup/datalad invocations:"
+	cat .git/tmp/stderr-pz
+fi
