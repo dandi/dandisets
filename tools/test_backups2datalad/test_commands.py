@@ -7,11 +7,11 @@ from traceback import format_exception
 from asyncclick.testing import CliRunner, Result
 from conftest import SampleDandiset
 from dandi.consts import dandiset_metadata_file
-from dandi.utils import find_files
 from datalad.api import Dataset
 from datalad.tests.utils import assert_repo_status
 import numpy as np
 import pytest
+from test_util import find_filepaths
 import zarr
 
 from backups2datalad.__main__ import main
@@ -51,14 +51,8 @@ async def test_backup_command(text_dandiset: SampleDandiset, tmp_path: Path) -> 
     )
     assert r.exit_code == 0, show_result(r)
     text_files = {
-        Path(f).relative_to(text_dandiset.dspath).as_posix()
-        for f in find_files(
-            r".*",
-            [text_dandiset.dspath],
-            exclude_dotfiles=False,
-            exclude_dotdirs=False,
-            exclude_vcs=False,
-        )
+        f.relative_to(text_dandiset.dspath).as_posix()
+        for f in find_filepaths(text_dandiset.dspath)
     }
     ds = Dataset(tmp_path / "ds" / text_dandiset.dandiset_id)
     assert ds.is_installed()
@@ -104,26 +98,14 @@ async def test_populate(new_dandiset: SampleDandiset, tmp_path: Path) -> None:
     sample_zarr_path = new_dandiset.dspath / "z" / "sample.zarr"
     zarr.save(sample_zarr_path, np.arange(1000), np.arange(1000, 0, -1))
     SAMPLE_ZARR_ENTRIES = {
-        Path(f).relative_to(sample_zarr_path).as_posix(): Path(f).read_bytes()
-        for f in find_files(
-            r".*",
-            [sample_zarr_path],
-            exclude_dotfiles=False,
-            exclude_dotdirs=False,
-            exclude_vcs=False,
-        )
+        f.relative_to(sample_zarr_path).as_posix(): f.read_bytes()
+        for f in find_filepaths(sample_zarr_path)
     }
     eye_zarr_path = new_dandiset.dspath / "z" / "eye.zarr"
     zarr.save(eye_zarr_path, np.eye(5))
     EYE_ZARR_ENTRIES = {
-        Path(f).relative_to(eye_zarr_path).as_posix(): Path(f).read_bytes()
-        for f in find_files(
-            r".*",
-            [eye_zarr_path],
-            exclude_dotfiles=False,
-            exclude_dotdirs=False,
-            exclude_vcs=False,
-        )
+        f.relative_to(eye_zarr_path).as_posix(): f.read_bytes()
+        for f in find_filepaths(eye_zarr_path)
     }
     await new_dandiset.upload()
 
@@ -214,16 +196,7 @@ async def test_populate(new_dandiset: SampleDandiset, tmp_path: Path) -> None:
         main, ["-c", str(cfgfile), "populate"], standalone_mode=False
     )
     assert r.exit_code == 0, show_result(r)
-    remote_files = {
-        Path(f).name: Path(f)
-        for f in find_files(
-            r".*",
-            [remote_root / "ds"],
-            exclude_dotfiles=False,
-            exclude_dotdirs=False,
-            exclude_vcs=False,
-        )
-    }
+    remote_files = {f.name: f for f in find_filepaths(remote_root / "ds")}
     assert remote_files.keys() == keys2blobs.keys()
     for key, blob in keys2blobs.items():
         assert remote_files[key].read_bytes() == blob
@@ -232,16 +205,7 @@ async def test_populate(new_dandiset: SampleDandiset, tmp_path: Path) -> None:
         main, ["-c", str(cfgfile), "populate-zarrs"], standalone_mode=False
     )
     assert r.exit_code == 0, show_result(r)
-    zarr_remote_files = {
-        Path(f).name: Path(f)
-        for f in find_files(
-            r".*",
-            [remote_root / "zarr"],
-            exclude_dotfiles=False,
-            exclude_dotdirs=False,
-            exclude_vcs=False,
-        )
-    }
+    zarr_remote_files = {f.name: f for f in find_filepaths(remote_root / "zarr")}
     assert zarr_remote_files.keys() == zarr_keys2blobs.keys()
     for key, blob in zarr_keys2blobs.items():
         assert zarr_remote_files[key].read_bytes() == blob

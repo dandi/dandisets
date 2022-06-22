@@ -7,12 +7,11 @@ from shutil import rmtree
 from typing import Optional
 
 from conftest import SampleDandiset
-from dandi.utils import find_files
 from datalad.api import Dataset
 from datalad.tests.utils import assert_repo_status
 import numpy as np
 import pytest
-from test_util import GitRepo
+from test_util import GitRepo, find_filepaths
 import zarr
 
 from backups2datalad.adataset import AsyncDataset
@@ -31,14 +30,7 @@ def check_zarr(
     source_path: Path, zarrds: Dataset, checksum: Optional[str] = None
 ) -> None:
     zarr_entries = {
-        Path(f).relative_to(source_path).as_posix()
-        for f in find_files(
-            r".*",
-            [source_path],
-            exclude_dotfiles=False,
-            exclude_dotdirs=False,
-            exclude_vcs=False,
-        )
+        f.relative_to(source_path).as_posix() for f in find_filepaths(source_path)
     }
     assert zarrds.is_installed()
     assert_repo_status(zarrds.path)
