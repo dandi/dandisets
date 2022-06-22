@@ -10,7 +10,6 @@ from dandi.consts import dandiset_metadata_file
 from dandi.dandiapi import Version
 from dandi.utils import yaml_load
 from datalad.api import Dataset
-from datalad.support.annexrepo import AnnexRepo
 from datalad.tests.utils import assert_repo_status, ok_file_under_git
 import pytest
 from test_util import GitRepo
@@ -363,17 +362,12 @@ async def test_binary(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
             enable_tags=True,
         ),
     )
-    dandiset_id = text_dandiset.dandiset_id
-    dspath = text_dandiset.dspath
-    (dspath / "data.dat").write_bytes(b"\0\1\2\3\4\5")
+    text_dandiset.add_blob("data.dat", b"\0\1\2\3\4\5")
     await text_dandiset.upload()
+    dandiset_id = text_dandiset.dandiset_id
     log.info("test_binary: Syncing test dandiset")
     await di.update_from_backup([dandiset_id])
-    backup = tmp_path / "dandisets" / dandiset_id
-    annex = AnnexRepo(backup)
-    data_backup = backup / "data.dat"
-    assert data_backup.is_symlink() and not data_backup.is_file()
-    assert annex.is_under_annex([data_backup]) == [True]
+    await text_dandiset.check_backup(Dataset(tmp_path / "dandisets" / dandiset_id))
 
 
 async def test_custom_commit_date(tmp_path: Path) -> None:
