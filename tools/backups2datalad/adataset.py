@@ -97,8 +97,11 @@ class AsyncDataset:
     async def get_repo_config(self, key: str) -> Optional[str]:
         try:
             return await areadcmd("git", "config", "--get", key, cwd=self.path)
-        except subprocess.CalledProcessError:
-            return None
+        except subprocess.CalledProcessError as e:
+            if e.returncode == 1:
+                return None
+            else:
+                raise
 
     async def call_git(self, *args: str | Path, **kwargs: Any) -> None:
         await aruncmd("git", *args, cwd=self.path, **kwargs)
