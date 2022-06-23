@@ -51,9 +51,10 @@ class AsyncAnnex(anyio.abc.AsyncResource):
             r = json.loads(await self.pfromkey.receive())
         if not r["success"]:
             log.error(
-                "`git annex fromkey %s %s` call failed:%s",
+                "`git annex fromkey %s %s` [cwd=%s] call failed:%s",
                 key,
                 path,
+                self.repo,
                 format_errors(r["error-messages"]),
             )
             ### TODO: Raise an exception?
@@ -108,9 +109,10 @@ class AsyncAnnex(anyio.abc.AsyncResource):
             r = json.loads(await self.pregisterurl.receive())
         if not r["success"]:
             log.error(
-                "`git annex registerurl %s %s` call failed:%s",
+                "`git annex registerurl %s %s` [cwd=%s] call failed:%s",
                 key,
                 url,
+                self.repo,
                 format_errors(r["error-messages"]),
             )
             ### TODO: Raise an exception?
