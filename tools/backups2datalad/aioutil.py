@@ -55,7 +55,7 @@ class TextProcess(anyio.abc.ObjectStream[str]):
         rc = await self.p.wait()
         log.log(
             logging.WARNING if rc != 0 and self.warn_on_fail else logging.DEBUG,
-            "%s command exited with return code %d",
+            "Command %s exited with return code %d",
             self.desc,
             rc,
         )
@@ -63,11 +63,11 @@ class TextProcess(anyio.abc.ObjectStream[str]):
     async def send(self, s: str) -> None:
         if self.p.returncode is not None:
             raise RuntimeError(
-                f"{self.desc} command suddenly exited with return code"
+                f"Command {self.desc} suddenly exited with return code"
                 f" {self.p.returncode}!"
             )
         assert self.p.stdin is not None
-        log.log(DEEP_DEBUG, "Sending to %s command: %r", self.desc, s)
+        log.log(DEEP_DEBUG, "Sending to command %s: %r", self.desc, s)
         await self.p.stdin.send(s.encode(self.encoding))
 
     async def receive(self) -> str:
@@ -75,7 +75,7 @@ class TextProcess(anyio.abc.ObjectStream[str]):
             raise anyio.EndOfStream()
         if self.p.returncode not in (None, 0):
             raise RuntimeError(
-                f"{self.desc} command suddenly exited with return code"
+                f"Command {self.desc} suddenly exited with return code"
                 f" {self.p.returncode}!"
             )
         assert self.p.stdout is not None
@@ -87,11 +87,11 @@ class TextProcess(anyio.abc.ObjectStream[str]):
                     blob = await self.p.stdout.receive()
                 except anyio.EndOfStream:
                     # EOF
-                    log.log(DEEP_DEBUG, "%s command reached EOF", self.desc)
+                    log.log(DEEP_DEBUG, "Stdout of command %s reached EOF", self.desc)
                     line = self.buff.decode(self.encoding)
                     self.buff = b""
                     log.log(
-                        DEEP_DEBUG, "Decoded line from %s command: %r", self.desc, line
+                        DEEP_DEBUG, "Decoded line from command %s: %r", self.desc, line
                     )
                     self.done = True
                     if line:
@@ -103,7 +103,7 @@ class TextProcess(anyio.abc.ObjectStream[str]):
             else:
                 line = self.buff[: i + 1].decode(self.encoding)
                 self.buff = self.buff[i + 1 :]
-                log.log(DEEP_DEBUG, "Decoded line from %s command: %r", self.desc, line)
+                log.log(DEEP_DEBUG, "Decoded line from command %s: %r", self.desc, line)
                 return line
 
     async def send_eof(self) -> None:
@@ -229,11 +229,10 @@ async def stream_null_command(
     *args: str | Path, cwd: Optional[Path] = None
 ) -> AsyncGenerator[str, None]:
     argstrs = [str(a) for a in args]
+    desc = "`{shlex.join(argstrs)}`"
     if cwd is not None:
-        attrs = f" [cwd={cwd}]"
-    else:
-        attrs = ""
-    log.debug("Opening pipe to %s%s", shlex.join(argstrs), attrs)
+        desc += f" [cwd={cwd}]"
+    log.debug("Opening pipe to %s", desc)
     async with await anyio.open_process(argstrs, cwd=cwd, stderr=None) as p:
         buff = ""
         assert p.stdout is not None
@@ -252,9 +251,8 @@ async def stream_null_command(
             yield buff
     log.log(
         logging.DEBUG if p.returncode == 0 else logging.WARNING,
-        "Command `%s`%s exited with return code %d",
-        shlex.join(argstrs),
-        attrs,
+        "Command %s exited with return code %d",
+        desc,
         p.returncode,
     )
     ### TODO: Raise an exception if p.returncode is nonzero?
