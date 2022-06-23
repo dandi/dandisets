@@ -419,9 +419,9 @@ async def async_assets(
                 if ts is not None:
                     timestamp = maxdatetime(timestamp, ts)
                 for asset_path in zarrlink.asset_paths:
-                    dm.report.downloaded += 1
                     if not (ds.pathobj / asset_path).exists():
                         log.info("Zarr asset added at %s; cloning", asset_path)
+                        dm.report.downloaded += 1
                         dm.report.added += 1
                         if config.zarr_gh_org is not None:
                             src = f"https://github.com/{config.zarr_gh_org}/{zarr_id}"
@@ -439,6 +439,7 @@ async def async_assets(
                         log.debug("Finished cloning Zarr to %s", asset_path)
                     elif ts is not None:
                         log.info("Zarr asset modified at %s; updating", asset_path)
+                        dm.report.downloaded += 1
                         dm.report.updated += 1
                         zds = AsyncDataset(ds.pathobj / asset_path)
                         if config.zarr_gh_org is not None:
