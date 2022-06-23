@@ -16,7 +16,6 @@ from typing import (
     Generic,
     Optional,
     TypeVar,
-    cast,
 )
 
 import anyio
@@ -168,20 +167,6 @@ async def arequest(
             else:
                 raise
         return r
-
-
-@dataclass
-class MiniFuture(Generic[T]):
-    event: anyio.Event = field(default_factory=anyio.Event)
-    value: Optional[T] = None
-
-    def set(self, value: T) -> None:
-        self.value = value
-        self.event.set()
-
-    async def get(self) -> T:
-        await self.event.wait()
-        return cast(T, self.value)
 
 
 @dataclass

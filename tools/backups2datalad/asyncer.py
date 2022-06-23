@@ -25,13 +25,13 @@ from identify.identify import tags_from_filename
 
 from .adandi import RemoteDandiset
 from .adataset import AsyncDataset
-from .aioutil import MiniFuture, TextProcess, arequest, open_git_annex
+from .aioutil import TextProcess, arequest, open_git_annex
 from .annex import AsyncAnnex
 from .config import BackupConfig
 from .consts import USER_AGENT
 from .logging import PrefixedLogger, log
 from .util import AssetTracker, Report, format_errors, key2hash, maxdatetime, quantify
-from .zarr import sync_zarr
+from .zarr import ZarrLink, sync_zarr
 
 if sys.version_info[:2] >= (3, 10):
     from contextlib import aclosing
@@ -45,13 +45,6 @@ class ToDownload:
     url: str
     extra_urls: list[str]
     sha256_digest: str
-
-
-@dataclass
-class ZarrLink:
-    zarr_dspath: Path
-    timestamp_fut: MiniFuture[Optional[datetime]]
-    asset_paths: list[str]
 
 
 @dataclass
@@ -244,20 +237,20 @@ class Downloader:
             )
         else:
             zarr_dspath = self.config.zarr_root / asset.zarr
-            ts_fut: MiniFuture[Optional[datetime]] = MiniFuture()
+            zl = ZarrLink(
+                zarr_dspath=zarr_dspath,
+                timestamp=None,
+                asset_paths=[asset.path],
+            )
             self.nursery.start_soon(
-                partial(sync_zarr, ts_fut=ts_fut),
+                partial(sync_zarr, link=zl),
                 asset,
                 zarr_digest,
                 zarr_dspath,
                 self.config,
                 self.log.sublogger(f"Zarr {asset.zarr}"),
             )
-            self.zarrs[asset.zarr] = ZarrLink(
-                zarr_dspath=zarr_dspath,
-                timestamp_fut=ts_fut,
-                asset_paths=[asset.path],
-            )
+            self.zarrs[asset.zarr] = zl
 
     async def get_file_bucket_url(self, asset: RemoteAsset) -> str:
         self.log.debug("%s: Fetching bucket URL", asset.path)
@@ -420,7 +413,9 @@ async def async_assets(
 
             timestamp = dm.last_timestamp
             for zarr_id, zarrlink in dm.zarrs.items():
-                ts = await zarrlink.timestamp_fut.get()
+                # We've left the task group, so all of the Zarr tasks have
+                # finished and set the timestamps in their links
+                ts = zarrlink.timestamp
                 if ts is not None:
                     timestamp = maxdatetime(timestamp, ts)
                 for asset_path in zarrlink.asset_paths:
