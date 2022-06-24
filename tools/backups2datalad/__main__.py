@@ -84,7 +84,7 @@ async def main(
         datefmt="%Y-%m-%dT%H:%M:%S%z",
         level=getattr(logging, log_level),
     )
-    await ctx.obj.debug_logfile()
+    await ctx.obj.debug_logfile(quiet_debug)
 
 
 @main.command()

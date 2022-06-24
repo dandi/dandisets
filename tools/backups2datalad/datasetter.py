@@ -24,7 +24,7 @@ from .adataset import AsyncDataset, ObjectType
 from .aioutil import areadcmd, arequest, pool_amap
 from .config import BackupConfig
 from .consts import DEFAULT_BRANCH, USER_AGENT
-from .logging import PrefixedLogger, log
+from .logging import PrefixedLogger, log, quiet_filter
 from .syncer import Syncer
 from .util import (
     AssetTracker,
@@ -442,7 +442,7 @@ class DandiDatasetter(AsyncResource):
         # create_github_sibling(), when the repo may not yet exist
         await arequest(self.gh, "PATCH", repo.api_url, json=kwargs, retry_on=[404])
 
-    async def debug_logfile(self) -> None:
+    async def debug_logfile(self, quiet_debug: bool) -> None:
         """
         Log all log messages at DEBUG or higher to a file without disrupting or
         altering the logging to the screen
@@ -451,7 +451,10 @@ class DandiDatasetter(AsyncResource):
         screen_level = root.getEffectiveLevel()
         root.setLevel(logging.NOTSET)
         for h in root.handlers:
-            h.setLevel(screen_level)
+            if quiet_debug:
+                h.addFilter(quiet_filter)
+            else:
+                h.setLevel(screen_level)
         # Superdataset must exist before creating anything in the directory:
         await self.ensure_superdataset()
         logdir = self.config.dandiset_root / ".git" / "dandi" / "backups2datalad"

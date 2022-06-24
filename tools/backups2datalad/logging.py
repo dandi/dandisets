@@ -49,3 +49,10 @@ class PrefixedLogger:
 
 
 log = PrefixedLogger(logging.getLogger("backups2datalad"))
+
+
+def quiet_filter(record: logging.LogRecord) -> bool:
+    if record.name == "backups2datalad":
+        return record.levelno >= logging.DEBUG
+    else:
+        return record.levelno >= logging.INFO
