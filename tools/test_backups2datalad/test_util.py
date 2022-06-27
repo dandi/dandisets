@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 import json
 from pathlib import Path
 import subprocess
 from typing import Any, List, cast
+
+from dandi.utils import find_files
 
 from backups2datalad.util import is_meta_file
 
@@ -97,3 +100,16 @@ class GitRepo:
 
     def get_commit_count(self) -> int:
         return int(self.readcmd("rev-list", "--count", "HEAD"))
+
+
+def find_filepaths(dirpath: Path) -> Iterator[Path]:
+    return map(
+        Path,
+        find_files(
+            r".*",
+            [dirpath],
+            exclude_dotfiles=False,
+            exclude_dotdirs=False,
+            exclude_vcs=False,
+        ),
+    )

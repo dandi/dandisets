@@ -176,13 +176,7 @@ class AsyncDataset:
     async def get_file_stats(self) -> list[FileStat]:
         filedict: dict[str, FileStat] = {}
         async with aclosing(
-            stream_null_command(
-                "git",
-                "ls-tree",
-                "-lrz",
-                "HEAD",
-                cwd=self.pathobj,
-            )
+            stream_null_command("git", "ls-tree", "-lrz", "HEAD", cwd=self.pathobj)
         ) as p:
             async for entry in p:
                 fst = FileStat.from_entry(entry)

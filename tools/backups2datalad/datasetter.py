@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 import json
 import logging
@@ -24,7 +24,7 @@ from .adataset import AsyncDataset, ObjectType
 from .aioutil import areadcmd, arequest, pool_amap
 from .config import BackupConfig
 from .consts import DEFAULT_BRANCH, USER_AGENT
-from .logging import PrefixedLogger, log
+from .logging import PrefixedLogger, log, quiet_filter
 from .syncer import Syncer
 from .util import (
     AssetTracker,
@@ -45,6 +45,7 @@ class DandiDatasetter(AsyncResource):
     dandi_client: AsyncDandiClient
     config: BackupConfig
     gh: Optional[httpx.AsyncClient] = None
+    ghlock: anyio.Lock = field(default_factory=anyio.Lock)
 
     async def aclose(self) -> None:
         await self.dandi_client.aclose()
@@ -426,18 +427,22 @@ class DandiDatasetter(AsyncResource):
             await ds.call_git("push", "github", dandiset.version_id)
 
     async def edit_github_repo(self, repo: GHRepo, **kwargs: Any) -> None:
-        if self.gh is None:
-            token = await areadcmd("git", "config", "hub.oauthtoken")
-            self.gh = httpx.AsyncClient(
-                headers={"Authorization": f"token {token}", "User-Agent": USER_AGENT},
-                follow_redirects=True,
-            )
+        async with self.ghlock:
+            if self.gh is None:
+                token = await areadcmd("git", "config", "hub.oauthtoken")
+                self.gh = httpx.AsyncClient(
+                    headers={
+                        "Authorization": f"token {token}",
+                        "User-Agent": USER_AGENT,
+                    },
+                    follow_redirects=True,
+                )
         log.debug("Editing repository %s", repo)
         # Retry on 404's in case we're calling this right after
         # create_github_sibling(), when the repo may not yet exist
         await arequest(self.gh, "PATCH", repo.api_url, json=kwargs, retry_on=[404])
 
-    async def debug_logfile(self) -> None:
+    async def debug_logfile(self, quiet_debug: bool) -> None:
         """
         Log all log messages at DEBUG or higher to a file without disrupting or
         altering the logging to the screen
@@ -446,7 +451,10 @@ class DandiDatasetter(AsyncResource):
         screen_level = root.getEffectiveLevel()
         root.setLevel(logging.NOTSET)
         for h in root.handlers:
-            h.setLevel(screen_level)
+            if quiet_debug:
+                h.addFilter(quiet_filter)
+            else:
+                h.setLevel(screen_level)
         # Superdataset must exist before creating anything in the directory:
         await self.ensure_superdataset()
         logdir = self.config.dandiset_root / ".git" / "dandi" / "backups2datalad"

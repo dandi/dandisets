@@ -16,7 +16,6 @@ from dandi.dandiapi import RemoteZarrAsset
 from pydantic import BaseModel
 
 from .adataset import AsyncDataset
-from .aioutil import MiniFuture
 from .annex import AsyncAnnex
 from .config import BackupConfig
 from .logging import PrefixedLogger
@@ -41,6 +40,13 @@ class SyncData(BaseModel):
     bucket: str
     prefix: str
     last_modified: Optional[datetime]
+
+
+@dataclass
+class ZarrLink:
+    zarr_dspath: Path
+    timestamp: Optional[datetime]
+    asset_paths: list[str]
 
 
 @dataclass
@@ -361,7 +367,7 @@ async def sync_zarr(
     dsdir: Path,
     config: BackupConfig,
     log: PrefixedLogger,
-    ts_fut: Optional[MiniFuture[Optional[datetime]]] = None,
+    link: Optional[ZarrLink] = None,
 ) -> None:
     async with config.zarr_limit:
         assert config.zarrs is not None
@@ -420,9 +426,7 @@ async def sync_zarr(
                 log.debug("Pushing to GitHub")
                 await ds.push(to="github", jobs=config.jobs, data="nothing")
                 log.debug("Finished pushing to GitHub")
-            if ts_fut is not None:
-                ts_fut.set(commit_ts)
+            if link is not None:
+                link.timestamp = commit_ts
         else:
             log.info("no changes; not committing")
-            if ts_fut is not None:
-                ts_fut.set(None)

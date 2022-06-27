@@ -48,13 +48,13 @@ class AsyncAnnex(anyio.abc.AsyncResource):
                     path=self.repo,
                 )
             await self.pfromkey.send(f"{key} {path}\n")
-            ### TODO: Do something if receive() returns "" (signalling EOF)
             r = json.loads(await self.pfromkey.receive())
         if not r["success"]:
             log.error(
-                "`git annex fromkey %s %s` call failed:%s",
+                "`git annex fromkey %s %s` [cwd=%s] call failed:%s",
                 key,
                 path,
+                self.repo,
                 format_errors(r["error-messages"]),
             )
             ### TODO: Raise an exception?
@@ -71,7 +71,6 @@ class AsyncAnnex(anyio.abc.AsyncResource):
             await self.pexaminekey.send(
                 f"{self.digest_type}-s{size}--{digest} {filename}\n"
             )
-            ### TODO: Do something if receive() returns "" (signalling EOF)
             return (await self.pexaminekey.receive()).strip()
 
     async def get_key_remotes(self, key: str) -> Optional[list[str]]:
@@ -87,7 +86,6 @@ class AsyncAnnex(anyio.abc.AsyncResource):
                     warn_on_fail=False,
                 )
             await self.pwhereis.send(f"{key}\n")
-            ### TODO: Do something if receive() returns "" (signalling EOF)
             whereis = json.loads(await self.pwhereis.receive())
         if whereis["success"]:
             return [
@@ -108,13 +106,13 @@ class AsyncAnnex(anyio.abc.AsyncResource):
                     path=self.repo,
                 )
             await self.pregisterurl.send(f"{key} {url}\n")
-            ### TODO: Do something if receive() returns "" (signalling EOF)
             r = json.loads(await self.pregisterurl.receive())
         if not r["success"]:
             log.error(
-                "`git annex registerurl %s %s` call failed:%s",
+                "`git annex registerurl %s %s` [cwd=%s] call failed:%s",
                 key,
                 url,
+                self.repo,
                 format_errors(r["error-messages"]),
             )
             ### TODO: Raise an exception?
