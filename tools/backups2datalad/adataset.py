@@ -96,7 +96,7 @@ class AsyncDataset:
 
     async def get_repo_config(self, key: str) -> Optional[str]:
         try:
-            return await areadcmd("git", "config", "--get", key, cwd=self.path)
+            return await self.read_git("config", "--get", key)
         except subprocess.CalledProcessError as e:
             if e.returncode == 1:
                 return None
@@ -224,6 +224,49 @@ class AsyncDataset:
         else:
             log.debug("GitHub remote already exists for %s", name)
             return False
+
+    async def get_remote_url(self) -> str:
+        upstream = await self.get_repo_config(f"branch.{DEFAULT_BRANCH}.remote")
+        if upstream is None:
+            raise ValueError(
+                f"Upstream branch not set for {DEFAULT_BRANCH} in {self.path}"
+            )
+        url = await self.get_repo_config(f"remote.{upstream}.url")
+        if url is None:
+            raise ValueError(f"{upstream!r} remote URL not set for {self.path}")
+        return url
+
+    async def ensure_subdataset(self, subds: AsyncDataset) -> None:
+        path = subds.pathobj.relative_to(self.pathobj)
+        try:
+            await self.call_git("submodule", "status", path)
+        except subprocess.CalledProcessError as e:
+            if e.returncode != 1:
+                raise
+        else:
+            return
+        log.info("Adding submodule %s of %s to .gitmodules", path, self.path)
+        try:
+            url = await subds.get_remote_url()
+        except ValueError:
+            url = f"./{path}"
+        await self.call_git("submodule", "add", url, path)
+        datalad_id = await subds.read_git(
+            "config",
+            "--file",
+            ".datalad/config",
+            "--get",
+            "datalad.dataset.id",
+        )
+        await self.call_git(
+            "config",
+            "--file",
+            ".gitmodules",
+            "--replace-all",
+            f"submodule.{path}.datalad-id",
+            datalad_id,
+        )
+        await self.add(".gitmodules")
 
 
 class ObjectType(Enum):

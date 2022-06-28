@@ -11,7 +11,7 @@ from anyio.abc import AsyncResource
 from dandi.consts import known_instances
 from dandi.dandiapi import DandiAPIClient, RemoteAsset
 from dandi.dandiapi import RemoteDandiset as SyncRemoteDandiset
-from dandi.dandiapi import Version
+from dandi.dandiapi import RemoteZarrAsset, Version
 import httpx
 
 from .aioutil import arequest
@@ -173,6 +173,12 @@ class RemoteDandiset(SyncRemoteDandiset):
             async for item in ait:
                 metadata = await self.aclient.get(f"/assets/{item['asset_id']}/")
                 yield RemoteAsset.from_data(self, item, metadata)
+
+    async def aget_zarr_assets(self) -> AsyncGenerator[RemoteZarrAsset, None]:
+        async with aclosing(self.aget_assets()) as ait:
+            async for asset in ait:
+                if isinstance(asset, RemoteZarrAsset):
+                    yield asset
 
     async def aget_asset_by_path(self, path: str) -> RemoteAsset:
         async with aclosing(

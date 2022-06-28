@@ -138,6 +138,32 @@ async def update_from_backup(
 
 @main.command()
 @click.option(
+    "-P",
+    "--partial-dir",
+    type=click.Path(file_okay=False, path_type=Path),
+    help="Directory in which to store in-progress Zarr backups",
+)
+@click.option("-w", "--workers", type=int, help="Number of workers to run in parallel")
+@click.argument("dandiset")
+@click.pass_obj
+async def backup_zarrs(
+    datasetter: DandiDatasetter,
+    dandiset: str,
+    workers: Optional[int],
+    partial_dir: Optional[Path],
+) -> None:
+    async with datasetter:
+        if datasetter.config.zarrs is None:
+            raise click.UsageError("Zarr backups not configured in config file")
+        if workers is not None:
+            datasetter.config.workers = workers
+        if partial_dir is None:
+            partial_dir = datasetter.config.backup_root / "partial-zarrs"
+        await datasetter.backup_zarrs(dandiset, partial_dir)
+
+
+@main.command()
+@click.option(
     "-e",
     "--exclude",
     help="Skip dandisets matching the given regex",

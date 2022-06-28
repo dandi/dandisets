@@ -154,6 +154,12 @@ class SampleDandiset:
             assert p.is_symlink() and not p.exists()
             keys2blobs[Path(os.readlink(p)).name] = blob
 
+        zarr_manifest = await self.check_all_zarrs(backup_ds, zarr_root)
+        return (PopulateManifest(keys2blobs), zarr_manifest)
+
+    async def check_all_zarrs(
+        self, backup_ds: Dataset, zarr_root: Optional[Path] = None
+    ) -> PopulateManifest:
         submodules = {
             sm["path"].relative_to(backup_ds.pathobj).as_posix(): sm
             for sm in backup_ds.repo.get_submodules_()
@@ -175,14 +181,11 @@ class SampleDandiset:
                 assert submod["gitmodule_url"] == str(zarr_ds.pathobj)
                 assert submod["type"] == "dataset"
                 assert submod["gitshasum"] == zarr_ds.repo.format_commit("%H")
-
                 zarr_keys2blobs.update(
                     self.check_zarr_backup(zarr_ds, entries, checksum)
                 )
-
         assert not submodules
-
-        return (PopulateManifest(keys2blobs), PopulateManifest(zarr_keys2blobs))
+        return PopulateManifest(zarr_keys2blobs)
 
     def check_zarr_backup(
         self, zarr_ds: Dataset, entries: dict[str, bytes], checksum: Optional[str]
