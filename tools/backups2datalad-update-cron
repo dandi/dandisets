@@ -12,7 +12,7 @@ eval python -m tools.backups2datalad \
    -e '000108$' \
    "$*" 2>&1 | grep -v 'nothing to save, working tree clean'
 
-git pull
+git pull --commit --no-edit
 datalad push -J 5
 ) 2>|.git/tmp/stderr-2
 
