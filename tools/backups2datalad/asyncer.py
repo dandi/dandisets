@@ -25,7 +25,7 @@ from identify.identify import tags_from_filename
 
 from .adandi import RemoteDandiset
 from .adataset import AsyncDataset
-from .aioutil import TextProcess, arequest, open_git_annex
+from .aioutil import TextProcess, arequest, aruncmd, open_git_annex
 from .annex import AsyncAnnex
 from .config import BackupConfig
 from .consts import USER_AGENT
@@ -432,8 +432,12 @@ async def async_assets(
                             partial(clone, source=src, path=ds.pathobj / asset_path)
                         )
                         if config.zarr_gh_org is not None:
-                            await anyio.run_process(
-                                ["git", "remote", "rename", "origin", "github"],
+                            await aruncmd(
+                                "git",
+                                "remote",
+                                "rename",
+                                "origin",
+                                "github",
                                 cwd=ds.pathobj / asset_path,
                             )
                         log.debug("Finished cloning Zarr to %s", asset_path)

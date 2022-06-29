@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from functools import partial
 import json
 import logging
 from operator import attrgetter
@@ -14,6 +15,9 @@ from typing import Any, AsyncGenerator, Optional, Sequence
 import anyio
 from anyio.abc import AsyncResource
 from dandi.consts import dandiset_metadata_file
+from dandi.dandiapi import RemoteZarrAsset
+from dandi.exceptions import NotFoundError
+from datalad.api import clone
 from ghrepo import GHRepo
 import httpx
 from humanize import naturalsize
@@ -21,7 +25,7 @@ from packaging.version import Version as PkgVersion
 
 from .adandi import AsyncDandiClient, RemoteDandiset
 from .adataset import AsyncDataset, ObjectType
-from .aioutil import areadcmd, arequest, pool_amap
+from .aioutil import areadcmd, arequest, aruncmd, pool_amap
 from .config import BackupConfig
 from .consts import DEFAULT_BRANCH, USER_AGENT
 from .logging import PrefixedLogger, log, quiet_filter
@@ -33,6 +37,7 @@ from .util import (
     quantify,
     update_dandiset_metadata,
 )
+from .zarr import ZarrLink, sync_zarr
 
 if sys.version_info[:2] >= (3, 10):
     from contextlib import aclosing
@@ -71,13 +76,15 @@ class DandiDatasetter(AsyncResource):
         to_save: list[str] = []
         ds_stats: list[DandisetStats] = []
         for d, stats in report.results:
-            to_save.append(d)
+            to_save.append(d.identifier)
             if self.config.gh_org:
                 assert stats is not None
                 ds_stats.append(stats)
         if to_save:
             log.debug("Committing superdataset")
-            await superds.save(message="CRON update", path=to_save)
+            for did in to_save:
+                await superds.ensure_subdataset(AsyncDataset(superds.pathobj / did))
+            await superds.save(message="CRON update", path=to_save + [".gitmodules"])
             log.debug("Superdataset committed")
         if report.failed:
             raise RuntimeError(
@@ -164,19 +171,8 @@ class DandiDatasetter(AsyncResource):
         dlog.debug("Finished running `git gc`")
         return syncer.report.commits > 0
 
-    async def get_remote_url(self, ds: AsyncDataset) -> str:
-        upstream = await ds.get_repo_config(f"branch.{DEFAULT_BRANCH}.remote")
-        if upstream is None:
-            raise ValueError(
-                f"Upstream branch not set for {DEFAULT_BRANCH} in {ds.path}"
-            )
-        url = await ds.get_repo_config(f"remote.{upstream}.url")
-        if url is None:
-            raise ValueError(f"{upstream!r} remote URL not set for {ds.path}")
-        return url
-
     async def get_ghrepo_for_dataset(self, ds: AsyncDataset) -> GHRepo:
-        url = await self.get_remote_url(ds)
+        url = await ds.get_remote_url()
         return GHRepo.parse_url(url)
 
     async def update_github_metadata(
@@ -217,7 +213,7 @@ class DandiDatasetter(AsyncResource):
             if not is_meta_file(path.parts[0], dandiset=True):
                 if filestat.type is ObjectType.COMMIT:
                     zarr_ds = AsyncDataset(ds.pathobj / path)
-                    zarr_id = Path(await self.get_remote_url(zarr_ds)).name
+                    zarr_id = Path(await zarr_ds.get_remote_url()).name
                     try:
                         zarr_stat = substats[zarr_id]
                     except KeyError:
@@ -441,6 +437,80 @@ class DandiDatasetter(AsyncResource):
         # Retry on 404's in case we're calling this right after
         # create_github_sibling(), when the repo may not yet exist
         await arequest(self.gh, "PATCH", repo.api_url, json=kwargs, retry_on=[404])
+
+    async def backup_zarrs(self, dandiset: str, partial_dir: Path) -> None:
+        assert self.config.zarr_root is not None
+        partial_dir.mkdir(parents=True, exist_ok=True)
+        d = await self.dandi_client.get_dandiset(dandiset, "draft")
+        ds = AsyncDataset(self.config.dandiset_root / d.identifier)
+        dslock = anyio.Lock()
+
+        async def dobackup(asset: RemoteZarrAsset) -> None:
+            try:
+                zarr_digest = asset.get_digest().value
+            except NotFoundError:
+                log.info(
+                    "%s: Zarr checksum has not been computed yet;" " not backing up",
+                    asset.path,
+                )
+                return
+            ultimate_dspath = self.config.zarr_root / asset.zarr
+            if ultimate_dspath.exists():
+                log.info("%s: Zarr already backed up", asset.path)
+                return
+            zarr_dspath = partial_dir / asset.zarr
+            zl = ZarrLink(
+                zarr_dspath=ultimate_dspath,
+                timestamp=None,
+                asset_paths=[asset.path],
+            )
+            await sync_zarr(
+                asset,
+                zarr_digest,
+                zarr_dspath,
+                self.config,
+                log.sublogger(f"Zarr {asset.zarr}"),
+                link=zl,
+            )
+            log.info("Zarr %s: Moving dataset", asset.zarr)
+            zarr_dspath.rename(ultimate_dspath)
+            ts = zl.timestamp
+            assert ts is not None
+            assert not (ds.pathobj / asset.path).exists()
+            log.debug("Waiting for lock on Dandiset dataset")
+            async with dslock:
+                log.info("Zarr %s: cloning to %s", asset.zarr, asset.path)
+                if self.config.zarr_gh_org is not None:
+                    src = f"https://github.com/{self.config.zarr_gh_org}/{asset.zarr}"
+                else:
+                    src = str(ultimate_dspath)
+                await anyio.to_thread.run_sync(
+                    partial(clone, source=src, path=ds.pathobj / asset.path)
+                )
+                if self.config.zarr_gh_org is not None:
+                    await aruncmd(
+                        "git",
+                        "remote",
+                        "rename",
+                        "origin",
+                        "github",
+                        cwd=ds.pathobj / asset.path,
+                    )
+                log.debug("Zarr %s: Finished cloning", asset.zarr)
+                await ds.ensure_subdataset(AsyncDataset(ds.pathobj / asset.path))
+                log.debug("Zarr %s: Saving changes to Dandiset dataset", asset.zarr)
+                await ds.save(
+                    f"[backups2datalad] Backed up Zarr {asset.zarr} to {asset.path}",
+                    path=[asset.path, ".gitmodules"],
+                    commit_date=ts,
+                )
+                log.debug("Zarr %s: Changes saved", asset.zarr)
+
+        report = await pool_amap(
+            dobackup, d.aget_zarr_assets(), workers=self.config.workers
+        )
+        if report.failed:
+            raise RuntimeError(f"{quantify(len(report.failed), 'Zarr backup')} failed")
 
     async def debug_logfile(self, quiet_debug: bool) -> None:
         """
