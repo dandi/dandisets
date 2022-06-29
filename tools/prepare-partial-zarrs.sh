@@ -8,8 +8,8 @@ partial_zarrs="$backup_root/partial-zarrs"
 
 dandiset=000108
 
-zarr_info_file="$(mktemp zarr-info-XXXXXX.json)"
-git_status_file="$(mktemp git-status-XXXXXX.json)"
+zarr_info_file="$(mktemp)"
+git_status_file="$(mktemp)"
 
 mkdir -p "$partial_zarrs"
 
@@ -20,11 +20,17 @@ cd "$zarr_root"
 for zarr in *-*-*-*-*
 do
     echo "[INFO] Checking Zarr $zarr ..."
-    curl -fsSL -O "$zarr_info_file" "https://api.dandiarchive.org/api/zarr/$zarr/"
+    curl -fsSL -o "$zarr_info_file" "https://api.dandiarchive.org/api/zarr/$zarr/"
     zarr_dandiset="$(jq -r .dandiset "$zarr_info_file")"
+    path="$(jq -r .name "$zarr_info_file")"
     if [[ "$zarr_dandiset" != "$dandiset" ]]
     then
         echo "[INFO] Zarr is for different Dandiset; skipping"
+        continue
+    fi
+    if [ -e "$dandiset_root/$dandiset/$path" ]
+    then
+        echo "[INFO] Zarr is already in Dandiset dataset; skipping"
         continue
     fi
     cd "$zarr_root/$zarr"
@@ -37,8 +43,13 @@ do
         cd ..
         mv "$zarr" "$partial_zarrs"
     else
-        git status --porcelain -uall > "$git_status_file"
-        if [ -s "$git_status_file" ]
+        git status --porcelain --branch > "$git_status_file"
+        if head -n1 "$git_status_file" | grep -Fwq gone
+        then
+            echo "[INFO] Zarr was never pushed to GitHub; pushing"
+            git push -u github draft
+        fi
+        if grep -vq '^#' "$git_status_file"
         then
             echo "[INFO] Zarr backup was not saved; resetting"
             git reset --hard HEAD
@@ -48,7 +59,6 @@ do
             mv "$zarr" "$partial_zarrs"
         else
             echo "[INFO] Zarr is backed up; adding to Dandiset dataset"
-            path="$(jq -r .name "$zarr_info_file")"
             cd "$dandiset_root/$dandiset"
             datalad clone https://github.com/dandizarrs/"$zarr" "$path"
             cd "$path"
