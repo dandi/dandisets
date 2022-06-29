@@ -372,27 +372,30 @@ async def sync_zarr(
     async with config.zarr_limit:
         assert config.zarrs is not None
         ds = AsyncDataset(dsdir)
-        if await ds.ensure_installed(
+        await ds.ensure_installed(
             desc=f"Zarr {asset.zarr}",
             commit_date=asset.created,
             backup_remote=config.zarrs.remote,
             backend="MD5E",
             cfg_proc=None,
-        ):
+        )
+        if not (ds.pathobj / ".dandi" / ".gitattributes").exists():
             log.debug("Excluding .dandi/ from git-annex")
             (ds.pathobj / ".dandi").mkdir(parents=True, exist_ok=True)
             (ds.pathobj / ".dandi" / ".gitattributes").write_text(
                 "* annex.largefiles=nothing\n"
             )
             await ds.save(
-                message="Exclude .dandi/ from git-annex", commit_date=asset.created
+                message="Exclude .dandi/ from git-annex",
+                path=[".dandi/.gitattributes"],
+                commit_date=asset.created,
             )
-            if (zgh := config.zarrs.github_org) is not None:
-                log.debug("Creating GitHub sibling")
-                await ds.create_github_sibling(
-                    owner=zgh, name=asset.zarr, backup_remote=config.zarrs.remote
-                )
-            log.debug("Finished initializing dataset")
+        if (zgh := config.zarrs.github_org) is not None:
+            log.debug("Creating GitHub sibling")
+            await ds.create_github_sibling(
+                owner=zgh, name=asset.zarr, backup_remote=config.zarrs.remote
+            )
+            log.debug("Created GitHub sibling")
         async with AsyncAnnex(dsdir, digest_type="MD5") as annex:
             if (r := config.zarrs.remote) is not None:
                 backup_remote = r.name

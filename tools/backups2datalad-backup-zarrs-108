@@ -1,0 +1,10 @@
+#!/bin/bash
+source "$(dirname "$0")"/backups2datalad-cron-common
+
+python -m tools.backups2datalad \
+    -l WARNING \
+    --backup-root "$backup_root" \
+    --config tools/backups2datalad.cfg.yaml \
+    update-zarrs \
+    --workers 10 \
+    '000108' |& tee .git/tmp/update-zarrs.log
