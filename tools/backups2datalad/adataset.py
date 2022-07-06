@@ -19,7 +19,7 @@ from .aioutil import areadcmd, aruncmd, open_git_annex, stream_null_command
 from .config import Remote
 from .consts import DEFAULT_BRANCH
 from .logging import log
-from .util import custom_commit_env
+from .util import custom_commit_env, exp_wait
 
 if sys.version_info[:2] >= (3, 10):
     from contextlib import aclosing
@@ -130,7 +130,7 @@ class AsyncDataset:
         )
 
     async def push(self, to: str, jobs: int, data: Optional[str] = None) -> None:
-        i = 0
+        waits = exp_wait(attempts=3, base=2)
         while True:
             try:
                 # TODO: Improve
@@ -139,15 +139,19 @@ class AsyncDataset:
                 )
             except CommandError as e:
                 if "unexpected disconnect" in str(e):
-                    i += 1
-                    if i < 3:
-                        log.warning(
-                            "Push of dataset at %s failed with unexpected"
-                            " disconnect; retrying",
-                            self.path,
-                        )
-                        continue
-                raise
+                    try:
+                        delay = next(waits)
+                    except StopIteration:
+                        raise e
+                    log.warning(
+                        "Push of dataset at %s failed with unexpected"
+                        " disconnect; retrying",
+                        self.path,
+                    )
+                    await anyio.sleep(delay)
+                    continue
+                else:
+                    raise
             else:
                 break
 
