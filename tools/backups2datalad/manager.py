@@ -19,6 +19,10 @@ from .util import quantify
 
 @dataclass
 class Manager(AsyncResource):
+    """
+    A container for state needed by multiple components of the backup process
+    """
+
     config: BackupConfig
     gh: Optional[GitHub]
     log: PrefixedLogger
