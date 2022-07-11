@@ -6,26 +6,34 @@ from typing import Optional
 from dandi.dandiapi import RemoteDandiset
 
 from .adataset import AsyncDataset
-from .asyncer import async_assets
+from .asyncer import Report, async_assets
 from .config import BackupConfig
 from .logging import PrefixedLogger
-from .util import AssetTracker, Report, quantify
+from .manager import Manager
+from .util import AssetTracker, quantify
 
 
 @dataclass
 class Syncer:
-    config: BackupConfig
+    manager: Manager
     dandiset: RemoteDandiset
     ds: AsyncDataset
     tracker: AssetTracker
-    log: PrefixedLogger
     deleted: int = 0
     report: Optional[Report] = None
+
+    @property
+    def config(self) -> BackupConfig:
+        return self.manager.config
+
+    @property
+    def log(self) -> PrefixedLogger:
+        return self.manager.log
 
     async def sync_assets(self) -> None:
         self.log.info("Syncing assets...")
         self.report = await async_assets(
-            self.dandiset, self.ds, self.config, self.tracker, self.log
+            self.dandiset, self.ds, self.manager, self.tracker
         )
         self.log.info("Asset sync complete!")
         self.log.info("%s added", quantify(self.report.added, "asset"))

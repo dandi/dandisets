@@ -15,10 +15,10 @@ from botocore.client import Config
 from dandi.dandiapi import RemoteZarrAsset
 from pydantic import BaseModel
 
-from .adataset import AsyncDataset
+from .adataset import AsyncDataset, DatasetStats
 from .annex import AsyncAnnex
-from .config import BackupConfig
 from .logging import PrefixedLogger
+from .manager import Manager
 from .util import is_meta_file, key2hash, maxdatetime, quantify
 
 if sys.version_info[:2] >= (3, 10):
@@ -47,6 +47,7 @@ class ZarrLink:
     zarr_dspath: Path
     timestamp: Optional[datetime]
     asset_paths: list[str]
+    stats: Optional[DatasetStats] = None
 
 
 @dataclass
@@ -365,22 +366,21 @@ async def sync_zarr(
     asset: RemoteZarrAsset,
     checksum: str,
     dsdir: Path,
-    config: BackupConfig,
-    log: PrefixedLogger,
+    manager: Manager,
     link: Optional[ZarrLink] = None,
 ) -> None:
-    async with config.zarr_limit:
-        assert config.zarrs is not None
+    async with manager.config.zarr_limit:
+        assert manager.config.zarrs is not None
         ds = AsyncDataset(dsdir)
         await ds.ensure_installed(
             desc=f"Zarr {asset.zarr}",
             commit_date=asset.created,
-            backup_remote=config.zarrs.remote,
+            backup_remote=manager.config.zarrs.remote,
             backend="MD5E",
             cfg_proc=None,
         )
         if not (ds.pathobj / ".dandi" / ".gitattributes").exists():
-            log.debug("Excluding .dandi/ from git-annex")
+            manager.log.debug("Excluding .dandi/ from git-annex")
             (ds.pathobj / ".dandi").mkdir(parents=True, exist_ok=True)
             (ds.pathobj / ".dandi" / ".gitattributes").write_text(
                 "* annex.largefiles=nothing\n"
@@ -390,14 +390,14 @@ async def sync_zarr(
                 path=[".dandi/.gitattributes"],
                 commit_date=asset.created,
             )
-        if (zgh := config.zarrs.github_org) is not None:
-            log.debug("Creating GitHub sibling")
+        if (zgh := manager.config.zarrs.github_org) is not None:
+            manager.log.debug("Creating GitHub sibling")
             await ds.create_github_sibling(
-                owner=zgh, name=asset.zarr, backup_remote=config.zarrs.remote
+                owner=zgh, name=asset.zarr, backup_remote=manager.config.zarrs.remote
             )
-            log.debug("Created GitHub sibling")
+            manager.log.debug("Created GitHub sibling")
         async with AsyncAnnex(dsdir, digest_type="MD5") as annex:
-            if (r := config.zarrs.remote) is not None:
+            if (r := manager.config.zarrs.remote) is not None:
                 backup_remote = r.name
             else:
                 backup_remote = None
@@ -406,30 +406,36 @@ async def sync_zarr(
                 zarr_id=asset.zarr,
                 repo=dsdir,
                 annex=annex,
-                s3bucket=config.s3bucket,
+                s3bucket=manager.config.s3bucket,
                 backup_remote=backup_remote,
                 checksum=checksum,
-                log=log,
+                log=manager.log,
             )
             await zsync.run()
         report = zsync.report
         if report:
             summary = report.get_summary()
-            log.info("%s; committing", summary)
+            manager.log.info("%s; committing", summary)
             if zsync.last_timestamp is None:
                 commit_ts = asset.created
             else:
                 commit_ts = zsync.last_timestamp
             await ds.save(message=f"[backups2datalad] {summary}", commit_date=commit_ts)
-            log.debug("Commit made")
-            log.debug("Running `git gc`")
+            manager.log.debug("Commit made")
+            manager.log.debug("Running `git gc`")
             await ds.gc()
-            log.debug("Finished running `git gc`")
-            if config.zarr_gh_org is not None:
-                log.debug("Pushing to GitHub")
-                await ds.push(to="github", jobs=config.jobs, data="nothing")
-                log.debug("Finished pushing to GitHub")
+            manager.log.debug("Finished running `git gc`")
+            if manager.config.zarr_gh_org is not None:
+                manager.log.debug("Pushing to GitHub")
+                await ds.push(to="github", jobs=manager.config.jobs, data="nothing")
+                manager.log.debug("Finished pushing to GitHub")
             if link is not None:
                 link.timestamp = commit_ts
         else:
-            log.info("no changes; not committing")
+            manager.log.info("no changes; not committing")
+        if link is not None:
+            manager.log.info("Counting up files ...")
+            link.stats = (await ds.get_stats())[0]
+            manager.log.info("Done counting up files")
+            if manager.gh is not None:
+                await manager.set_zarr_description(asset.zarr, link.stats)

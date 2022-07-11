@@ -9,8 +9,9 @@ from operator import attrgetter
 import os
 from pathlib import Path
 import re
+import subprocess
 import sys
-from typing import Any, AsyncGenerator, Optional, Sequence
+from typing import AsyncGenerator, Optional, Sequence
 
 import anyio
 from anyio.abc import AsyncResource
@@ -19,24 +20,18 @@ from dandi.dandiapi import RemoteZarrAsset
 from dandi.exceptions import NotFoundError
 from datalad.api import clone
 from ghrepo import GHRepo
-import httpx
 from humanize import naturalsize
 from packaging.version import Version as PkgVersion
 
 from .adandi import AsyncDandiClient, RemoteDandiset
-from .adataset import AsyncDataset, ObjectType
-from .aioutil import areadcmd, arequest, aruncmd, pool_amap
+from .adataset import AsyncDataset, DatasetStats
+from .aioutil import aruncmd, pool_amap
 from .config import BackupConfig
-from .consts import DEFAULT_BRANCH, USER_AGENT
-from .logging import PrefixedLogger, log, quiet_filter
+from .consts import DEFAULT_BRANCH
+from .logging import log, quiet_filter
+from .manager import GitHub, Manager
 from .syncer import Syncer
-from .util import (
-    AssetTracker,
-    assets_eq,
-    is_meta_file,
-    quantify,
-    update_dandiset_metadata,
-)
+from .util import AssetTracker, assets_eq, quantify, update_dandiset_metadata
 from .zarr import ZarrLink, sync_zarr
 
 if sys.version_info[:2] >= (3, 10):
@@ -48,14 +43,25 @@ else:
 @dataclass
 class DandiDatasetter(AsyncResource):
     dandi_client: AsyncDandiClient
+    manager: Manager = field(init=False)
     config: BackupConfig
-    gh: Optional[httpx.AsyncClient] = None
-    ghlock: anyio.Lock = field(default_factory=anyio.Lock)
+
+    def __post_init__(self) -> None:
+        if self.config.gh_org is not None:
+            token = subprocess.run(
+                ["git", "config", "hub.oauthtoken"],
+                check=True,
+                stdout=subprocess.PIPE,
+                text=True,
+            ).stdout.strip()
+            gh = GitHub(token)
+        else:
+            gh = None
+        self.manager = Manager(config=self.config, gh=gh, log=log)
 
     async def aclose(self) -> None:
         await self.dandi_client.aclose()
-        if self.gh is not None:
-            await self.gh.aclose()
+        await self.manager.aclose()
 
     async def ensure_superdataset(self) -> AsyncDataset:
         superds = AsyncDataset(self.config.dandiset_root)
@@ -74,11 +80,10 @@ class DandiDatasetter(AsyncResource):
             workers=self.config.workers,
         )
         to_save: list[str] = []
-        ds_stats: list[DandisetStats] = []
+        ds_stats: list[DatasetStats] = []
         for d, stats in report.results:
             to_save.append(d.identifier)
             if self.config.gh_org:
-                assert stats is not None
                 ds_stats.append(stats)
         if to_save:
             log.debug("Committing superdataset")
@@ -111,79 +116,80 @@ class DandiDatasetter(AsyncResource):
                 name=dandiset_id,
                 backup_remote=self.config.dandisets.remote,
             ):
-                await self.edit_github_repo(
+                await self.manager.edit_github_repo(
                     GHRepo(self.config.gh_org, dandiset_id),
                     homepage=f"https://identifiers.org/DANDI:{dandiset_id}",
                 )
 
     async def update_dandiset(
         self, dandiset: RemoteDandiset, ds: Optional[AsyncDataset] = None
-    ) -> Optional[DandisetStats]:
+    ) -> DatasetStats:
         if ds is None:
             ds = await self.init_dataset(
                 self.config.dandiset_root / dandiset.identifier,
                 dandiset_id=dandiset.identifier,
                 create_time=dandiset.version.created,
             )
-        dlog = log.sublogger(f"Dandiset {dandiset.identifier}")
-        changed = await self.sync_dataset(dandiset, ds, dlog)
+        dmanager = self.manager.with_sublogger(f"Dandiset {dandiset.identifier}")
+        changed, zarr_stats = await self.sync_dataset(dandiset, ds, dmanager)
         await self.ensure_github_remote(ds, dandiset.identifier)
         await self.tag_releases(dandiset, ds, push=self.config.gh_org is not None)
+        stats, _ = await ds.get_stats(cache=zarr_stats)
         if self.config.gh_org is not None:
             if changed:
-                dlog.info("Pushing to sibling")
+                dmanager.log.info("Pushing to sibling")
                 await ds.push(to="github", jobs=self.config.jobs, data="nothing")
-            return await self.set_dandiset_gh_metadata(dandiset, ds)
-        else:
-            return None
+            await self.manager.set_dandiset_description(dandiset, stats)
+        return stats
 
     async def sync_dataset(
-        self, dandiset: RemoteDandiset, ds: AsyncDataset, dlog: PrefixedLogger
-    ) -> bool:
-        # Returns true if any changes were committed to the repository
-        dlog.info("Syncing")
+        self, dandiset: RemoteDandiset, ds: AsyncDataset, manager: Manager
+    ) -> tuple[bool, dict[str, DatasetStats]]:
+        # Returns:
+        # - true iff any changes were committed to the repository
+        # - a mapping from Zarr IDs to their dataset stats
+        manager.log.info("Syncing")
         if await ds.is_dirty():
             raise RuntimeError(f"Dirty {dandiset}; clean or save before running")
         tracker = await anyio.to_thread.run_sync(AssetTracker.from_dataset, ds.pathobj)
-        syncer = Syncer(
-            config=self.config, dandiset=dandiset, ds=ds, tracker=tracker, log=dlog
-        )
+        syncer = Syncer(manager=manager, dandiset=dandiset, ds=ds, tracker=tracker)
         await update_dandiset_metadata(dandiset, ds)
         await syncer.sync_assets()
         await syncer.prune_deleted()
         syncer.dump_asset_metadata()
         assert syncer.report is not None
-        dlog.debug("Checking whether repository is dirty ...")
+        manager.log.debug("Checking whether repository is dirty ...")
         if await ds.is_unclean():
-            dlog.info("Committing changes")
+            manager.log.info("Committing changes")
             await ds.save(
                 message=syncer.get_commit_message(),
                 commit_date=dandiset.version.modified,
             )
-            dlog.debug("Commit made")
+            manager.log.debug("Commit made")
             syncer.report.commits += 1
         else:
-            dlog.debug("Repository is clean")
+            manager.log.debug("Repository is clean")
             if syncer.report.commits == 0:
-                dlog.info("No changes made to repository")
-        dlog.debug("Running `git gc`")
+                manager.log.info("No changes made to repository")
+        manager.log.debug("Running `git gc`")
         await ds.gc()
-        dlog.debug("Finished running `git gc`")
-        return syncer.report.commits > 0
-
-    async def get_ghrepo_for_dataset(self, ds: AsyncDataset) -> GHRepo:
-        url = await ds.get_remote_url()
-        return GHRepo.parse_url(url)
+        manager.log.debug("Finished running `git gc`")
+        assert syncer.report.zarr_stats is not None
+        return (syncer.report.commits > 0, syncer.report.zarr_stats)
 
     async def update_github_metadata(
         self,
         dandiset_ids: Sequence[str],
         exclude: Optional[re.Pattern[str]],
     ) -> None:
-        ds_stats: list[DandisetStats] = []
+        ds_stats: list[DatasetStats] = []
         async for d in self.get_dandisets(dandiset_ids, exclude=exclude):
             ds = AsyncDataset(self.config.dandiset_root / d.identifier)
-            ds_stats.append(await self.set_dandiset_gh_metadata(d, ds))
+            stats, zarrstats = await ds.get_stats()
+            await self.manager.set_dandiset_description(d, stats)
+            for zarr_id, zarr_stat in zarrstats.items():
+                await self.manager.set_zarr_description(zarr_id, zarr_stat)
+            ds_stats.append(stats)
         if not dandiset_ids and exclude is None:
             superds = AsyncDataset(self.config.dandiset_root)
             await self.set_superds_description(superds, ds_stats)
@@ -202,85 +208,17 @@ class DandiDatasetter(AsyncResource):
                 else:
                     yield d
 
-    async def get_dandiset_stats(
-        self, ds: AsyncDataset
-    ) -> tuple[DandisetStats, dict[str, DandisetStats]]:
-        files = 0
-        size = 0
-        substats: dict[str, DandisetStats] = {}
-        for filestat in await ds.get_file_stats():
-            path = Path(filestat.path)
-            if not is_meta_file(path.parts[0], dandiset=True):
-                if filestat.type is ObjectType.COMMIT:
-                    zarr_ds = AsyncDataset(ds.pathobj / path)
-                    zarr_id = Path(await zarr_ds.get_remote_url()).name
-                    try:
-                        zarr_stat = substats[zarr_id]
-                    except KeyError:
-                        zarr_stat, subsubstats = await self.get_dandiset_stats(zarr_ds)
-                        assert not subsubstats
-                        substats[zarr_id] = zarr_stat
-                    files += zarr_stat.files
-                    size += zarr_stat.size
-                else:
-                    files += 1
-                    assert filestat.size is not None
-                    size += filestat.size
-        return (DandisetStats(files=files, size=size), substats)
-
-    async def set_dandiset_gh_metadata(
-        self, d: RemoteDandiset, ds: AsyncDataset
-    ) -> DandisetStats:
-        assert self.config.gh_org is not None
-        assert self.config.zarr_gh_org is not None
-        stats, zarrstats = await self.get_dandiset_stats(ds)
-        await self.edit_github_repo(
-            GHRepo(self.config.gh_org, d.identifier),
-            homepage=f"https://identifiers.org/DANDI:{d.identifier}",
-            description=await self.describe_dandiset(d, stats),
-        )
-        for zarr_id, zarr_stat in zarrstats.items():
-            await self.edit_github_repo(
-                GHRepo(self.config.zarr_gh_org, zarr_id),
-                description=self.describe_zarr(zarr_stat),
-            )
-        return stats
-
-    async def describe_dandiset(
-        self, dandiset: RemoteDandiset, stats: DandisetStats
-    ) -> str:
-        metadata = await dandiset.aget_raw_metadata()
-        desc = dandiset.version.name
-        contact = ", ".join(
-            c["name"]
-            for c in metadata.get("contributor", [])
-            if "dandi:ContactPerson" in c.get("roleName", []) and "name" in c
-        )
-        if contact:
-            desc = f"{contact}, {desc}"
-        versions = 0
-        async for v in dandiset.aget_versions(include_draft=False):
-            versions += 1
-        if versions:
-            desc = f"{quantify(versions, 'release')}, {desc}"
-        size = naturalsize(stats.size)
-        return f"{quantify(stats.files, 'file')}, {size}, {desc}"
-
-    def describe_zarr(self, stats: DandisetStats) -> str:
-        size = naturalsize(stats.size)
-        return f"{quantify(stats.files, 'file')}, {size}"
-
     async def set_superds_description(
-        self, superds: AsyncDataset, ds_stats: list[DandisetStats]
+        self, superds: AsyncDataset, ds_stats: list[DatasetStats]
     ) -> None:
         log.info("Setting repository description for superdataset")
-        repo = await self.get_ghrepo_for_dataset(superds)
+        repo = await superds.get_ghrepo()
         total_size = naturalsize(sum(s.size for s in ds_stats))
         desc = (
             f"{quantify(len(ds_stats), 'Dandiset')}, {total_size} total."
             "  DataLad super-dataset of all Dandisets from https://github.com/dandisets"
         )
-        await self.edit_github_repo(repo, description=desc)
+        await self.manager.edit_github_repo(repo, description=desc)
 
     async def tag_releases(
         self, dandiset: RemoteDandiset, ds: AsyncDataset, push: bool
@@ -403,7 +341,9 @@ class DandiDatasetter(AsyncResource):
                 "checkout", "-b", f"release-{dandiset.version_id}", candidates[0]
             )
             await self.sync_dataset(
-                dandiset, ds, log.sublogger(f"Dandiset {dandiset.identifier}")
+                dandiset,
+                ds,
+                self.manager.with_sublogger(f"Dandiset {dandiset.identifier}"),
             )
         await ds.call_git(
             "tag",
@@ -422,22 +362,6 @@ class DandiDatasetter(AsyncResource):
         if push:
             await ds.call_git("push", "github", dandiset.version_id)
 
-    async def edit_github_repo(self, repo: GHRepo, **kwargs: Any) -> None:
-        async with self.ghlock:
-            if self.gh is None:
-                token = await areadcmd("git", "config", "hub.oauthtoken")
-                self.gh = httpx.AsyncClient(
-                    headers={
-                        "Authorization": f"token {token}",
-                        "User-Agent": USER_AGENT,
-                    },
-                    follow_redirects=True,
-                )
-        log.debug("Editing repository %s", repo)
-        # Retry on 404's in case we're calling this right after
-        # create_github_sibling(), when the repo may not yet exist
-        await arequest(self.gh, "PATCH", repo.api_url, json=kwargs, retry_on=[404])
-
     async def backup_zarrs(self, dandiset: str, partial_dir: Path) -> None:
         assert self.config.zarr_root is not None
         partial_dir.mkdir(parents=True, exist_ok=True)
@@ -450,7 +374,7 @@ class DandiDatasetter(AsyncResource):
                 zarr_digest = asset.get_digest().value
             except NotFoundError:
                 log.info(
-                    "%s: Zarr checksum has not been computed yet;" " not backing up",
+                    "%s: Zarr checksum has not been computed yet; not backing up",
                     asset.path,
                 )
                 return
@@ -468,8 +392,7 @@ class DandiDatasetter(AsyncResource):
                 asset,
                 zarr_digest,
                 zarr_dspath,
-                self.config,
-                log.sublogger(f"Zarr {asset.zarr}"),
+                self.manager.with_sublogger(f"Zarr {asset.zarr}"),
                 link=zl,
             )
             log.info("Zarr %s: Moving dataset", asset.zarr)
@@ -540,9 +463,3 @@ class DandiDatasetter(AsyncResource):
         handler.setFormatter(fmter)
         root.addHandler(handler)
         log.info("Saving logs to %s", logfile)
-
-
-@dataclass
-class DandisetStats:
-    files: int
-    size: int

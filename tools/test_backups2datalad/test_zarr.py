@@ -10,10 +10,11 @@ import numpy as np
 import pytest
 from test_util import GitRepo
 
-from backups2datalad.adataset import AsyncDataset
+from backups2datalad.adataset import AsyncDataset, DatasetStats
 from backups2datalad.config import BackupConfig, ResourceConfig
-from backups2datalad.datasetter import DandiDatasetter, DandisetStats
+from backups2datalad.datasetter import DandiDatasetter
 from backups2datalad.logging import log as plog
+from backups2datalad.manager import Manager
 from backups2datalad.zarr import sync_zarr
 
 log = logging.getLogger("test_backups2datalad.test_zarr")
@@ -29,7 +30,9 @@ async def test_sync_zarr(new_dandiset: SampleDandiset, tmp_path: Path) -> None:
     config = BackupConfig(
         s3bucket="dandi-api-staging-dandisets", zarrs=ResourceConfig(path="zarrs")
     )
-    await sync_zarr(asset, checksum, tmp_path, config, plog)
+    await sync_zarr(
+        asset, checksum, tmp_path, Manager(config=config, gh=None, log=plog)
+    )
     new_dandiset.check_zarr_backup(
         Dataset(tmp_path), new_dandiset.zarr_assets["sample.zarr"], checksum
     )
@@ -65,9 +68,9 @@ async def test_backup_zarr(new_dandiset: SampleDandiset, tmp_path: Path) -> None
     assert gitrepo.get_commit_count() == 3
     assert gitrepo.get_commit_subject("HEAD") == "[backups2datalad] 2 files added"
 
-    assert await di.get_dandiset_stats(AsyncDataset(ds.pathobj)) == (
-        DandisetStats(files=6, size=1535),
-        {asset.zarr: DandisetStats(files=5, size=1516)},
+    assert await AsyncDataset(ds.pathobj).get_stats() == (
+        DatasetStats(files=6, size=1535),
+        {asset.zarr: DatasetStats(files=5, size=1516)},
     )
 
     log.info("test_backup_zarr: Syncing unmodified Zarr dandiset")

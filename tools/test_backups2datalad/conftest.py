@@ -15,7 +15,7 @@ from dandi.consts import dandiset_metadata_file
 from dandi.exceptions import NotFoundError
 from dandi.upload import upload
 from datalad.api import Dataset
-from datalad.tests.utils import assert_repo_status
+from datalad.tests.utils_pytest import assert_repo_status
 import pytest
 from test_util import find_filepaths
 import zarr
