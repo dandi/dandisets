@@ -10,7 +10,7 @@ from dandi.consts import dandiset_metadata_file
 from dandi.dandiapi import Version
 from dandi.utils import yaml_load
 from datalad.api import Dataset
-from datalad.tests.utils import assert_repo_status, ok_file_under_git
+from datalad.tests.utils_pytest import assert_repo_status, ok_file_under_git
 import pytest
 from test_util import GitRepo
 

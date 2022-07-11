@@ -14,12 +14,13 @@ from typing import Any, Optional, Sequence, cast
 import anyio
 from datalad.api import Dataset
 from datalad.runner.exception import CommandError
+from ghrepo import GHRepo
 
 from .aioutil import areadcmd, aruncmd, open_git_annex, stream_null_command
 from .config import Remote
 from .consts import DEFAULT_BRANCH
 from .logging import log
-from .util import custom_commit_env, exp_wait
+from .util import custom_commit_env, exp_wait, is_meta_file
 
 if sys.version_info[:2] >= (3, 10):
     from contextlib import aclosing
@@ -272,6 +273,36 @@ class AsyncDataset:
         )
         await self.add(".gitmodules")
 
+    async def get_ghrepo(self) -> GHRepo:
+        url = await self.get_remote_url()
+        return GHRepo.parse_url(url)
+
+    async def get_stats(
+        self, cache: Optional[dict[str, DatasetStats]] = None
+    ) -> tuple[DatasetStats, dict[str, DatasetStats]]:
+        files = 0
+        size = 0
+        substats: dict[str, DatasetStats] = cache if cache is not None else {}
+        for filestat in await self.get_file_stats():
+            path = Path(filestat.path)
+            if not is_meta_file(path.parts[0], dandiset=True):
+                if filestat.type is ObjectType.COMMIT:
+                    zarr_ds = AsyncDataset(self.pathobj / path)
+                    zarr_id = Path(await zarr_ds.get_remote_url()).name
+                    try:
+                        zarr_stat = substats[zarr_id]
+                    except KeyError:
+                        zarr_stat, subsubstats = await zarr_ds.get_stats()
+                        assert not subsubstats
+                        substats[zarr_id] = zarr_stat
+                    files += zarr_stat.files
+                    size += zarr_stat.size
+                else:
+                    files += 1
+                    assert filestat.size is not None
+                    size += filestat.size
+        return (DatasetStats(files=files, size=size), substats)
+
 
 class ObjectType(Enum):
     COMMIT = "commit"
@@ -294,3 +325,9 @@ class FileStat:
             type=ObjectType(typename),
             size=None if sizestr == "-" else int(sizestr),
         )
+
+
+@dataclass
+class DatasetStats:
+    files: int
+    size: int

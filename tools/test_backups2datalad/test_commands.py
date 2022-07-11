@@ -6,7 +6,7 @@ from traceback import format_exception
 from asyncclick.testing import CliRunner, Result
 from conftest import SampleDandiset
 from datalad.api import Dataset
-from datalad.tests.utils import assert_repo_status
+from datalad.tests.utils_pytest import assert_repo_status
 import numpy as np
 import pytest
 

@@ -24,13 +24,14 @@ import httpx
 from identify.identify import tags_from_filename
 
 from .adandi import RemoteDandiset
-from .adataset import AsyncDataset
+from .adataset import AsyncDataset, DatasetStats
 from .aioutil import TextProcess, arequest, aruncmd, open_git_annex
 from .annex import AsyncAnnex
 from .config import BackupConfig
 from .consts import USER_AGENT
 from .logging import PrefixedLogger, log
-from .util import AssetTracker, Report, format_errors, key2hash, maxdatetime, quantify
+from .manager import Manager
+from .util import AssetTracker, format_errors, key2hash, maxdatetime, quantify
 from .zarr import ZarrLink, sync_zarr
 
 if sys.version_info[:2] >= (3, 10):
@@ -48,16 +49,67 @@ class ToDownload:
 
 
 @dataclass
+class Report:
+    commits: int = 0
+    added: int = 0
+    updated: int = 0
+    registered: int = 0
+    downloaded: int = 0
+    failed: int = 0
+    hash_mismatches: int = 0
+    old_unhashed: int = 0
+    zarr_stats: dict[str, DatasetStats] = field(default_factory=dict)
+
+    def update(self, other: Report) -> None:
+        self.commits += other.commits
+        self.added += other.added
+        self.updated += other.updated
+        self.registered += other.registered
+        self.downloaded += other.downloaded
+        self.failed += other.failed
+        self.hash_mismatches += other.hash_mismatches
+        self.old_unhashed += other.old_unhashed
+
+    def get_commit_message(self) -> str:
+        msgparts = []
+        if self.added:
+            msgparts.append(f"{quantify(self.added, 'file')} added")
+        if self.updated:
+            msgparts.append(f"{quantify(self.updated, 'file')} updated")
+        if not msgparts:
+            msgparts.append("Only some metadata updates")
+        return f"[backups2datalad] {', '.join(msgparts)}"
+
+    def check(self) -> None:
+        errors: list[str] = []
+        if self.failed:
+            errors.append(f"{quantify(self.failed, 'asset')} failed to download")
+        if self.hash_mismatches:
+            errors.append(
+                f"{quantify(self.hash_mismatches, 'asset')} had the wrong hash"
+                " after downloading"
+            )
+        if self.old_unhashed:
+            errors.append(
+                f"{quantify(self.old_unhashed, 'asset')} on server had no"
+                " SHA256 hash despite advanced age"
+            )
+        if errors:
+            raise RuntimeError(
+                f"Errors occurred while downloading: {'; '.join(errors)}"
+            )
+
+
+@dataclass
 class Downloader:
     dandiset_id: str
     addurl: TextProcess
     repo: Path
-    config: BackupConfig
+    manager: Manager
     tracker: AssetTracker
     s3client: httpx.AsyncClient
     annex: AsyncAnnex
     nursery: anyio.abc.TaskGroup
-    log: PrefixedLogger
     last_timestamp: Optional[datetime] = None
     report: Report = field(init=False, default_factory=Report)
     in_progress: dict[str, ToDownload] = field(init=False, default_factory=dict)
@@ -71,6 +123,14 @@ class Downloader:
             self.download_sender,
             self.download_receiver,
         ) = anyio.create_memory_object_stream(0)
+
+    @property
+    def config(self) -> BackupConfig:
+        return self.manager.config
+
+    @property
+    def log(self) -> PrefixedLogger:
+        return self.manager.log
 
     async def asset_loop(self, aia: AsyncIterator[Optional[RemoteAsset]]) -> None:
         now = datetime.now(timezone.utc)
@@ -247,8 +307,7 @@ class Downloader:
                 asset,
                 zarr_digest,
                 zarr_dspath,
-                self.config,
-                self.log.sublogger(f"Zarr {asset.zarr}"),
+                self.manager.with_sublogger(f"Zarr {asset.zarr}"),
             )
             self.zarrs[asset.zarr] = zl
 
@@ -363,9 +422,8 @@ class Downloader:
 async def async_assets(
     dandiset: RemoteDandiset,
     ds: AsyncDataset,
-    config: BackupConfig,
+    manager: Manager,
     tracker: AssetTracker,
-    log: PrefixedLogger,
 ) -> Report:
     done_flag = anyio.Event()
     total_report = Report()
@@ -377,7 +435,7 @@ async def async_assets(
                     "--batch",
                     "--with-files",
                     "--jobs",
-                    str(config.jobs),
+                    str(manager.config.jobs),
                     "--json",
                     "--json-error-messages",
                     "--json-progress",
@@ -390,12 +448,11 @@ async def async_assets(
                         dandiset_id=dandiset.identifier,
                         addurl=p,
                         repo=ds.pathobj,
-                        config=config,
+                        manager=manager,
                         tracker=tracker,
                         s3client=s3client,
                         annex=annex,
                         nursery=nursery,
-                        log=log,
                     )
                     nursery.start_soon(dm.asset_loop, aia)
                     nursery.start_soon(dm.feed_addurl)
@@ -404,34 +461,39 @@ async def async_assets(
                 tracker.dump()
 
             for fpath in dm.need_add:
-                log.info("Manually running `git add %s`", fpath)
+                manager.log.info("Manually running `git add %s`", fpath)
                 try:
                     await ds.call_git("add", fpath)
                 except subprocess.CalledProcessError:
-                    log.error("Manual `git add %s` failed", fpath)
+                    manager.log.error("Manual `git add %s` failed", fpath)
                     dm.report.failed += 1
 
             timestamp = dm.last_timestamp
             for zarr_id, zarrlink in dm.zarrs.items():
                 # We've left the task group, so all of the Zarr tasks have
-                # finished and set the timestamps in their links
+                # finished and set the timestamps & stats in their links
+                assert zarrlink.stats is not None
+                total_report.zarr_stats[zarr_id] = zarrlink.stats
                 ts = zarrlink.timestamp
                 if ts is not None:
                     timestamp = maxdatetime(timestamp, ts)
                 for asset_path in zarrlink.asset_paths:
                     if not (ds.pathobj / asset_path).exists():
-                        log.info("Zarr asset added at %s; cloning", asset_path)
+                        manager.log.info("Zarr asset added at %s; cloning", asset_path)
                         dm.report.downloaded += 1
                         dm.report.added += 1
-                        if config.zarr_gh_org is not None:
-                            src = f"https://github.com/{config.zarr_gh_org}/{zarr_id}"
+                        if manager.config.zarr_gh_org is not None:
+                            src = (
+                                "https://github.com/"
+                                f"{manager.config.zarr_gh_org}/{zarr_id}"
+                            )
                         else:
-                            assert config.zarr_root is not None
-                            src = str(config.zarr_root / zarr_id)
+                            assert manager.config.zarr_root is not None
+                            src = str(manager.config.zarr_root / zarr_id)
                         await anyio.to_thread.run_sync(
                             partial(clone, source=src, path=ds.pathobj / asset_path)
                         )
-                        if config.zarr_gh_org is not None:
+                        if manager.config.zarr_gh_org is not None:
                             await aruncmd(
                                 "git",
                                 "remote",
@@ -440,40 +502,42 @@ async def async_assets(
                                 "github",
                                 cwd=ds.pathobj / asset_path,
                             )
-                        log.debug("Finished cloning Zarr to %s", asset_path)
+                        manager.log.debug("Finished cloning Zarr to %s", asset_path)
                     elif ts is not None:
-                        log.info("Zarr asset modified at %s; updating", asset_path)
+                        manager.log.info(
+                            "Zarr asset modified at %s; updating", asset_path
+                        )
                         dm.report.downloaded += 1
                         dm.report.updated += 1
                         zds = AsyncDataset(ds.pathobj / asset_path)
-                        if config.zarr_gh_org is not None:
+                        if manager.config.zarr_gh_org is not None:
                             await zds.update(how="ff-only", sibling="github")
                         else:
                             await zds.update(how="ff-only")
-                        log.debug("Finished updating Zarr at %s", asset_path)
+                        manager.log.debug("Finished updating Zarr at %s", asset_path)
 
             if dandiset.version_id == "draft":
                 if dm.report.registered or dm.report.downloaded:
-                    log.info(
+                    manager.log.info(
                         "%s registered, %s downloaded for this version segment;"
                         " committing",
                         quantify(dm.report.registered, "asset"),
                         quantify(dm.report.downloaded, "asset"),
                     )
-                    log.debug("Checking whether repository is dirty ...")
+                    manager.log.debug("Checking whether repository is dirty ...")
                     if await ds.is_unclean():
-                        log.info("Committing changes")
+                        manager.log.info("Committing changes")
                         assert timestamp is not None
                         await ds.save(
                             message=dm.report.get_commit_message(),
                             commit_date=timestamp,
                         )
-                        log.debug("Commit made")
+                        manager.log.debug("Commit made")
                         total_report.commits += 1
                     else:
-                        log.debug("Repository is clean")
+                        manager.log.debug("Repository is clean")
                 else:
-                    log.info(
+                    manager.log.info(
                         "No assets downloaded for this version segment; not committing"
                     )
             total_report.update(dm.report)

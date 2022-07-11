@@ -22,57 +22,6 @@ from .logging import log
 
 
 @dataclass
-class Report:
-    commits: int = 0
-    added: int = 0
-    updated: int = 0
-    registered: int = 0
-    downloaded: int = 0
-    failed: int = 0
-    hash_mismatches: int = 0
-    old_unhashed: int = 0
-
-    def update(self, other: Report) -> None:
-        self.commits += other.commits
-        self.added += other.added
-        self.updated += other.updated
-        self.registered += other.registered
-        self.downloaded += other.downloaded
-        self.failed += other.failed
-        self.hash_mismatches += other.hash_mismatches
-        self.old_unhashed += other.old_unhashed
-
-    def get_commit_message(self) -> str:
-        msgparts = []
-        if self.added:
-            msgparts.append(f"{quantify(self.added, 'file')} added")
-        if self.updated:
-            msgparts.append(f"{quantify(self.updated, 'file')} updated")
-        if not msgparts:
-            msgparts.append("Only some metadata updates")
-        return f"[backups2datalad] {', '.join(msgparts)}"
-
-    def check(self) -> None:
-        errors: list[str] = []
-        if self.failed:
-            errors.append(f"{quantify(self.failed, 'asset')} failed to download")
-        if self.hash_mismatches:
-            errors.append(
-                f"{quantify(self.hash_mismatches, 'asset')} had the wrong hash"
-                " after downloading"
-            )
-        if self.old_unhashed:
-            errors.append(
-                f"{quantify(self.old_unhashed, 'asset')} on server had no"
-                " SHA256 hash despite advanced age"
-            )
-        if errors:
-            raise RuntimeError(
-                f"Errors occurred while downloading: {'; '.join(errors)}"
-            )
-
-
-@dataclass
 class AssetTracker:
     #: The path to the .dandi/assets.json file that this instance manages
     filepath: Path
