@@ -398,7 +398,13 @@ class DandiDatasetter(AsyncResource):
             log.info("Zarr %s: Moving dataset", asset.zarr)
             zarr_dspath.rename(ultimate_dspath)
             ts = zl.timestamp
-            assert ts is not None
+            if ts is None:
+                # Zarr was already up to date; get timestamp from its latest
+                # commit
+                zds = AsyncDataset(ultimate_dspath)
+                ts = datetime.fromisoformat(
+                    await zds.read_git("show", "-s", "--format=%aI", "HEAD")
+                )
             assert not (ds.pathobj / asset.path).exists()
             log.debug("Waiting for lock on Dandiset dataset")
             async with dslock:
