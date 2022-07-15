@@ -13,6 +13,9 @@ import pytest
 from backups2datalad.__main__ import main
 from backups2datalad.adataset import AsyncDataset
 from backups2datalad.config import BackupConfig, Remote, ResourceConfig
+from backups2datalad.logging import log as plog
+from backups2datalad.manager import Manager
+from backups2datalad.zarr import sync_zarr
 
 pytestmark = pytest.mark.anyio
 
@@ -160,6 +163,56 @@ async def test_backup_zarrs(new_dandiset: SampleDandiset, tmp_path: Path) -> Non
     ds = AsyncDataset(backup_root / "ds" / new_dandiset.dandiset_id)
     await ds.ensure_installed(f"Dandiset {new_dandiset.dandiset_id}")
     (backup_root / "zarr").mkdir(parents=True, exist_ok=True)
+
+    r = await CliRunner().invoke(
+        main,
+        ["-c", str(cfgfile), "backup-zarrs", new_dandiset.dandiset_id],
+        standalone_mode=False,
+    )
+    assert r.exit_code == 0, show_result(r)
+    assert list((backup_root / "partial-zarrs").iterdir()) == []
+    assert sorted(p.name for p in (backup_root / "zarr").iterdir()) == sorted(
+        asset.zarr for asset in assets.values()
+    )
+    await new_dandiset.check_all_zarrs(ds.ds, backup_root / "zarr")
+
+
+async def test_backup_committed_zarr(
+    new_dandiset: SampleDandiset, tmp_path: Path
+) -> None:
+    new_dandiset.add_zarr("sample.zarr", np.arange(1000), np.arange(1000, 0, -1))
+    new_dandiset.add_zarr("z/eye.zarr", np.eye(5))
+    await new_dandiset.upload()
+    assets = {
+        asset.path: asset async for asset in new_dandiset.dandiset.aget_zarr_assets()
+    }
+
+    backup_root = tmp_path / "backup"
+
+    cfgfile = tmp_path / "config.yaml"
+    cfg = BackupConfig(
+        dandi_instance="dandi-staging",
+        s3bucket="dandi-api-staging-dandisets",
+        backup_root=backup_root,
+        dandisets=ResourceConfig(path="ds"),
+        zarrs=ResourceConfig(path="zarr"),
+    )
+    cfg.dump_yaml(cfgfile)
+
+    # The superdataset needs to be created before creating the Dandiset dataset
+    await AsyncDataset(backup_root / "ds").ensure_installed("superdataset")
+    ds = AsyncDataset(backup_root / "ds" / new_dandiset.dandiset_id)
+    await ds.ensure_installed(f"Dandiset {new_dandiset.dandiset_id}")
+    (backup_root / "zarr").mkdir(parents=True, exist_ok=True)
+
+    a0 = assets["sample.zarr"]
+    (backup_root / "partial-zarrs" / a0.zarr).mkdir(parents=True, exist_ok=True)
+    await sync_zarr(
+        a0,
+        a0.get_digest().value,
+        backup_root / "partial-zarrs" / a0.zarr,
+        Manager(config=cfg, gh=None, log=plog),
+    )
 
     r = await CliRunner().invoke(
         main,
