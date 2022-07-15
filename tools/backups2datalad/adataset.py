@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import InitVar, dataclass, field, replace
 from datetime import datetime
 from enum import Enum
@@ -7,6 +8,7 @@ from functools import partial
 import json
 from operator import attrgetter
 from pathlib import Path
+import re
 import subprocess
 import sys
 from typing import Any, Optional, Sequence, cast
@@ -123,6 +125,8 @@ class AsyncDataset:
         await aruncmd(
             "datalad",
             "save",
+            "-d",
+            ".",
             "-m",
             message,
             *path,
@@ -241,38 +245,6 @@ class AsyncDataset:
             raise ValueError(f"{upstream!r} remote URL not set for {self.path}")
         return url
 
-    async def ensure_subdataset(self, subds: AsyncDataset) -> None:
-        path = subds.pathobj.relative_to(self.pathobj)
-        try:
-            await self.call_git("submodule", "status", path)
-        except subprocess.CalledProcessError as e:
-            if e.returncode != 1:
-                raise
-        else:
-            return
-        log.info("Adding submodule %s of %s to .gitmodules", path, self.path)
-        try:
-            url = await subds.get_remote_url()
-        except ValueError:
-            url = f"./{path}"
-        await self.call_git("submodule", "add", url, path)
-        datalad_id = await subds.read_git(
-            "config",
-            "--file",
-            ".datalad/config",
-            "--get",
-            "datalad.dataset.id",
-        )
-        await self.call_git(
-            "config",
-            "--file",
-            ".gitmodules",
-            "--replace-all",
-            f"submodule.{path}.datalad-id",
-            datalad_id,
-        )
-        await self.add(".gitmodules")
-
     async def get_ghrepo(self) -> GHRepo:
         url = await self.get_remote_url()
         return GHRepo.parse_url(url)
@@ -302,6 +274,18 @@ class AsyncDataset:
                     assert filestat.size is not None
                     size += filestat.size
         return (DatasetStats(files=files, size=size), substats)
+
+    def assert_no_duplicates_in_gitmodules(self) -> None:
+        filepath = self.pathobj / ".gitmodules"
+        if not filepath.exists():
+            return
+        qtys: Counter[str] = Counter()
+        with filepath.open() as fp:
+            for line in fp:
+                if m := re.fullmatch(r'\[submodule "(.+)"\]\s*', line):
+                    qtys[m[1]] += 1
+        dupped = [name for (name, count) in qtys.most_common() if count > 1]
+        assert not dupped, f"Duplicates found in {filepath}: {dupped}"
 
 
 class ObjectType(Enum):
