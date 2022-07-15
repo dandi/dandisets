@@ -87,9 +87,9 @@ class DandiDatasetter(AsyncResource):
                 ds_stats.append(stats)
         if to_save:
             log.debug("Committing superdataset")
-            for did in to_save:
-                await superds.ensure_subdataset(AsyncDataset(superds.pathobj / did))
-            await superds.save(message="CRON update", path=to_save + [".gitmodules"])
+            superds.assert_no_duplicates_in_gitmodules()
+            await superds.save(message="CRON update", path=to_save)
+            superds.assert_no_duplicates_in_gitmodules()
             log.debug("Superdataset committed")
         if report.failed:
             raise RuntimeError(
@@ -420,13 +420,14 @@ class DandiDatasetter(AsyncResource):
                         cwd=ds.pathobj / asset.path,
                     )
                 log.debug("Zarr %s: Finished cloning", asset.zarr)
-                await ds.ensure_subdataset(AsyncDataset(ds.pathobj / asset.path))
                 log.debug("Zarr %s: Saving changes to Dandiset dataset", asset.zarr)
+                ds.assert_no_duplicates_in_gitmodules()
                 await ds.save(
                     f"[backups2datalad] Backed up Zarr {asset.zarr} to {asset.path}",
-                    path=[asset.path, ".gitmodules"],
+                    path=[asset.path],
                     commit_date=ts,
                 )
+                ds.assert_no_duplicates_in_gitmodules()
                 log.debug("Zarr %s: Changes saved", asset.zarr)
 
         report = await pool_amap(
