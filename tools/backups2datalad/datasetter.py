@@ -9,6 +9,8 @@ from operator import attrgetter
 import os
 from pathlib import Path
 import re
+import shutil
+from socket import gethostname
 import subprocess
 import sys
 from typing import AsyncGenerator, Optional, Sequence
@@ -396,12 +398,16 @@ class DandiDatasetter(AsyncResource):
                 link=zl,
             )
             log.info("Zarr %s: Moving dataset", asset.zarr)
-            zarr_dspath.rename(ultimate_dspath)
+            shutil.move(str(zarr_dspath), str(ultimate_dspath))
+            log.info("Zarr %s: Finished moving dataset", asset.zarr)
+            zds = AsyncDataset(ultimate_dspath)
+            await zds.call_annex(
+                "describe", "here", f"{gethostname()}:{ultimate_dspath}"
+            )
             ts = zl.timestamp
             if ts is None:
                 # Zarr was already up to date; get timestamp from its latest
                 # commit
-                zds = AsyncDataset(ultimate_dspath)
                 ts = datetime.fromisoformat(
                     await zds.read_git("show", "-s", "--format=%aI", "HEAD")
                 )
