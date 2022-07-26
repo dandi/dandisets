@@ -8,10 +8,10 @@ import sys
 from typing import TYPE_CHECKING, AsyncGenerator, Iterator, Optional, cast
 from urllib.parse import quote
 
+from aiobotocore.config import AioConfig
 from aiobotocore.session import get_session
 import anyio
 from botocore import UNSIGNED
-from botocore.client import Config
 from dandi.dandiapi import RemoteZarrAsset
 from pydantic import BaseModel
 
@@ -124,7 +124,7 @@ class ZarrSyncer:
         async with aclosing(self.annex.list_files()) as fileiter:
             local_paths = {f async for f in fileiter if not is_meta_file(f)}
         async with get_session().create_client(
-            "s3", config=Config(signature_version=UNSIGNED)
+            "s3", config=AioConfig(signature_version=UNSIGNED)
         ) as client:
             if not await self.needs_sync(client, last_sync, local_paths):
                 self.log.info("backup up to date")
