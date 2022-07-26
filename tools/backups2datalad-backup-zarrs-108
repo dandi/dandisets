@@ -7,4 +7,5 @@ python -m tools.backups2datalad \
     --config tools/backups2datalad.cfg.yaml \
     backup-zarrs \
     --workers 10 \
+    --partial-dir /mnt/fast/dandi/partial-zarrs \
     '000108' |& tee .git/tmp/update-zarrs-"$(date -u +%Y.%m.%d.%H.%M.%S)".log
