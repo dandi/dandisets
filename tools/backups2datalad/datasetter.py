@@ -83,8 +83,9 @@ class DandiDatasetter(AsyncResource):
         )
         to_save: list[str] = []
         ds_stats: list[DatasetStats] = []
-        for d, stats in report.results:
-            to_save.append(d.identifier)
+        for d, (changed, stats) in report.results:
+            if changed:
+                to_save.append(d.identifier)
             if self.config.gh_org:
                 ds_stats.append(stats)
         if to_save:
@@ -125,7 +126,10 @@ class DandiDatasetter(AsyncResource):
 
     async def update_dandiset(
         self, dandiset: RemoteDandiset, ds: Optional[AsyncDataset] = None
-    ) -> DatasetStats:
+    ) -> tuple[bool, DatasetStats]:
+        # Returns:
+        # - true iff any changes were committed to the repository
+        # - the dataset stats for the dataset as a whole
         if ds is None:
             ds = await self.init_dataset(
                 self.config.dandiset_root / dandiset.identifier,
@@ -142,7 +146,7 @@ class DandiDatasetter(AsyncResource):
                 dmanager.log.info("Pushing to sibling")
                 await ds.push(to="github", jobs=self.config.jobs, data="nothing")
             await self.manager.set_dandiset_description(dandiset, stats)
-        return stats
+        return (changed, stats)
 
     async def sync_dataset(
         self, dandiset: RemoteDandiset, ds: AsyncDataset, manager: Manager
