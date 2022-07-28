@@ -168,7 +168,7 @@ class RemoteDandiset(SyncRemoteDandiset):
         async with aclosing(
             self.aclient.paginate(
                 f"{self.version_api_path}assets/",
-                params={"order": "created", "metadata": "1"},
+                params={"order": "created", "metadata": "1", "page_size": "1000"},
             )
         ) as ait:
             async for item in ait:
@@ -185,7 +185,7 @@ class RemoteDandiset(SyncRemoteDandiset):
         async with aclosing(
             self.aclient.paginate(
                 f"{self.version_api_path}assets/",
-                params={"path": path, "metadata": "1"},
+                params={"path": path, "metadata": "1", "page_size": "1000"},
             )
         ) as ait:
             async for item in ait:
