@@ -167,11 +167,12 @@ class RemoteDandiset(SyncRemoteDandiset):
     async def aget_assets(self) -> AsyncGenerator[RemoteAsset, None]:
         async with aclosing(
             self.aclient.paginate(
-                f"{self.version_api_path}assets/", params={"order": "created"}
+                f"{self.version_api_path}assets/",
+                params={"order": "created", "metadata": "1"},
             )
         ) as ait:
             async for item in ait:
-                metadata = await self.aclient.get(f"/assets/{item['asset_id']}/")
+                metadata = item.pop("metadata", None)
                 yield RemoteAsset.from_data(self, item, metadata)
 
     async def aget_zarr_assets(self) -> AsyncGenerator[RemoteZarrAsset, None]:
@@ -184,12 +185,12 @@ class RemoteDandiset(SyncRemoteDandiset):
         async with aclosing(
             self.aclient.paginate(
                 f"{self.version_api_path}assets/",
-                params={"path": path},
+                params={"path": path, "metadata": "1"},
             )
         ) as ait:
             async for item in ait:
                 if item["path"] == path:
-                    metadata = await self.aclient.get(f"/assets/{item['asset_id']}/")
+                    metadata = item.pop("metadata", None)
                     return RemoteAsset.from_data(self, item, metadata)
         raise ValueError(f"Asset not found: {path}")
 
