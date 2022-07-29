@@ -224,7 +224,11 @@ async def release(
         dandiset_obj = await datasetter.dandi_client.get_dandiset(dandiset, version)
         dataset = AsyncDataset(datasetter.config.dandiset_root / dandiset)
         await datasetter.mkrelease(
-            dandiset_obj, dataset, commitish=commitish, push=push
+            dandiset_obj,
+            dataset,
+            commitish=commitish,
+            push=push,
+            log=datasetter.manager.log.sublogger(f"Dandiset {dandiset}/{version}"),
         )
         if push:
             await dataset.push(to="github", jobs=datasetter.config.jobs)
