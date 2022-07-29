@@ -18,7 +18,7 @@ from datalad.api import Dataset
 from datalad.support.json_py import dump
 
 from .config import BackupConfig
-from .logging import log
+from .logging import PrefixedLogger
 
 
 @dataclass
@@ -142,7 +142,9 @@ def assets_eq(remote_assets: list[RemoteAsset], local_assets: list[dict]) -> boo
     }
 
 
-async def update_dandiset_metadata(dandiset: RemoteDandiset, ds: Dataset) -> None:
+async def update_dandiset_metadata(
+    dandiset: RemoteDandiset, ds: Dataset, log: PrefixedLogger
+) -> None:
     log.info("Updating metadata file")
     (ds.pathobj / dandiset_metadata_file).unlink(missing_ok=True)
     metadata = await dandiset.aget_raw_metadata()

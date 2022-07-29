@@ -30,7 +30,7 @@ from .adataset import AsyncDataset, DatasetStats
 from .aioutil import aruncmd, pool_amap
 from .config import BackupConfig
 from .consts import DEFAULT_BRANCH
-from .logging import log, quiet_filter
+from .logging import PrefixedLogger, log, quiet_filter
 from .manager import GitHub, Manager
 from .syncer import Syncer
 from .util import AssetTracker, assets_eq, quantify, update_dandiset_metadata
@@ -139,7 +139,9 @@ class DandiDatasetter(AsyncResource):
         dmanager = self.manager.with_sublogger(f"Dandiset {dandiset.identifier}")
         changed, zarr_stats = await self.sync_dataset(dandiset, ds, dmanager)
         await self.ensure_github_remote(ds, dandiset.identifier)
-        await self.tag_releases(dandiset, ds, push=self.config.gh_org is not None)
+        await self.tag_releases(
+            dandiset, ds, push=self.config.gh_org is not None, log=dmanager.log
+        )
         stats, _ = await ds.get_stats(cache=zarr_stats)
         if self.config.gh_org is not None:
             if changed:
@@ -159,7 +161,7 @@ class DandiDatasetter(AsyncResource):
             raise RuntimeError(f"Dirty {dandiset}; clean or save before running")
         tracker = await anyio.to_thread.run_sync(AssetTracker.from_dataset, ds.pathobj)
         syncer = Syncer(manager=manager, dandiset=dandiset, ds=ds, tracker=tracker)
-        await update_dandiset_metadata(dandiset, ds)
+        await update_dandiset_metadata(dandiset, ds, log=manager.log)
         await syncer.sync_assets()
         await syncer.prune_deleted()
         syncer.dump_asset_metadata()
@@ -210,7 +212,7 @@ class DandiDatasetter(AsyncResource):
         async with aclosing(diter):
             async for d in diter:
                 if exclude is not None and exclude.search(d.identifier):
-                    log.debug("Skipping dandiset %s", d.identifier)
+                    log.debug("Skipping Dandiset %s", d.identifier)
                 else:
                     yield d
 
@@ -227,18 +229,22 @@ class DandiDatasetter(AsyncResource):
         await self.manager.edit_github_repo(repo, description=desc)
 
     async def tag_releases(
-        self, dandiset: RemoteDandiset, ds: AsyncDataset, push: bool
+        self,
+        dandiset: RemoteDandiset,
+        ds: AsyncDataset,
+        push: bool,
+        log: PrefixedLogger,
     ) -> None:
         if not self.config.enable_tags:
             return
-        log.info("Tagging releases for Dandiset %s", dandiset.identifier)
+        log.info("Tagging releases for Dandiset")
         versions = [v async for v in dandiset.aget_versions(include_draft=False)]
         for v in versions:
             if await ds.read_git("tag", "-l", v.identifier):
                 log.debug("Version %s already tagged", v.identifier)
             else:
                 log.info("Tagging version %s", v.identifier)
-                await self.mkrelease(dandiset.for_version(v), ds, push=push)
+                await self.mkrelease(dandiset.for_version(v), ds, push=push, log=log)
         if versions:
             latest = max(map(attrgetter("identifier"), versions), key=PkgVersion)
             description = await ds.read_git("describe", "--tags", "--long", "--always")
@@ -270,6 +276,7 @@ class DandiDatasetter(AsyncResource):
         dandiset: RemoteDandiset,
         ds: AsyncDataset,
         push: bool,
+        log: PrefixedLogger,
         commitish: Optional[str] = None,
     ) -> None:
         # `dandiset` must have its version set to the published version
@@ -330,7 +337,7 @@ class DandiDatasetter(AsyncResource):
             await ds.call_git(
                 "checkout", "-b", f"release-{dandiset.version_id}", matching[0]
             )
-            await update_dandiset_metadata(dandiset, ds)
+            await update_dandiset_metadata(dandiset, ds, log)
             log.debug("Committing changes")
             await ds.save(
                 message=f"[backups2datalad] {dandiset_metadata_file} updated",
