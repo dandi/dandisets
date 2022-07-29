@@ -229,7 +229,7 @@ async def stream_null_command(
     *args: str | Path, cwd: Optional[Path] = None
 ) -> AsyncGenerator[str, None]:
     argstrs = [str(a) for a in args]
-    desc = "`{shlex.join(argstrs)}`"
+    desc = f"`{shlex.join(argstrs)}`"
     if cwd is not None:
         desc += f" [cwd={cwd}]"
     log.debug("Opening pipe to %s", desc)
