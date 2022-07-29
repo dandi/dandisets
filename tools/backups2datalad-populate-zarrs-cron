@@ -12,6 +12,7 @@ python -m tools.backups2datalad \
 # they aren't subdatasets, we might need to use straight GNU parallel
 
 #datalad foreach-dataset -s -r -R 1 -J 5 --chpwd pwd --cmd-type eval 'ds.push(to="github")'
+foreach_push_gitannex 2
 
 ) 2>|.git/tmp/stderr-pz
 

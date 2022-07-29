@@ -8,7 +8,7 @@ python -m tools.backups2datalad \
    --config tools/backups2datalad.cfg.yaml \
    populate "$@"
 
-datalad foreach-dataset -s -r -R 1 -J 5 --chpwd pwd --cmd-type eval 'ds.push(to="github")'
+foreach_push_gitannex 1
 
 ) 2>|.git/tmp/stderr-pa
 
