@@ -139,6 +139,7 @@ class Downloader:
             async for asset in aia:
                 if asset is None:
                     break
+                self.tracker.remote_assets.add(asset.path)
                 if downloading:
                     if asset.asset_type == AssetType.ZARR:
                         try:
