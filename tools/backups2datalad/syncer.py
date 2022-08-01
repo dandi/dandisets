@@ -20,6 +20,7 @@ class Syncer:
     ds: AsyncDataset
     tracker: AssetTracker
     deleted: int = 0
+    garbage_assets: int = 0
     report: Optional[Report] = None
 
     @property
@@ -53,6 +54,7 @@ class Syncer:
             self.deleted += 1
 
     def dump_asset_metadata(self) -> None:
+        self.garbage_assets = self.tracker.prune_metadata()
         self.tracker.dump()
 
     def get_commit_message(self) -> str:
@@ -65,6 +67,11 @@ class Syncer:
                 msgparts.append(f"{quantify(self.report.updated, 'file')} updated")
         if self.deleted:
             msgparts.append(f"{quantify(self.deleted, 'file')} deleted")
+        if self.garbage_assets:
+            msgparts.append(
+                f"{quantify(self.garbage_assets, 'asset')} garbage-collected"
+                " from .dandi/assets.json"
+            )
         if futures := self.tracker.future_qty:
             msgparts.append(f"{quantify(futures, 'asset')} not yet downloaded")
         if not msgparts:

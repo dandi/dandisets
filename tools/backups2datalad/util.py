@@ -38,6 +38,8 @@ class AssetTracker:
     #: Paths of assets that are not being downloaded this run due to a lack of
     #: SHA256 digests
     future_assets: set[str] = field(init=False, default_factory=set)
+    #: Paths of assets fetched from the remote server
+    remote_assets: set[str] = field(init=False, default_factory=set)
 
     @classmethod
     def from_dataset(cls, dspath: Path) -> AssetTracker:
@@ -80,6 +82,14 @@ class AssetTracker:
             if config.match_asset(apath):
                 self.asset_metadata.pop(apath, None)
                 yield apath
+
+    def prune_metadata(self) -> int:
+        pruned = 0
+        for path in list(self.asset_metadata):
+            if path not in self.remote_assets:
+                self.asset_metadata.pop(path)
+                pruned += 1
+        return pruned
 
     def dump(self) -> None:
         self.filepath.parent.mkdir(exist_ok=True, parents=True)
