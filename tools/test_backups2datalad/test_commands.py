@@ -9,9 +9,10 @@ from datalad.api import Dataset
 from datalad.tests.utils_pytest import assert_repo_status
 import numpy as np
 import pytest
+from test_util import GitRepo
 
 from backups2datalad.__main__ import main
-from backups2datalad.adataset import AsyncDataset
+from backups2datalad.adataset import AssetsState, AsyncDataset
 from backups2datalad.config import BackupConfig, Remote, ResourceConfig
 from backups2datalad.logging import log as plog
 from backups2datalad.manager import Manager
@@ -52,6 +53,10 @@ async def test_backup_command(text_dandiset: SampleDandiset, tmp_path: Path) -> 
     assert_repo_status(tmp_path / "ds")
     ds = Dataset(tmp_path / "ds" / text_dandiset.dandiset_id)
     await text_dandiset.check_backup(ds)
+    repo = GitRepo(ds.pathobj)
+    state = AssetsState.parse_raw(repo.get_blob("HEAD", ".dandi/assets-state.json"))
+    d = await text_dandiset.client.get_dandiset(text_dandiset.dandiset_id, "draft")
+    assert state.timestamp == d.version.modified
 
 
 async def test_populate(new_dandiset: SampleDandiset, tmp_path: Path) -> None:

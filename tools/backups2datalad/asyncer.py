@@ -24,7 +24,7 @@ import httpx
 from identify.identify import tags_from_filename
 
 from .adandi import RemoteDandiset
-from .adataset import AsyncDataset, DatasetStats
+from .adataset import AssetsState, AsyncDataset, DatasetStats
 from .aioutil import TextProcess, arequest, aruncmd, open_git_annex
 from .annex import AsyncAnnex
 from .config import BackupConfig
@@ -525,10 +525,15 @@ async def async_assets(
                         quantify(dm.report.registered, "asset"),
                         quantify(dm.report.downloaded, "asset"),
                     )
+                    assert timestamp is not None
+                    if done_flag.is_set():
+                        ts = dandiset.version.modified
+                    else:
+                        ts = timestamp
+                    ds.set_assets_state(AssetsState(timestamp=ts))
                     manager.log.debug("Checking whether repository is dirty ...")
                     if await ds.is_unclean():
                         manager.log.info("Committing changes")
-                        assert timestamp is not None
                         await ds.save(
                             message=dm.report.get_commit_message(),
                             commit_date=timestamp,
@@ -541,6 +546,8 @@ async def async_assets(
                     manager.log.info(
                         "No assets downloaded for this version segment; not committing"
                     )
+            else:
+                ds.set_assets_state(AssetsState(timestamp=dandiset.version.created))
             total_report.update(dm.report)
     return total_report
 

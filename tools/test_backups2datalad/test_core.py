@@ -14,7 +14,7 @@ from datalad.tests.utils_pytest import assert_repo_status, ok_file_under_git
 import pytest
 from test_util import GitRepo
 
-from backups2datalad.adataset import AsyncDataset
+from backups2datalad.adataset import AssetsState, AsyncDataset
 from backups2datalad.config import BackupConfig
 from backups2datalad.consts import DEFAULT_BRANCH
 from backups2datalad.datasetter import DandiDatasetter
@@ -65,7 +65,7 @@ async def test_1(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
     assert_repo_status(ds.path)  # that all is clean etc
     assert (ds.pathobj / "new.txt").read_text() == "This is a new file.\n"
 
-    repo = GitRepo(ds.path)
+    repo = GitRepo(ds.pathobj)
 
     def check_version_tag(v: Version) -> None:
         vid = v.identifier
@@ -256,13 +256,14 @@ async def test_3(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
         await dandiset.await_until_valid(65)
         if i < 3:
             status = {
+                ".dandi/assets-state.json": "M",
                 ".dandi/assets.json": "M",
                 "counter.txt": "A",
                 "dandiset.yaml": "M",
                 f"v{i}.txt": "A",
             }
         else:
-            status = {"dandiset.yaml": "M"}
+            status = {"dandiset.yaml": "M", ".dandi/assets-state.json": "M"}
         versions.append(((await dandiset.apublish()).version, status))
     log.info("test_3: Creating backup of Dandiset")
     await di.update_from_backup([dandiset_id])
@@ -285,6 +286,10 @@ async def test_3(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
             )
             assert repo.is_ancestor(v.identifier, DEFAULT_BRANCH)
         assert repo.get_diff_tree(v.identifier) == status
+        state = AssetsState.parse_raw(
+            repo.get_blob(v.identifier, ".dandi/assets-state.json")
+        )
+        assert state.timestamp == v.created
 
     # Assert each (non-merge) backup commit on the default branch is a parent
     # of a tag (except the last one, which *is* a tag).

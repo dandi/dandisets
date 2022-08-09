@@ -11,12 +11,13 @@ from pathlib import Path
 import re
 import subprocess
 import sys
-from typing import Any, Optional, Sequence, cast
+from typing import Any, ClassVar, Optional, Sequence, cast
 
 import anyio
 from datalad.api import Dataset
 from datalad.runner.exception import CommandError
 from ghrepo import GHRepo
+from pydantic import BaseModel
 
 from .aioutil import areadcmd, aruncmd, open_git_annex, stream_null_command
 from .config import Remote
@@ -287,6 +288,17 @@ class AsyncDataset:
         dupped = [name for (name, count) in qtys.most_common() if count > 1]
         assert not dupped, f"Duplicates found in {filepath}: {dupped}"
 
+    def get_assets_state(self) -> Optional[AssetsState]:
+        try:
+            return AssetsState.parse_file(self.pathobj / AssetsState.PATH)
+        except FileNotFoundError:
+            return None
+
+    def set_assets_state(self, state: AssetsState) -> None:
+        path = self.pathobj / AssetsState.PATH
+        path.parent.mkdir(exist_ok=True)
+        path.write_text(state.json(indent=4) + "\n")
+
 
 class ObjectType(Enum):
     COMMIT = "commit"
@@ -315,3 +327,8 @@ class FileStat:
 class DatasetStats:
     files: int
     size: int
+
+
+class AssetsState(BaseModel):
+    PATH: ClassVar[Path] = Path(".dandi", "assets-state.json")
+    timestamp: datetime
