@@ -217,3 +217,7 @@ def is_meta_file(path: str, dandiset: bool = False) -> bool:
     if dandiset and root == dandiset_metadata_file:
         return True
     return root in (".dandi", ".datalad", ".git", ".gitattributes", ".gitmodules")
+
+
+class UnexpectedChangeError(Exception):
+    pass

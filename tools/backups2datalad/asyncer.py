@@ -31,7 +31,14 @@ from .config import BackupConfig
 from .consts import USER_AGENT
 from .logging import PrefixedLogger, log
 from .manager import Manager
-from .util import AssetTracker, format_errors, key2hash, maxdatetime, quantify
+from .util import (
+    AssetTracker,
+    UnexpectedChangeError,
+    format_errors,
+    key2hash,
+    maxdatetime,
+    quantify,
+)
 from .zarr import ZarrLink, sync_zarr
 
 if sys.version_info[:2] >= (3, 10):
@@ -110,6 +117,7 @@ class Downloader:
     s3client: httpx.AsyncClient
     annex: AsyncAnnex
     nursery: anyio.abc.TaskGroup
+    error_on_change: bool = False
     last_timestamp: Optional[datetime] = None
     report: Report = field(init=False, default_factory=Report)
     in_progress: dict[str, ToDownload] = field(init=False, default_factory=dict)
@@ -215,6 +223,11 @@ class Downloader:
                 self.log.debug("%s: Skipping asset", asset.path)
                 self.tracker.finish_asset(asset.path)
                 return
+            if self.error_on_change:
+                raise UnexpectedChangeError(
+                    f"Metadata for asset {asset.path} was changed/added but"
+                    " draft timestamp was not updated on server"
+                )
             self.log.info("%s: Syncing", asset.path)
             dest.parent.mkdir(parents=True, exist_ok=True)
             to_update = False
@@ -304,7 +317,7 @@ class Downloader:
                 asset_paths=[asset.path],
             )
             self.nursery.start_soon(
-                partial(sync_zarr, link=zl),
+                partial(sync_zarr, link=zl, error_on_change=self.error_on_change),
                 asset,
                 zarr_digest,
                 zarr_dspath,
@@ -425,6 +438,7 @@ async def async_assets(
     ds: AsyncDataset,
     manager: Manager,
     tracker: AssetTracker,
+    error_on_change: bool = False,
 ) -> Report:
     done_flag = anyio.Event()
     total_report = Report()
@@ -454,6 +468,7 @@ async def async_assets(
                         s3client=s3client,
                         annex=annex,
                         nursery=nursery,
+                        error_on_change=error_on_change,
                     )
                     nursery.start_soon(dm.asset_loop, aia)
                     nursery.start_soon(dm.feed_addurl)
@@ -480,6 +495,11 @@ async def async_assets(
                     timestamp = maxdatetime(timestamp, ts)
                 for asset_path in zarrlink.asset_paths:
                     if not (ds.pathobj / asset_path).exists():
+                        if error_on_change:
+                            raise UnexpectedChangeError(
+                                f"Zarr asset added at {asset_path} but draft"
+                                " timestamp was not updated on server"
+                            )
                         manager.log.info("Zarr asset added at %s; cloning", asset_path)
                         dm.report.downloaded += 1
                         dm.report.added += 1

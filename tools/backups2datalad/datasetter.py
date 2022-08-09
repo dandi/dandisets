@@ -140,6 +140,10 @@ class DandiDatasetter(AsyncResource):
         state = ds.get_assets_state()
         if state is None or state.timestamp < dandiset.version.modified:
             changed, zarr_stats = await self.sync_dataset(dandiset, ds, dmanager)
+        elif dmanager.config.verify_timestamps:
+            changed, zarr_stats = await self.sync_dataset(
+                dandiset, ds, dmanager, error_on_change=True
+            )
         else:
             dmanager.log.info(
                 "Remote Dandiset has not been modified since last backup; not syncing"
@@ -159,7 +163,11 @@ class DandiDatasetter(AsyncResource):
         return (changed, stats)
 
     async def sync_dataset(
-        self, dandiset: RemoteDandiset, ds: AsyncDataset, manager: Manager
+        self,
+        dandiset: RemoteDandiset,
+        ds: AsyncDataset,
+        manager: Manager,
+        error_on_change: bool = False,
     ) -> tuple[bool, dict[str, DatasetStats]]:
         # Returns:
         # - true iff any changes were committed to the repository
@@ -170,9 +178,9 @@ class DandiDatasetter(AsyncResource):
         tracker = await anyio.to_thread.run_sync(AssetTracker.from_dataset, ds.pathobj)
         syncer = Syncer(manager=manager, dandiset=dandiset, ds=ds, tracker=tracker)
         await update_dandiset_metadata(dandiset, ds, log=manager.log)
-        await syncer.sync_assets()
-        await syncer.prune_deleted()
-        syncer.dump_asset_metadata()
+        await syncer.sync_assets(error_on_change)
+        await syncer.prune_deleted(error_on_change)
+        syncer.dump_asset_metadata(error_on_change)
         assert syncer.report is not None
         manager.log.debug("Checking whether repository is dirty ...")
         if await ds.is_unclean():

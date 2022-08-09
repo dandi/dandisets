@@ -113,6 +113,12 @@ async def main(
     help="Enable/disable creation of tags for releases  [default: enabled]",
 )
 @click.option("-w", "--workers", type=int, help="Number of workers to run in parallel")
+@click.option(
+    "--verify-timestamps",
+    is_flag=True,
+    default=None,
+    help="Error if a Dandiset has changed without an update to its timestamp",
+)
 @click.argument("dandisets", nargs=-1)
 @click.pass_obj
 async def update_from_backup(
@@ -123,6 +129,7 @@ async def update_from_backup(
     asset_filter: Optional[re.Pattern[str]],
     force: Optional[str],
     workers: Optional[int],
+    verify_timestamps: Optional[bool],
 ) -> None:
     async with datasetter:
         if asset_filter is not None:
@@ -133,6 +140,8 @@ async def update_from_backup(
             datasetter.config.enable_tags = tags
         if workers is not None:
             datasetter.config.workers = workers
+        if verify_timestamps is not None:
+            datasetter.config.verify_timestamps = verify_timestamps
         await datasetter.update_from_backup(dandisets, exclude=exclude)
 
 

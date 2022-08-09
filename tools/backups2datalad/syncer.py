@@ -10,7 +10,7 @@ from .asyncer import Report, async_assets
 from .config import BackupConfig
 from .logging import PrefixedLogger
 from .manager import Manager
-from .util import AssetTracker, quantify
+from .util import AssetTracker, UnexpectedChangeError, quantify
 
 
 @dataclass
@@ -31,10 +31,10 @@ class Syncer:
     def log(self) -> PrefixedLogger:
         return self.manager.log
 
-    async def sync_assets(self) -> None:
+    async def sync_assets(self, error_on_change: bool = False) -> None:
         self.log.info("Syncing assets...")
         self.report = await async_assets(
-            self.dandiset, self.ds, self.manager, self.tracker
+            self.dandiset, self.ds, self.manager, self.tracker, error_on_change
         )
         self.log.info("Asset sync complete!")
         self.log.info("%s added", quantify(self.report.added, "asset"))
@@ -45,16 +45,26 @@ class Syncer:
         )
         self.report.check()
 
-    async def prune_deleted(self) -> None:
+    async def prune_deleted(self, error_on_change: bool = False) -> None:
         for asset_path in self.tracker.get_deleted(self.config):
+            if error_on_change:
+                raise UnexpectedChangeError(
+                    f"Asset {asset_path!r} deleted from Dandiset but timestamp"
+                    " was not updated on server"
+                )
             self.log.info(
                 "%s: Asset is in dataset but not in Dandiarchive; deleting", asset_path
             )
             await self.ds.remove(asset_path)
             self.deleted += 1
 
-    def dump_asset_metadata(self) -> None:
+    def dump_asset_metadata(self, error_on_change: bool = False) -> None:
         self.garbage_assets = self.tracker.prune_metadata()
+        if self.garbage_assets and error_on_change:
+            raise UnexpectedChangeError(
+                f"{quantify(self.garbage_assets, 'asset')} garbage-collected"
+                " from assets.json but draft timestamp was not updated on server"
+            )
         self.tracker.dump()
 
     def get_commit_message(self) -> str:
