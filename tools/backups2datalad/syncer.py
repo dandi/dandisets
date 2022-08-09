@@ -58,12 +58,12 @@ class Syncer:
             await self.ds.remove(asset_path)
             self.deleted += 1
 
-    def dump_asset_metadata(self, error_on_change: bool = False) -> None:
+    def dump_asset_metadata(self) -> None:
         self.garbage_assets = self.tracker.prune_metadata()
-        if self.garbage_assets and error_on_change:
+        if self.garbage_assets and not self.config.gc_assets:
             raise UnexpectedChangeError(
                 f"{quantify(self.garbage_assets, 'asset')} garbage-collected"
-                " from assets.json but draft timestamp was not updated on server"
+                " from assets.json"
             )
         self.tracker.dump()
 

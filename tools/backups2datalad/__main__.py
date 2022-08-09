@@ -108,17 +108,26 @@ async def main(
     help="Force all assets to be updated, even those whose metadata hasn't changed",
 )
 @click.option(
+    "--gc-assets",
+    is_flag=True,
+    default=None,
+    help=(
+        "If assets.json contains any assets neither on the server nor in the"
+        " backup, delete them instead of erroring"
+    ),
+)
+@click.option(
     "--tags/--no-tags",
     default=None,
     help="Enable/disable creation of tags for releases  [default: enabled]",
 )
-@click.option("-w", "--workers", type=int, help="Number of workers to run in parallel")
 @click.option(
     "--verify-timestamps",
     is_flag=True,
     default=None,
     help="Error if a Dandiset has changed without an update to its timestamp",
 )
+@click.option("-w", "--workers", type=int, help="Number of workers to run in parallel")
 @click.argument("dandisets", nargs=-1)
 @click.pass_obj
 async def update_from_backup(
@@ -130,6 +139,7 @@ async def update_from_backup(
     force: Optional[str],
     workers: Optional[int],
     verify_timestamps: Optional[bool],
+    gc_assets: Optional[bool],
 ) -> None:
     async with datasetter:
         if asset_filter is not None:
@@ -142,6 +152,8 @@ async def update_from_backup(
             datasetter.config.workers = workers
         if verify_timestamps is not None:
             datasetter.config.verify_timestamps = verify_timestamps
+        if gc_assets is not None:
+            datasetter.config.gc_assets = gc_assets
         await datasetter.update_from_backup(dandisets, exclude=exclude)
 
 

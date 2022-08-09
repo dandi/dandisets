@@ -180,7 +180,7 @@ class DandiDatasetter(AsyncResource):
         await update_dandiset_metadata(dandiset, ds, log=manager.log)
         await syncer.sync_assets(error_on_change)
         await syncer.prune_deleted(error_on_change)
-        syncer.dump_asset_metadata(error_on_change)
+        syncer.dump_asset_metadata()
         assert syncer.report is not None
         manager.log.debug("Checking whether repository is dirty ...")
         if await ds.is_unclean():
