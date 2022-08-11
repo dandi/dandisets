@@ -37,6 +37,7 @@ async def test_backup_command(text_dandiset: SampleDandiset, tmp_path: Path) -> 
         "dandisets:\n"
         "  path: ds\n"
     )
+
     r = await CliRunner().invoke(
         main,
         [
@@ -57,6 +58,25 @@ async def test_backup_command(text_dandiset: SampleDandiset, tmp_path: Path) -> 
     state = AssetsState.parse_raw(repo.get_blob("HEAD", ".dandi/assets-state.json"))
     d = await text_dandiset.client.get_dandiset(text_dandiset.dandiset_id, "draft")
     assert state.timestamp == d.version.modified
+    last_commit = repo.get_commitish_hash("HEAD")
+
+    r = await CliRunner().invoke(
+        main,
+        [
+            "--backup-root",
+            str(tmp_path),
+            "-c",
+            str(cfgfile),
+            "update-from-backup",
+            "--verify-timestamps",
+            "--gc-assets",
+            text_dandiset.dandiset_id,
+        ],
+        standalone_mode=False,
+    )
+    assert r.exit_code == 0, show_result(r)
+    assert_repo_status(tmp_path / "ds")
+    assert repo.get_commitish_hash("HEAD") == last_commit
 
 
 async def test_populate(new_dandiset: SampleDandiset, tmp_path: Path) -> None:
