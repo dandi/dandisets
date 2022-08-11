@@ -140,6 +140,12 @@ class DandiDatasetter(AsyncResource):
         state = ds.get_assets_state()
         if state is None or state.timestamp < dandiset.version.modified:
             changed, zarr_stats = await self.sync_dataset(dandiset, ds, dmanager)
+        elif state.timestamp > dandiset.version.modified:
+            raise RuntimeError(
+                f"Remote Dandiset {dandiset.identifier} has 'modified'"
+                f" timestamp {dandiset.version.modified} BEFORE last-recorded"
+                f" {state.timestamp}"
+            )
         elif dmanager.config.verify_timestamps:
             changed, zarr_stats = await self.sync_dataset(
                 dandiset, ds, dmanager, error_on_change=True
