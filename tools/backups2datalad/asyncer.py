@@ -19,6 +19,7 @@ from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStre
 from dandi.dandiapi import AssetType, RemoteAsset, RemoteZarrAsset
 from dandi.exceptions import NotFoundError
 from dandischema.models import DigestType
+import datalad
 from datalad.api import clone
 import httpx
 from identify.identify import tags_from_filename
@@ -440,6 +441,11 @@ async def async_assets(
     tracker: AssetTracker,
     error_on_change: bool = False,
 ) -> Report:
+    if datalad.support.external_versions.external_versions["cmd:annex"] < "10.20220724":
+        raise RuntimeError(
+            "git-annex does not support annex.alwayscompact=false;"
+            " v10.20220724 required"
+        )
     done_flag = anyio.Event()
     total_report = Report()
     async with aclosing(aiterassets(dandiset, done_flag)) as aia:
@@ -447,6 +453,8 @@ async def async_assets(
             try:
                 async with await open_git_annex(
                     "addurl",
+                    "-c",
+                    "annex.alwayscompact=false",
                     "--batch",
                     "--with-files",
                     "--jobs",

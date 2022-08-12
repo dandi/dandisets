@@ -100,6 +100,8 @@ class AsyncAnnex(anyio.abc.AsyncResource):
             if self.pregisterurl is None:
                 self.pregisterurl = await open_git_annex(
                     "registerurl",
+                    "-c",
+                    "annex.alwayscompact=false",
                     "--batch",
                     "--json",
                     "--json-error-messages",
