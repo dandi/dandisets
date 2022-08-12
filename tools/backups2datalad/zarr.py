@@ -19,7 +19,7 @@ from .adataset import AsyncDataset, DatasetStats
 from .annex import AsyncAnnex
 from .logging import PrefixedLogger
 from .manager import Manager
-from .util import is_meta_file, key2hash, maxdatetime, quantify
+from .util import UnexpectedChangeError, is_meta_file, key2hash, maxdatetime, quantify
 
 if sys.version_info[:2] >= (3, 10):
     from contextlib import aclosing
@@ -114,6 +114,7 @@ class ZarrSyncer:
     checksum: str
     log: PrefixedLogger
     last_timestamp: Optional[datetime] = None
+    error_on_change: bool = False
     report: ZarrReport = field(default_factory=ZarrReport)
 
     def __post_init__(self) -> None:
@@ -142,6 +143,12 @@ class ZarrSyncer:
                     if last_sync is not None and entry.last_modified < last_sync:
                         self.log.info("%s: file not modified since last backup", entry)
                         continue
+                    if self.error_on_change:
+                        raise UnexpectedChangeError(
+                            f"Zarr {self.zarr_id}: entry {entry!r} was"
+                            " modified/added, but Dandiset draft timestamp was"
+                            " not updated on server"
+                        )
                     dest = self.repo / str(entry)
                     if dest.is_dir():
                         # File path is replacing a directory, which needs to be
@@ -210,6 +217,7 @@ class ZarrSyncer:
                             self.log.info(
                                 "%s: Not in backup remote %s", entry, self.backup_remote
                             )
+        await anyio.to_thread.run_sync(self.prune_deleted, local_paths)
         old_checksum: Optional[str]
         try:
             old_checksum = (self.repo / CHECKSUM_FILE).read_text().strip()
@@ -224,7 +232,6 @@ class ZarrSyncer:
         if (self.repo / OLD_CHECKSUM_FILE).exists():
             (self.repo / OLD_CHECKSUM_FILE).unlink()
         self.write_sync_file()
-        await anyio.to_thread.run_sync(self.prune_deleted, local_paths)
 
     def read_sync_file(self) -> Optional[datetime]:
         try:
@@ -272,9 +279,19 @@ class ZarrSyncer:
                 try:
                     local_paths.remove(path)
                 except KeyError:
+                    if self.error_on_change:
+                        raise UnexpectedChangeError(
+                            f"Zarr {self.zarr_id}: entry {path!r} added, but"
+                            " Dandiset draft timestamp was not updated on server"
+                        )
                     self.log.info("%s on server but not in backup", path)
                     return True
                 if obj["LastModified"] > last_sync:
+                    if self.error_on_change:
+                        raise UnexpectedChangeError(
+                            f"Zarr {self.zarr_id}: entry {path!r} modified, but"
+                            " Dandiset draft timestamp was not updated on server"
+                        )
                     self.log.info(
                         "%s was modified on server at %s, after last sync at %s",
                         path,
@@ -283,6 +300,12 @@ class ZarrSyncer:
                     )
                     return True
         if local_paths:
+            if self.error_on_change:
+                raise UnexpectedChangeError(
+                    f"Zarr {self.zarr_id}: {quantify(len(local_paths), 'file')}"
+                    " deleted, but Dandiset draft timestamp was not updated on"
+                    " server"
+                )
             self.log.info(
                 "%s in local backup but no longer on server",
                 quantify(len(local_paths), "file"),
@@ -302,6 +325,12 @@ class ZarrSyncer:
         dirpath.rmdir()
 
     def prune_deleted(self, local_paths: set[str]) -> None:
+        if local_paths and self.error_on_change:
+            raise UnexpectedChangeError(
+                f"Zarr {self.zarr_id}: {quantify(len(local_paths), 'file')}"
+                " deleted from Zarr, but Dandiset draft timestamp was not"
+                " updated on server"
+            )
         self.log.info("deleting extra files")
         for path in local_paths:
             self.log.info("deleting %s", path)
@@ -368,10 +397,16 @@ async def sync_zarr(
     dsdir: Path,
     manager: Manager,
     link: Optional[ZarrLink] = None,
+    error_on_change: bool = False,
 ) -> None:
     async with manager.config.zarr_limit:
         assert manager.config.zarrs is not None
         ds = AsyncDataset(dsdir)
+        if error_on_change and not ds.pathobj.exists():
+            raise UnexpectedChangeError(
+                f"Zarr {asset.zarr} added to Dandiset at {asset.path!r} but"
+                " draft timestamp was not updated on server"
+            )
         await ds.ensure_installed(
             desc=f"Zarr {asset.zarr}",
             commit_date=asset.created,
@@ -410,6 +445,7 @@ async def sync_zarr(
                 backup_remote=backup_remote,
                 checksum=checksum,
                 log=manager.log,
+                error_on_change=error_on_change,
             )
             await zsync.run()
         report = zsync.report

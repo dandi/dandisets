@@ -136,7 +136,8 @@ class SampleDandiset:
             self.text_assets.keys() | self.blob_assets.keys() | self.zarr_assets.keys()
         )
         assert backup_files == (
-            asset_set | {dandiset_metadata_file, ".dandi/assets.json"}
+            asset_set
+            | {dandiset_metadata_file, ".dandi/assets.json", ".dandi/assets-state.json"}
         )
         with (backup_ds.pathobj / ".dandi" / "assets.json").open() as fp:
             assert {asset["path"] for asset in json.load(fp)} == asset_set

@@ -26,7 +26,7 @@ from humanize import naturalsize
 from packaging.version import Version as PkgVersion
 
 from .adandi import AsyncDandiClient, RemoteDandiset
-from .adataset import AsyncDataset, DatasetStats
+from .adataset import AssetsState, AsyncDataset, DatasetStats
 from .aioutil import aruncmd, pool_amap
 from .config import BackupConfig
 from .consts import DEFAULT_BRANCH
@@ -137,7 +137,25 @@ class DandiDatasetter(AsyncResource):
                 create_time=dandiset.version.created,
             )
         dmanager = self.manager.with_sublogger(f"Dandiset {dandiset.identifier}")
-        changed, zarr_stats = await self.sync_dataset(dandiset, ds, dmanager)
+        state = ds.get_assets_state()
+        if state is None or state.timestamp < dandiset.version.modified:
+            changed, zarr_stats = await self.sync_dataset(dandiset, ds, dmanager)
+        elif state.timestamp > dandiset.version.modified:
+            raise RuntimeError(
+                f"Remote Dandiset {dandiset.identifier} has 'modified'"
+                f" timestamp {dandiset.version.modified} BEFORE last-recorded"
+                f" {state.timestamp}"
+            )
+        elif dmanager.config.verify_timestamps:
+            changed, zarr_stats = await self.sync_dataset(
+                dandiset, ds, dmanager, error_on_change=True
+            )
+        else:
+            dmanager.log.info(
+                "Remote Dandiset has not been modified since last backup; not syncing"
+            )
+            changed = False
+            zarr_stats = {}
         await self.ensure_github_remote(ds, dandiset.identifier)
         await self.tag_releases(
             dandiset, ds, push=self.config.gh_org is not None, log=dmanager.log
@@ -151,7 +169,11 @@ class DandiDatasetter(AsyncResource):
         return (changed, stats)
 
     async def sync_dataset(
-        self, dandiset: RemoteDandiset, ds: AsyncDataset, manager: Manager
+        self,
+        dandiset: RemoteDandiset,
+        ds: AsyncDataset,
+        manager: Manager,
+        error_on_change: bool = False,
     ) -> tuple[bool, dict[str, DatasetStats]]:
         # Returns:
         # - true iff any changes were committed to the repository
@@ -162,8 +184,8 @@ class DandiDatasetter(AsyncResource):
         tracker = await anyio.to_thread.run_sync(AssetTracker.from_dataset, ds.pathobj)
         syncer = Syncer(manager=manager, dandiset=dandiset, ds=ds, tracker=tracker)
         await update_dandiset_metadata(dandiset, ds, log=manager.log)
-        await syncer.sync_assets()
-        await syncer.prune_deleted()
+        await syncer.sync_assets(error_on_change)
+        await syncer.prune_deleted(error_on_change)
         syncer.dump_asset_metadata()
         assert syncer.report is not None
         manager.log.debug("Checking whether repository is dirty ...")
@@ -338,6 +360,7 @@ class DandiDatasetter(AsyncResource):
                 "checkout", "-b", f"release-{dandiset.version_id}", matching[0]
             )
             await update_dandiset_metadata(dandiset, ds, log)
+            ds.set_assets_state(AssetsState(timestamp=dandiset.version.created))
             log.debug("Committing changes")
             await ds.save(
                 message=f"[backups2datalad] {dandiset_metadata_file} updated",

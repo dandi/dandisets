@@ -44,6 +44,8 @@ class BackupConfig(BaseModel):
     workers: int = DEFAULT_WORKERS
     force: Optional[str] = None
     enable_tags: bool = True
+    verify_timestamps: bool = False
+    gc_assets: bool = False
 
     class Config:
         # <https://github.com/samuelcolvin/pydantic/issues/1241>
