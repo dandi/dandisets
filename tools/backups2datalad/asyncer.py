@@ -571,6 +571,10 @@ async def async_assets(
                     else:
                         manager.log.debug("Repository is clean")
                 else:
+                    if done_flag.is_set():
+                        ds.set_assets_state(
+                            AssetsState(timestamp=dandiset.version.modified)
+                        )
                     manager.log.info(
                         "No assets downloaded for this version segment; not committing"
                     )
