@@ -57,7 +57,10 @@ async def test_backup_command(text_dandiset: SampleDandiset, tmp_path: Path) -> 
     repo = GitRepo(ds.pathobj)
     state = AssetsState.parse_raw(repo.get_blob("HEAD", ".dandi/assets-state.json"))
     d = await text_dandiset.client.get_dandiset(text_dandiset.dandiset_id, "draft")
-    assert state.timestamp == d.version.modified
+    # The server seems to sometimes randomly update the Dandiset after the
+    # backup command fetches its information, leading to the state timestamp
+    # not being equal to the draft modified timestamp.
+    assert state.timestamp <= d.version.modified
     last_commit = repo.get_commitish_hash("HEAD")
 
     r = await CliRunner().invoke(
