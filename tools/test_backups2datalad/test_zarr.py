@@ -186,6 +186,7 @@ async def test_backup_zarr_delete_zarr(
     assert gitrepo.get_commit_subject("HEAD") == "[backups2datalad] 1 file deleted"
 
 
+@pytest.mark.xfail(reason="https://github.com/dandi/dandi-archive/issues/1245")
 async def test_backup_zarr_pathological(
     new_dandiset: SampleDandiset, tmp_path: Path
 ) -> None:
