@@ -261,12 +261,14 @@ class DandiDatasetter(AsyncResource):
             return
         log.info("Tagging releases for Dandiset")
         versions = [v async for v in dandiset.aget_versions(include_draft=False)]
+        changed = False
         for v in versions:
             if await ds.read_git("tag", "-l", v.identifier):
                 log.debug("Version %s already tagged", v.identifier)
             else:
                 log.info("Tagging version %s", v.identifier)
                 await self.mkrelease(dandiset.for_version(v), ds, push=push, log=log)
+                changed = True
         if versions:
             latest = max(map(attrgetter("identifier"), versions), key=PkgVersion)
             description = await ds.read_git("describe", "--tags", "--long", "--always")
@@ -290,7 +292,7 @@ class DandiDatasetter(AsyncResource):
                     " content merged)",
                     latest,
                 )
-            if push:
+            if push and (changed or merge):
                 await ds.push(to="github", jobs=self.config.jobs, data="nothing")
 
     async def mkrelease(
