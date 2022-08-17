@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 from shutil import rmtree
+from time import sleep
 
 from conftest import SampleDandiset
 from datalad.api import Dataset
@@ -11,6 +12,7 @@ import pytest
 from test_util import GitRepo
 
 from backups2datalad.adataset import AsyncDataset, DatasetStats
+from backups2datalad.aioutil import arequest
 from backups2datalad.config import BackupConfig, ResourceConfig
 from backups2datalad.datasetter import DandiDatasetter
 from backups2datalad.logging import log as plog
@@ -186,7 +188,6 @@ async def test_backup_zarr_delete_zarr(
     assert gitrepo.get_commit_subject("HEAD") == "[backups2datalad] 1 file deleted"
 
 
-@pytest.mark.xfail(reason="https://github.com/dandi/dandi-archive/issues/1245")
 async def test_backup_zarr_pathological(
     new_dandiset: SampleDandiset, tmp_path: Path
 ) -> None:
@@ -212,6 +213,12 @@ async def test_backup_zarr_pathological(
         f"{new_dandiset.dandiset.version_api_path}assets/",
         json={"metadata": {"path": "empty.zarr"}, "zarr_id": empty_zarr_id},
     )
+    await arequest(client.session, "POST", f"/zarr/{empty_zarr_id}/ingest/")
+    while True:
+        sleep(2)
+        r = await client.get(f"/zarr/{empty_zarr_id}/")
+        if r["status"] == "Complete":
+            break
     new_dandiset.zarr_assets["empty.zarr"] = {}
 
     di = DandiDatasetter(
