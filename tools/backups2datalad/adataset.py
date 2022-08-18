@@ -206,7 +206,7 @@ class AsyncDataset:
         name: str,
         backup_remote: Optional[Remote],
         *,
-        existing: str = "skip",
+        existing: str = "reconfigure",
     ) -> bool:
         # Returns True iff sibling was created
         if "github" not in (await self.read_git("remote")).splitlines():
