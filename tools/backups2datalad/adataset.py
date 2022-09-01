@@ -299,6 +299,30 @@ class AsyncDataset:
         path.parent.mkdir(exist_ok=True)
         path.write_text(state.json(indent=4) + "\n")
 
+    async def uninstall_submodules(self) -> None:
+        await aruncmd(
+            "datalad",
+            "foreach-dataset",
+            "-s",
+            "-Jauto",
+            "--cmd-type",
+            "eval",
+            "--chpwd",
+            "pwd",
+            "ds.uninstall(check=False)",
+            cwd=self.path,
+        )
+
+    async def update_submodule(self, path: str, commit_hash: str) -> None:
+        await aruncmd(
+            "git",
+            "update-index",
+            "--index-info",
+            "-z",
+            cwd=self.path,
+            input=f"160000 commit {commit_hash}\t{path}\0".encode("utf-8"),
+        )
+
 
 class ObjectType(Enum):
     COMMIT = "commit"
