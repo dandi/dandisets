@@ -7,7 +7,7 @@ eval python -m tools.backups2datalad \
    --backup-root "$backup_root" \
    --config tools/backups2datalad.cfg.yaml \
    update-from-backup \
-   -e '000108$' \
+   -e '000(108|23[5678])$' \
    "$*" 2>&1 | grep -v 'nothing to save, working tree clean'
 
 git pull --commit --no-edit
