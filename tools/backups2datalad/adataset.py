@@ -264,7 +264,7 @@ class AsyncDataset:
                 if filestat.type is ObjectType.COMMIT:
                     # this zarr should not be present locally as a submodule
                     # so we should get its id from its information in submodules
-                    sub_info = await self.get_submodules(path=path)
+                    sub_info = await self.get_subdatasets(path=path)
                     assert len(sub_info) == 1  # must be known
                     zarr_id = Path(sub_info[0]['gitmodule_url']).name
                     try:
@@ -309,20 +309,20 @@ class AsyncDataset:
         path.parent.mkdir(exist_ok=True)
         path.write_text(state.json(indent=4) + "\n")
 
-    async def get_submodules(self, **kwargs: Any) -> list:
+    async def get_subdatasets(self, **kwargs: Any) -> list:
         return await anyio.to_thread.run_sync(
             partial(self.ds.subdatasets,
                     result_renderer=None,
                     **kwargs))
 
-    async def uninstall_submodules(self) -> None:
+    async def uninstall_subdatasets(self) -> None:
         # dropping all dandisets is not trivial :-/
         # https://github.com/datalad/datalad/issues/7013
         #  --reckless kill is not working
         # https://github.com/datalad/datalad/issues/6933#issuecomment-1239402621
         #   '*' pathspec is not supported
         # so could resort to this ad-hoc way but we might want just to pair
-        subdatasets = await self.get_submodules(
+        subdatasets = await self.get_subdatasets(
                     result_xfm='relpaths',
                     state="present")
         await anyio.to_thread.run_sync(

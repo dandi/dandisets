@@ -202,7 +202,7 @@ class DandiDatasetter(AsyncResource):
             if syncer.report.commits == 0:
                 manager.log.info("No changes made to repository")
         manager.log.info("Uninstalling submodules")
-        await ds.uninstall_submodules()
+        await ds.uninstall_subdatasets()
         manager.log.info("Finished uninstalling submodules")
         manager.log.debug("Running `git gc`")
         await ds.gc()

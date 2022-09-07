@@ -165,8 +165,6 @@ class SampleDandiset:
             sds["path"].relative_to(backup_ds.pathobj).as_posix(): sds
             for sds in backup_ds.repo.get_submodules_()
         }
-        if subdatasets:
-            import pdb; pdb.set_trace()
         zarr_keys2blobs: dict[str, bytes] = {}
         if self.zarr_assets:
             assert zarr_root is not None
