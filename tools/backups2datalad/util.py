@@ -83,12 +83,12 @@ class AssetTracker:
                 self.asset_metadata.pop(apath, None)
                 yield apath
 
-    def prune_metadata(self) -> int:
-        pruned = 0
+    def prune_metadata(self) -> list[str]:
+        pruned = []
         for path in list(self.asset_metadata):
             if path not in self.remote_assets:
                 self.asset_metadata.pop(path)
-                pruned += 1
+                pruned.append(path)
         return pruned
 
     def dump(self) -> None:
