@@ -20,7 +20,7 @@ from ghrepo import GHRepo
 from pydantic import BaseModel
 
 from .aioutil import areadcmd, aruncmd, open_git_annex, stream_null_command
-from .config import Remote
+from .config import Remote, BackupConfig
 from .consts import DEFAULT_BRANCH
 from .logging import log
 from .util import custom_commit_env, exp_wait, is_meta_file
@@ -251,7 +251,9 @@ class AsyncDataset:
         return GHRepo.parse_url(url)
 
     async def get_stats(
-        self, cache: Optional[dict[str, DatasetStats]] = None
+        self,
+        config: BackupConfig,  # for path to zarrs
+        cache: Optional[dict[str, DatasetStats]] = None
     ) -> tuple[DatasetStats, dict[str, DatasetStats]]:
         files = 0
         size = 0
@@ -260,12 +262,20 @@ class AsyncDataset:
             path = Path(filestat.path)
             if not is_meta_file(path.parts[0], dandiset=True):
                 if filestat.type is ObjectType.COMMIT:
-                    zarr_ds = AsyncDataset(self.pathobj / path)
-                    zarr_id = Path(await zarr_ds.get_remote_url()).name
+                    # this zarr should not be present locally as a submodule
+                    # so we should get its id from its information in submodules
+                    sub_info = await self.get_submodules(path=path)
+                    assert len(sub_info) == 1  # must be known
+                    zarr_id = Path(sub_info[0]['gitmodule_url']).name
                     try:
                         zarr_stat = substats[zarr_id]
                     except KeyError:
-                        zarr_stat, subsubstats = await zarr_ds.get_stats()
+                        assert config.zarr_root
+                        zarr_ds = AsyncDataset(config.zarr_root / zarr_id)
+                        # here we assume that HEAD among dandisets is the same as of
+                        # submodule, which might not necessarily be the case.
+                        # TODO: get for the specific commit
+                        zarr_stat, subsubstats = await zarr_ds.get_stats(config=config)
                         assert not subsubstats
                         substats[zarr_id] = zarr_stat
                     files += zarr_stat.files
@@ -299,6 +309,12 @@ class AsyncDataset:
         path.parent.mkdir(exist_ok=True)
         path.write_text(state.json(indent=4) + "\n")
 
+    async def get_submodules(self, **kwargs: Any) -> list:
+        return await anyio.to_thread.run_sync(
+            partial(self.ds.subdatasets,
+                    result_renderer=None,
+                    **kwargs))
+
     async def uninstall_submodules(self) -> None:
         # dropping all dandisets is not trivial :-/
         # https://github.com/datalad/datalad/issues/7013
@@ -306,10 +322,11 @@ class AsyncDataset:
         # https://github.com/datalad/datalad/issues/6933#issuecomment-1239402621
         #   '*' pathspec is not supported
         # so could resort to this ad-hoc way but we might want just to pair
-        subdatasets = await anyio.to_thread.run_sync(
-            partial(self.ds.subdatasets, state="present"))
+        subdatasets = await self.get_submodules(
+                    result_xfm='relpaths',
+                    state="present")
         await anyio.to_thread.run_sync(
-            partial(self.ds.drop, paths=subdatasets, reckless='kill'))
+            partial(self.ds.drop, path=subdatasets, reckless='kill'))
 
     async def update_submodule(self, path: str, commit_hash: str) -> None:
         await aruncmd(

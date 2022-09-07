@@ -160,7 +160,7 @@ class DandiDatasetter(AsyncResource):
         await self.tag_releases(
             dandiset, ds, push=self.config.gh_org is not None, log=dmanager.log
         )
-        stats, _ = await ds.get_stats(cache=zarr_stats)
+        stats, _ = await ds.get_stats(config=dmanager.config, cache=zarr_stats)
         if self.config.gh_org is not None:
             if changed:
                 dmanager.log.info("Pushing to sibling")
@@ -218,7 +218,7 @@ class DandiDatasetter(AsyncResource):
         ds_stats: list[DatasetStats] = []
         async for d in self.get_dandisets(dandiset_ids, exclude=exclude):
             ds = AsyncDataset(self.config.dandiset_root / d.identifier)
-            stats, zarrstats = await ds.get_stats()
+            stats, zarrstats = await ds.get_stats(config=self.config)
             await self.manager.set_dandiset_description(d, stats)
             for zarr_id, zarr_stat in zarrstats.items():
                 await self.manager.set_zarr_description(zarr_id, zarr_stat)
