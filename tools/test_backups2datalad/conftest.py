@@ -162,8 +162,8 @@ class SampleDandiset:
         self, backup_ds: Dataset, zarr_root: Optional[Path] = None
     ) -> PopulateManifest:
         subdatasets = {
-            sds["path"].relative_to(backup_ds.pathobj).as_posix(): sds
-            for sds in backup_ds.repo.get_submodules_()
+            Path(sds["path"]).relative_to(backup_ds.pathobj).as_posix(): sds
+            for sds in backup_ds.subdatasets(state="any", result_renderer=None)
         }
         zarr_keys2blobs: dict[str, bytes] = {}
         if self.zarr_assets:
