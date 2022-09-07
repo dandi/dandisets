@@ -325,8 +325,10 @@ class AsyncDataset:
         subdatasets = await self.get_subdatasets(
                     result_xfm='relpaths',
                     state="present")
-        await anyio.to_thread.run_sync(
-            partial(self.ds.drop, path=subdatasets, reckless='kill'))
+        log.debug("Will uninstall %d subdatasets", len(subdatasets))
+        res = await anyio.to_thread.run_sync(
+            partial(self.ds.drop, what='datasets', recursive=True, path=subdatasets, reckless='kill'))
+        assert all(r['status'] == 'ok' for r in res)
 
     async def update_submodule(self, path: str, commit_hash: str) -> None:
         await aruncmd(
