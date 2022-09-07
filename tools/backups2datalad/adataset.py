@@ -332,8 +332,9 @@ class AsyncDataset:
         await aruncmd(
             "git",
             "update-index",
-            "--index-info",
             "-z",
+            # apparently must be the last argument!
+            "--index-info",
             cwd=self.path,
             input=f"160000 commit {commit_hash}\t{path}\0".encode("utf-8"),
         )
