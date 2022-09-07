@@ -325,10 +325,14 @@ class AsyncDataset:
         subdatasets = await self.get_subdatasets(
                     result_xfm='relpaths',
                     state="present")
-        log.debug("Will uninstall %d subdatasets", len(subdatasets))
-        res = await anyio.to_thread.run_sync(
-            partial(self.ds.drop, what='datasets', recursive=True, path=subdatasets, reckless='kill'))
-        assert all(r['status'] == 'ok' for r in res)
+        if subdatasets:
+            log.debug("Will uninstall %d subdatasets", len(subdatasets))
+            res = await anyio.to_thread.run_sync(
+                partial(self.ds.drop, what='datasets', recursive=True, path=subdatasets, reckless='kill'))
+            assert all(r['status'] == 'ok' for r in res)
+        else:
+            # yet another case where [] is treated as None?
+            log.debug("No subdatasets to uninstall")
 
     async def update_submodule(self, path: str, commit_hash: str) -> None:
         await aruncmd(
