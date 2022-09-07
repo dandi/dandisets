@@ -300,18 +300,16 @@ class AsyncDataset:
         path.write_text(state.json(indent=4) + "\n")
 
     async def uninstall_submodules(self) -> None:
-        await aruncmd(
-            "datalad",
-            "foreach-dataset",
-            "-s",
-            "-Jauto",
-            "--cmd-type",
-            "eval",
-            "--chpwd",
-            "pwd",
-            "ds.uninstall(check=False)",
-            cwd=self.path,
-        )
+        # dropping all dandisets is not trivial :-/
+        # https://github.com/datalad/datalad/issues/7013
+        #  --reckless kill is not working
+        # https://github.com/datalad/datalad/issues/6933#issuecomment-1239402621
+        #   '*' pathspec is not supported
+        # so could resort to this ad-hoc way but we might want just to pair
+        subdatasets = await anyio.to_thread.run_sync(
+            partial(self.ds.subdatasets, state="present"))
+        await anyio.to_thread.run_sync(
+            partial(self.ds.drop, paths=subdatasets, reckless='kill'))
 
     async def update_submodule(self, path: str, commit_hash: str) -> None:
         await aruncmd(
