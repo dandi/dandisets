@@ -79,7 +79,13 @@ async def test_backup_command(text_dandiset: SampleDandiset, tmp_path: Path) -> 
     )
     assert r.exit_code == 0, show_result(r)
     assert_repo_status(tmp_path / "ds")
-    assert repo.get_commitish_hash("HEAD") == last_commit
+
+    # see above comment about "random" server behavior
+    if state.timestamp < d.version.modified:
+        assert repo.get_commitish_hash("HEAD^") == last_commit
+        assert repo.get_commit_subject("HEAD").endswith("Only some metadata updates")
+    else:
+        assert repo.get_commitish_hash("HEAD") == last_commit
 
 
 async def test_populate(new_dandiset: SampleDandiset, tmp_path: Path) -> None:
