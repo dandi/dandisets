@@ -127,7 +127,7 @@ def dataset_files(dspath: Path) -> Iterator[str]:
     for p in Dataset(dspath).subdatasets(
         result_xfm="relpaths", state="absent", result_renderer=None
     ):
-        yield p
+        yield str(p)
 
 
 def is_interactive() -> bool:
