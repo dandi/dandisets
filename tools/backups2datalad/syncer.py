@@ -63,7 +63,7 @@ class Syncer:
         self.garbage_assets = self.tracker.prune_metadata()
         if self.garbage_assets and not self.config.gc_assets:
             # to ease troubleshooting, let's list some which were GCed
-            listing = ', '.join(self.garbage_assets[:3])
+            listing = ", ".join(self.garbage_assets[:3])
             if len(self.garbage_assets) > 3:
                 listing += f" and {len(self.garbage_assets) - 3} more."
             raise UnexpectedChangeError(

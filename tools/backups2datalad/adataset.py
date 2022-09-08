@@ -20,7 +20,7 @@ from ghrepo import GHRepo
 from pydantic import BaseModel
 
 from .aioutil import areadcmd, aruncmd, open_git_annex, stream_null_command
-from .config import Remote, BackupConfig
+from .config import BackupConfig, Remote
 from .consts import DEFAULT_BRANCH
 from .logging import log
 from .util import custom_commit_env, exp_wait, is_meta_file
@@ -253,7 +253,7 @@ class AsyncDataset:
     async def get_stats(
         self,
         config: BackupConfig,  # for path to zarrs
-        cache: Optional[dict[str, DatasetStats]] = None
+        cache: Optional[dict[str, DatasetStats]] = None,
     ) -> tuple[DatasetStats, dict[str, DatasetStats]]:
         files = 0
         size = 0
@@ -266,7 +266,7 @@ class AsyncDataset:
                     # so we should get its id from its information in submodules
                     sub_info = await self.get_subdatasets(path=path)
                     assert len(sub_info) == 1  # must be known
-                    zarr_id = Path(sub_info[0]['gitmodule_url']).name
+                    zarr_id = Path(sub_info[0]["gitmodule_url"]).name
                     try:
                         zarr_stat = substats[zarr_id]
                     except KeyError:
@@ -311,9 +311,8 @@ class AsyncDataset:
 
     async def get_subdatasets(self, **kwargs: Any) -> list:
         return await anyio.to_thread.run_sync(
-            partial(self.ds.subdatasets,
-                    result_renderer=None,
-                    **kwargs))
+            partial(self.ds.subdatasets, result_renderer=None, **kwargs)
+        )
 
     async def uninstall_subdatasets(self) -> None:
         # dropping all dandisets is not trivial :-/
@@ -322,14 +321,19 @@ class AsyncDataset:
         # https://github.com/datalad/datalad/issues/6933#issuecomment-1239402621
         #   '*' pathspec is not supported
         # so could resort to this ad-hoc way but we might want just to pair
-        subdatasets = await self.get_subdatasets(
-                    result_xfm='relpaths',
-                    state="present")
+        subdatasets = await self.get_subdatasets(result_xfm="relpaths", state="present")
         if subdatasets:
             log.debug("Will uninstall %d subdatasets", len(subdatasets))
             res = await anyio.to_thread.run_sync(
-                partial(self.ds.drop, what='datasets', recursive=True, path=subdatasets, reckless='kill'))
-            assert all(r['status'] == 'ok' for r in res)
+                partial(
+                    self.ds.drop,
+                    what="datasets",
+                    recursive=True,
+                    path=subdatasets,
+                    reckless="kill",
+                )
+            )
+            assert all(r["status"] == "ok" for r in res)
         else:
             # yet another case where [] is treated as None?
             log.debug("No subdatasets to uninstall")

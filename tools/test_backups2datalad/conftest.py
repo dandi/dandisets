@@ -181,7 +181,9 @@ class SampleDandiset:
                 assert subds["gitmodule_url"] == str(zarr_ds.pathobj)
                 assert subds["type"] == "dataset"
                 assert subds["gitshasum"] == zarr_ds.repo.format_commit("%H")
-                assert subds["state"] == "absent"  # we should have them uninstalled in the dataset
+                assert (
+                    subds["state"] == "absent"
+                )  # we should have them uninstalled in the dataset
                 zarr_keys2blobs.update(
                     self.check_zarr_backup(zarr_ds, entries, checksum)
                 )
