@@ -270,7 +270,7 @@ class AsyncDataset:
                     try:
                         zarr_stat = substats[zarr_id]
                     except KeyError:
-                        assert config.zarr_root
+                        assert config.zarr_root is not None
                         zarr_ds = AsyncDataset(config.zarr_root / zarr_id)
                         # here we assume that HEAD among dandisets is the same as of
                         # submodule, which might not necessarily be the case.

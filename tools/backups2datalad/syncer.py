@@ -20,7 +20,7 @@ class Syncer:
     ds: AsyncDataset
     tracker: AssetTracker
     deleted: int = 0
-    # value of garbage_assets will be assigned but to pacity mypy - assign factory
+    # value of garbage_assets will be assigned but to pacify mypy - assign factory
     garbage_assets: list[str] = field(default_factory=list)
     report: Optional[Report] = None
 
