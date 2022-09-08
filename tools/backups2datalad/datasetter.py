@@ -480,7 +480,11 @@ class DandiDatasetter(AsyncResource):
                 )
                 ds.assert_no_duplicates_in_gitmodules()
                 log.debug("Zarr %s: Changes saved", asset.zarr)
-
+                # now that we have as a subdataset and know that it is all good, uninstall that subdataset
+                await anyio.to_thread.run_sync(
+                    partial(ds.ds.drop,
+                            what="datasets", recursive=True, path=[asset.path], reckless='kill'))
+                log.debug("Zarr %s: uninstalled", asset.zarr)
         report = await pool_amap(
             dobackup, d.aget_zarr_assets(), workers=self.config.workers
         )
