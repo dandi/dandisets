@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 from dandi.dandiapi import RemoteDandiset
@@ -20,7 +20,8 @@ class Syncer:
     ds: AsyncDataset
     tracker: AssetTracker
     deleted: int = 0
-    garbage_assets: int = 0
+    # value of garbage_assets will be assigned but to pacify mypy - assign factory
+    garbage_assets: list[str] = field(default_factory=list)
     report: Optional[Report] = None
 
     @property
@@ -61,9 +62,13 @@ class Syncer:
     def dump_asset_metadata(self) -> None:
         self.garbage_assets = self.tracker.prune_metadata()
         if self.garbage_assets and not self.config.gc_assets:
+            # to ease troubleshooting, let's list some which were GCed
+            listing = ", ".join(self.garbage_assets[:3])
+            if len(self.garbage_assets) > 3:
+                listing += f" and {len(self.garbage_assets) - 3} more."
             raise UnexpectedChangeError(
-                f"{quantify(self.garbage_assets, 'asset')} garbage-collected"
-                " from assets.json"
+                f"{quantify(len(self.garbage_assets), 'asset')} garbage-collected"
+                f" from assets.json: {listing}"
             )
         self.tracker.dump()
 
@@ -79,7 +84,7 @@ class Syncer:
             msgparts.append(f"{quantify(self.deleted, 'file')} deleted")
         if self.garbage_assets:
             msgparts.append(
-                f"{quantify(self.garbage_assets, 'asset')} garbage-collected"
+                f"{quantify(len(self.garbage_assets), 'asset')} garbage-collected"
                 " from .dandi/assets.json"
             )
         if futures := self.tracker.future_qty:

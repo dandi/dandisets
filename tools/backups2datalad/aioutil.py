@@ -213,6 +213,11 @@ async def aruncmd(
     else:
         attrs = ""
     log.debug("Running: %s%s", shlex.join(argstrs), attrs)
+    # Note: stdout/err will be output as ran and not along with the
+    # exception if check was not set to False and command exits with
+    # non-0 status leading to CalledProcessError -- hard to associate
+    # the output produced by the command (might be an error) with the
+    # failed run/exception.
     kwargs.setdefault("stdout", None)
     kwargs.setdefault("stderr", None)
     return await anyio.run_process(argstrs, **kwargs)

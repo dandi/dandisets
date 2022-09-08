@@ -83,12 +83,12 @@ class AssetTracker:
                 self.asset_metadata.pop(apath, None)
                 yield apath
 
-    def prune_metadata(self) -> int:
-        pruned = 0
+    def prune_metadata(self) -> list[str]:
+        pruned = []
         for path in list(self.asset_metadata):
             if path not in self.remote_assets:
                 self.asset_metadata.pop(path)
-                pruned += 1
+                pruned.append(path)
         return pruned
 
     def dump(self) -> None:
@@ -119,9 +119,15 @@ def dataset_files(dspath: Path) -> Iterator[str]:
             yield str(p.relative_to(dspath))
         elif p.is_dir():
             if (p / ".git").exists():
+                # installed subdataset (or not even added/known yet)
                 yield str(p.relative_to(dspath))
             else:
                 files.extend(p.iterdir())
+    # there could be uninstalled, such as .zarr/ subdatasets, report them as well
+    for p in Dataset(dspath).subdatasets(
+        result_xfm="relpaths", state="absent", result_renderer=None
+    ):
+        yield str(p)
 
 
 def is_interactive() -> bool:

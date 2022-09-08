@@ -161,11 +161,10 @@ class SampleDandiset:
     async def check_all_zarrs(
         self, backup_ds: Dataset, zarr_root: Optional[Path] = None
     ) -> PopulateManifest:
-        submodules = {
-            sm["path"].relative_to(backup_ds.pathobj).as_posix(): sm
-            for sm in backup_ds.repo.get_submodules_()
+        subdatasets = {
+            Path(sds["path"]).relative_to(backup_ds.pathobj).as_posix(): sds
+            for sds in backup_ds.subdatasets(state="any", result_renderer=None)
         }
-
         zarr_keys2blobs: dict[str, bytes] = {}
         if self.zarr_assets:
             assert zarr_root is not None
@@ -177,15 +176,18 @@ class SampleDandiset:
                 except NotFoundError:
                     # Happens when Zarr is empty?
                     checksum = None
-                assert path in submodules
-                submod = submodules.pop(path)
-                assert submod["gitmodule_url"] == str(zarr_ds.pathobj)
-                assert submod["type"] == "dataset"
-                assert submod["gitshasum"] == zarr_ds.repo.format_commit("%H")
+                assert path in subdatasets
+                subds = subdatasets.pop(path)
+                assert subds["gitmodule_url"] == str(zarr_ds.pathobj)
+                assert subds["type"] == "dataset"
+                assert subds["gitshasum"] == zarr_ds.repo.format_commit("%H")
+                assert (
+                    subds["state"] == "absent"
+                )  # we should have them uninstalled in the dataset
                 zarr_keys2blobs.update(
                     self.check_zarr_backup(zarr_ds, entries, checksum)
                 )
-        assert not submodules
+        assert not subdatasets
         return PopulateManifest(zarr_keys2blobs)
 
     def check_zarr_backup(

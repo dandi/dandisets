@@ -70,7 +70,7 @@ async def test_backup_zarr(new_dandiset: SampleDandiset, tmp_path: Path) -> None
     assert gitrepo.get_commit_count() == 3
     assert gitrepo.get_commit_subject("HEAD") == "[backups2datalad] 2 files added"
 
-    assert await AsyncDataset(ds.pathobj).get_stats() == (
+    assert await AsyncDataset(ds.pathobj).get_stats(config=di.config) == (
         DatasetStats(files=6, size=1535),
         {asset.zarr: DatasetStats(files=5, size=1516)},
     )

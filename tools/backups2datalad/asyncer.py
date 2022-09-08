@@ -538,11 +538,10 @@ async def async_assets(
                         )
                         dm.report.downloaded += 1
                         dm.report.updated += 1
-                        zds = AsyncDataset(ds.pathobj / asset_path)
-                        if manager.config.zarr_gh_org is not None:
-                            await zds.update(how="ff-only", sibling="github")
-                        else:
-                            await zds.update(how="ff-only")
+                        assert zarrlink.commit_hash is not None
+                        await ds.update_submodule(
+                            asset_path, commit_hash=zarrlink.commit_hash
+                        )
                         manager.log.debug("Finished updating Zarr at %s", asset_path)
 
             if dandiset.version_id == "draft":

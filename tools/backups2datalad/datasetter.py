@@ -160,7 +160,7 @@ class DandiDatasetter(AsyncResource):
         await self.tag_releases(
             dandiset, ds, push=self.config.gh_org is not None, log=dmanager.log
         )
-        stats, _ = await ds.get_stats(cache=zarr_stats)
+        stats, _ = await ds.get_stats(config=dmanager.config, cache=zarr_stats)
         if self.config.gh_org is not None:
             if changed:
                 dmanager.log.info("Pushing to sibling")
@@ -201,6 +201,9 @@ class DandiDatasetter(AsyncResource):
             manager.log.debug("Repository is clean")
             if syncer.report.commits == 0:
                 manager.log.info("No changes made to repository")
+        manager.log.info("Uninstalling submodules")
+        await ds.uninstall_subdatasets()
+        manager.log.info("Finished uninstalling submodules")
         manager.log.debug("Running `git gc`")
         await ds.gc()
         manager.log.debug("Finished running `git gc`")
@@ -215,7 +218,7 @@ class DandiDatasetter(AsyncResource):
         ds_stats: list[DatasetStats] = []
         async for d in self.get_dandisets(dandiset_ids, exclude=exclude):
             ds = AsyncDataset(self.config.dandiset_root / d.identifier)
-            stats, zarrstats = await ds.get_stats()
+            stats, zarrstats = await ds.get_stats(config=self.config)
             await self.manager.set_dandiset_description(d, stats)
             for zarr_id, zarr_stat in zarrstats.items():
                 await self.manager.set_zarr_description(zarr_id, zarr_stat)
@@ -477,6 +480,18 @@ class DandiDatasetter(AsyncResource):
                 )
                 ds.assert_no_duplicates_in_gitmodules()
                 log.debug("Zarr %s: Changes saved", asset.zarr)
+                # now that we have as a subdataset and know that it is all good,
+                # uninstall that subdataset
+                await anyio.to_thread.run_sync(
+                    partial(
+                        ds.ds.drop,
+                        what="datasets",
+                        recursive=True,
+                        path=[asset.path],
+                        reckless="kill",
+                    )
+                )
+                log.debug("Zarr %s: uninstalled", asset.zarr)
 
         report = await pool_amap(
             dobackup, d.aget_zarr_assets(), workers=self.config.workers
