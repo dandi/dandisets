@@ -236,9 +236,10 @@ class ZarrSyncer:
         self.write_sync_file()
 
     def read_sync_file(self) -> Optional[datetime]:
-        try:
-            data = SyncData.parse_file(self.repo / SYNC_FILE)
-        except FileNotFoundError:
+        sync_file_path = self.repo / SYNC_FILE
+        if sync_file_path.exists() or sync_file_path.is_symlink():
+            data = SyncData.parse_file(sync_file_path)
+        else:
             return None
         if data.bucket != self.s3bucket:
             raise RuntimeError(
