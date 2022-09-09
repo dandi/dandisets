@@ -194,10 +194,16 @@ class AsyncDataset:
         async with await open_git_annex(
             "find", "--include=*", "--json", use_stdin=False, path=self.pathobj
         ) as p:
-            async for line in p:
-                data = json.loads(line)
-                path = cast(str, data["file"])
-                filedict[path] = replace(filedict[path], size=int(data["bytesize"]))
+            try:
+                async for line in p:
+                    data = json.loads(line)
+                    path = cast(str, data["file"])
+                    filedict[path] = replace(filedict[path], size=int(data["bytesize"]))
+            except Exception:
+                log.exception(
+                    "Error parsing `git-annex find` output for %s:", self.path
+                )
+                raise
         return list(filedict.values())
 
     async def create_github_sibling(
