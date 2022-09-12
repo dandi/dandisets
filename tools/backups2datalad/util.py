@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 import json
 import os
+import random
 from pathlib import Path
 import sys
 import textwrap
@@ -194,6 +195,7 @@ def exp_wait(
     base: float = 1.25,
     multiplier: float = 1,
     attempts: Optional[int] = None,
+    jitter: float = .1,
 ) -> Iterator[float]:
     """
     Returns a generator of values usable as `sleep()` times when retrying
@@ -203,11 +205,13 @@ def exp_wait(
     :param float multiplier: value to multiply values by after exponentiation
     :param Optional[int] attempts: how many values to yield; set to `None` to
         yield forever
+    :param Optional[float] jitter: add +1 of that jitter ratio for the time
+        randomly so that wait track is unique.
     :rtype: Iterator[float]
     """
     n = 0
     while attempts is None or n < attempts:
-        yield base**n * multiplier
+        yield (base**n * multiplier) * (1+(random.random() - 0.5)*jitter)
         n += 1
 
 
