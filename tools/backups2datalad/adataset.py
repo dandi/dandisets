@@ -189,7 +189,11 @@ class AsyncDataset:
             stream_null_command("git", "ls-tree", "-lrz", "HEAD", cwd=self.pathobj)
         ) as p:
             async for entry in p:
-                fst = FileStat.from_entry(entry)
+                try:
+                    fst = FileStat.from_entry(entry)
+                except Exception:
+                    log.exception("Error parsing ls-tree line %r for %s:", entry, self.path)
+                    raise
                 filedict[fst.path] = fst
         async with await open_git_annex(
             "find", "--include=*", "--json", use_stdin=False, path=self.pathobj
