@@ -136,7 +136,7 @@ class AsyncDataset:
         )
 
     async def push(self, to: str, jobs: int, data: Optional[str] = None) -> None:
-        waits = exp_wait(attempts=3, base=2)
+        waits = exp_wait(attempts=6, base=2.1)
         while True:
             try:
                 # TODO: Improve

@@ -138,7 +138,7 @@ async def arequest(
     retry_on: Container[int] = (),
     **kwargs: Any,
 ) -> httpx.Response:
-    waits = exp_wait(attempts=10, base=1.8)
+    waits = exp_wait(attempts=15, base=2)
     while True:
         try:
             r = await client.request(method, url, follow_redirects=True, **kwargs)
