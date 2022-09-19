@@ -382,6 +382,19 @@ async def populate(dirpath: Path, backup_remote: str, pathtype: str, jobs: int) 
                 backup_remote,
                 path=dirpath,
             )
+            # poor man solution for now: ocopy back possible annexed
+            # .dandi/assets.json etc content # which could happen in
+            # dandisets heavy on assets and thus making huge assets.json
+            # which we need to keep in annex (such as 000026)
+            await call_annex_json(
+                "get",
+                "-c",
+                "annex.retry=3",
+                "--jobs",
+                str(jobs),
+                ".dandi",
+                path=dirpath,
+            )
         except RuntimeError as e:
             i += 1
             if i < 5:
