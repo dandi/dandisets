@@ -14,10 +14,11 @@ if sys.version_info[:2] >= (3, 10):
 else:
     from async_generator import aclosing
 
-dandiset_id = "FILL IN HERE"
-zarr_ids = {"FILL", "IN", "HERE"}
-backup_folder = "FILL IN HERE"
+dandiset_id = sys.argv[1]
+zarrs_folder = sys.argv[2]
+zarr_ids = sys.argv[3:]
 
+print(f"Working on {len(zarr_ids)} for dandiset {dandiset_id} under {zarrs_folder}")
 
 async def amain():
     config = BackupConfig(zarrs=ResourceConfig(path="dandizarrs"))
@@ -31,7 +32,7 @@ async def amain():
                     await sync_zarr(
                         asset,
                         checksum,
-                        Path(backup_folder, asset.zarr),
+                        Path(zarrs_folder, asset.zarr),
                         Manager(config=config, gh=None, log=log),
                     )
 
