@@ -509,7 +509,7 @@ class DandiDatasetter(AsyncResource):
         root.setLevel(logging.NOTSET)
         for h in root.handlers:
             if quiet_debug:
-                h.addFilter(quiet_filter)
+                h.addFilter(quiet_filter(logging.INFO))
             else:
                 h.setLevel(screen_level)
         # Superdataset must exist before creating anything in the directory:
@@ -520,6 +520,7 @@ class DandiDatasetter(AsyncResource):
         logfile = logdir / filename
         handler = logging.FileHandler(logfile, encoding="utf-8")
         handler.setLevel(logging.DEBUG)
+        handler.addFilter(quiet_filter(logging.WARNING))
         fmter = logging.Formatter(
             fmt="%(asctime)s [%(levelname)-8s] %(name)s: %(message)s",
             datefmt="%Y-%m-%dT%H:%M:%S%z",

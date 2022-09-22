@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 import logging
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 
 @dataclass
@@ -51,8 +51,11 @@ class PrefixedLogger:
 log = PrefixedLogger(logging.getLogger("backups2datalad"))
 
 
-def quiet_filter(record: logging.LogRecord) -> bool:
-    if record.name == "backups2datalad":
-        return record.levelno >= logging.DEBUG
-    else:
-        return record.levelno >= logging.INFO
+def quiet_filter(deflevel: int) -> Callable[[logging.LogRecord], bool]:
+    def filterfunc(record: logging.LogRecord) -> bool:
+        if record.name == "backups2datalad":
+            return record.levelno >= logging.DEBUG
+        else:
+            return record.levelno >= deflevel
+
+    return filterfunc
