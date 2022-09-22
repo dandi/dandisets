@@ -165,7 +165,7 @@ class DandiDatasetter(AsyncResource):
             if changed:
                 dmanager.log.info("Pushing to sibling")
                 await ds.push(to="github", jobs=self.config.jobs, data="nothing")
-            await self.manager.set_dandiset_description(dandiset, stats)
+            await self.manager.set_dandiset_description(dandiset, stats, ds)
         return (changed, stats)
 
     async def sync_dataset(
@@ -219,7 +219,7 @@ class DandiDatasetter(AsyncResource):
         async for d in self.get_dandisets(dandiset_ids, exclude=exclude):
             ds = AsyncDataset(self.config.dandiset_root / d.identifier)
             stats, zarrstats = await ds.get_stats(config=self.config)
-            await self.manager.set_dandiset_description(d, stats)
+            await self.manager.set_dandiset_description(d, stats, ds)
             for zarr_id, zarr_stat in zarrstats.items():
                 await self.manager.set_zarr_description(zarr_id, zarr_stat)
             ds_stats.append(stats)

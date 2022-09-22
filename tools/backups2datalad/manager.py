@@ -9,7 +9,7 @@ import httpx
 from humanize import naturalsize
 
 from .adandi import RemoteDandiset
-from .adataset import DatasetStats
+from .adataset import AsyncDataset, DatasetStats
 from .aioutil import arequest
 from .config import BackupConfig
 from .consts import USER_AGENT
@@ -38,15 +38,32 @@ class Manager(AsyncResource):
         assert self.gh is not None
         await self.gh.edit_repo(repo, **kwargs)
 
+    async def _set_github_description(
+        self, repo: GHRepo, ds: AsyncDataset, description: str, **kwargs: Any
+    ) -> None:
+        stored_description = ds.ds.config.get("dandi.github-description", None)
+        # we call edit_repo only if there is a change to description or any kwarg
+        # like homepage
+        new_description = description if not kwargs else repr((description, kwargs))
+        if new_description != stored_description:
+            assert self.gh is not None
+            await self.gh.edit_repo(
+                repo,
+                description=description,
+                **kwargs,
+            )
+            ds.ds.config.set("dandi.github-description", new_description, scope="local")
+
     async def set_dandiset_description(
-        self, dandiset: RemoteDandiset, stats: DatasetStats
+        self, dandiset: RemoteDandiset, stats: DatasetStats, ds: AsyncDataset
     ) -> None:
         assert self.config.gh_org is not None
         assert self.gh is not None
-        await self.gh.edit_repo(
+        await self._set_github_description(
             GHRepo(self.config.gh_org, dandiset.identifier),
-            homepage=f"https://identifiers.org/DANDI:{dandiset.identifier}",
+            ds,
             description=await self.describe_dandiset(dandiset, stats),
+            homepage=f"https://identifiers.org/DANDI:{dandiset.identifier}",
         )
 
     async def describe_dandiset(
@@ -72,9 +89,11 @@ class Manager(AsyncResource):
     async def set_zarr_description(self, zarr_id: str, stats: DatasetStats) -> None:
         assert self.config.zarr_gh_org is not None
         assert self.gh is not None
+        assert self.config.zarr_root is not None
         size = naturalsize(stats.size)
-        await self.gh.edit_repo(
+        await self._set_github_description(
             GHRepo(self.config.zarr_gh_org, zarr_id),
+            AsyncDataset(self.config.zarr_root / zarr_id),
             description=f"{quantify(stats.files, 'file')}, {size}",
         )
 
