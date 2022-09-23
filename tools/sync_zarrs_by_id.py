@@ -9,6 +9,9 @@ from backups2datalad.logging import log
 from backups2datalad.manager import Manager
 from backups2datalad.zarr import sync_zarr
 
+import logging
+logging.basicConfig(level=logging.INFO)
+
 if sys.version_info[:2] >= (3, 10):
     from contextlib import aclosing
 else:
@@ -35,6 +38,11 @@ async def amain():
                         Path(zarrs_folder, asset.zarr),
                         Manager(config=config, gh=None, log=log),
                     )
+                    zarr_ids.pop(zarr_ids.index(asset.zarr))
+    if zarr_ids:
+        print(
+            f"Following zarr ids were not found associated with {dandiset_id} and "
+            f"thus not processed: {', '.join(zarr_ids)}")
 
 
 if __name__ == "__main__":
