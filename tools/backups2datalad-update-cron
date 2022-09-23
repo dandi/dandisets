@@ -9,7 +9,7 @@ python -m tools.backups2datalad \
    --config tools/backups2datalad.cfg.yaml \
    update-from-backup \
    --workers 5 \
-   -e '000(108|23[5678])$' \
+   -e '000108$' \
    "$@" 2>&1 | grep -v 'nothing to save, working tree clean'
 
 git pull --commit --no-edit
