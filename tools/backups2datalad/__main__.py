@@ -372,6 +372,7 @@ async def populate(dirpath: Path, backup_remote: str, pathtype: str, jobs: int) 
     while True:
         log.info("Moving files for %s to backup remote", desc)
         try:
+            # everything but content of .dandi/ should be moved to backup
             await call_annex_json(
                 "move",
                 "-c",
@@ -380,19 +381,19 @@ async def populate(dirpath: Path, backup_remote: str, pathtype: str, jobs: int) 
                 str(jobs),
                 "--to",
                 backup_remote,
+                '--exclude', '.dandi/*',
                 path=dirpath,
             )
-            # poor man solution for now: ocopy back possible annexed
-            # .dandi/assets.json etc content # which could happen in
-            # dandisets heavy on assets and thus making huge assets.json
-            # which we need to keep in annex (such as 000026)
             await call_annex_json(
-                "get",
+                "copy",
                 "-c",
                 "annex.retry=3",
                 "--jobs",
                 str(jobs),
-                ".dandi",
+                "--to",
+                backup_remote,
+                "--not", "--in", backup_remote,
+                '.dandi/',
                 path=dirpath,
             )
         except RuntimeError as e:
