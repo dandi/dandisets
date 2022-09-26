@@ -176,7 +176,15 @@ class AsyncDataset:
 
     async def remove(self, path: str) -> None:
         # `path` must be relative to the root of the dataset
-        await self.call_git("rm", path)
+        if ".zarr/" in path and not path.endswith(".zarr/"):
+            # for some reason we manage to get to the case where we are trying
+            # to remove a path within .zarr subdataset although that should not
+            # happen. https://github.com/dandi/dandisets/issues/266
+            log.warning(
+                "Trying to remove within zarr %s in %s. Skipped", path, self.path
+            )
+        else:
+            await self.call_git("rm", path)
 
     async def update(self, how: str, sibling: Optional[str] = None) -> None:
         await anyio.to_thread.run_sync(
@@ -192,7 +200,9 @@ class AsyncDataset:
                 try:
                     fst = FileStat.from_entry(entry)
                 except Exception:
-                    log.exception("Error parsing ls-tree line %r for %s:", entry, self.path)
+                    log.exception(
+                        "Error parsing ls-tree line %r for %s:", entry, self.path
+                    )
                     raise
                 filedict[fst.path] = fst
         async with await open_git_annex(
