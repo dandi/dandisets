@@ -192,7 +192,9 @@ class AsyncDataset:
                 try:
                     fst = FileStat.from_entry(entry)
                 except Exception:
-                    log.exception("Error parsing ls-tree line %r for %s:", entry, self.path)
+                    log.exception(
+                        "Error parsing ls-tree line %r for %s:", entry, self.path
+                    )
                     raise
                 filedict[fst.path] = fst
         async with await open_git_annex(
@@ -268,15 +270,16 @@ class AsyncDataset:
         files = 0
         size = 0
         substats: dict[str, DatasetStats] = cache if cache is not None else {}
+        # get them all and remap per path
+        subdatasets = {s["path"]: s for s in await self.get_subdatasets()}
         for filestat in await self.get_file_stats():
             path = Path(filestat.path)
             if not is_meta_file(path.parts[0], dandiset=True):
                 if filestat.type is ObjectType.COMMIT:
                     # this zarr should not be present locally as a submodule
-                    # so we should get its id from its information in submodules
-                    sub_info = await self.get_subdatasets(path=path)
-                    assert len(sub_info) == 1  # must be known
-                    zarr_id = Path(sub_info[0]["gitmodule_url"]).name
+                    # so we should get its id from its information in submodules.
+                    sub_info = subdatasets[str(self.pathobj / path)]
+                    zarr_id = Path(sub_info["gitmodule_url"]).name
                     try:
                         zarr_stat = substats[zarr_id]
                     except KeyError:
