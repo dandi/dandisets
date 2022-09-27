@@ -278,7 +278,7 @@ class AsyncDataset:
                 if filestat.type is ObjectType.COMMIT:
                     # this zarr should not be present locally as a submodule
                     # so we should get its id from its information in submodules.
-                    sub_info = subdatasets[str(path.absolute())]
+                    sub_info = subdatasets[str(self.pathobj / path)]
                     zarr_id = Path(sub_info["gitmodule_url"]).name
                     try:
                         zarr_stat = substats[zarr_id]
