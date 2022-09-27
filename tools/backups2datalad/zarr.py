@@ -472,7 +472,10 @@ async def sync_zarr(
                 link.timestamp = commit_ts
         else:
             manager.log.info("no changes; not committing")
-        if link is not None:
+        # count up stats if there is a change or it was not counted before
+        if link is not None and (
+            report or not ds.ds.config.get("dandi.github-description", None)
+        ):
             manager.log.info("Counting up files ...")
             link.stats = (await ds.get_stats(config=manager.config))[0]
             manager.log.info("Done counting up files")
