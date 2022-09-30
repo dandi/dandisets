@@ -16,7 +16,6 @@ from dandi.dandiapi import RemoteZarrAsset
 from pydantic import BaseModel
 
 from .adataset import AsyncDataset, DatasetStats
-from .aioutil import areadcmd
 from .annex import AsyncAnnex
 from .logging import PrefixedLogger
 from .manager import Manager
@@ -478,6 +477,4 @@ async def sync_zarr(
             manager.log.info("Done counting up files")
             if manager.gh is not None:
                 await manager.set_zarr_description(asset.zarr, link.stats)
-            link.commit_hash = await areadcmd(
-                "git", "show", "-s", "--format=%H", cwd=ds.path
-            )
+            link.commit_hash = await ds.get_commit_hash()

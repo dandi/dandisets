@@ -288,8 +288,15 @@ class AsyncDataset:
                         # here we assume that HEAD among dandisets is the same as of
                         # submodule, which might not necessarily be the case.
                         # TODO: get for the specific commit
-                        zarr_stat, subsubstats = await zarr_ds.get_stats(config=config)
-                        assert not subsubstats
+                        opt_zarr_stat = await zarr_ds.get_stored_stats()
+                        if opt_zarr_stat is None:
+                            zarr_stat, subsubstats = await zarr_ds.get_stats(
+                                config=config
+                            )
+                            assert not subsubstats
+                            await zarr_ds.store_stats(zarr_stat)
+                        else:
+                            zarr_stat = opt_zarr_stat
                         substats[zarr_id] = zarr_stat
                     files += zarr_stat.files
                     size += zarr_stat.size
@@ -298,6 +305,26 @@ class AsyncDataset:
                     assert filestat.size is not None
                     size += filestat.size
         return (DatasetStats(files=files, size=size), substats)
+
+    async def get_stored_stats(self) -> Optional[DatasetStats]:
+        if (stored_stats := self.ds.config.get("dandi.stats", None)) is not None:
+            try:
+                stored_commit, files_str, size_str = stored_stats.split(",")
+                files = int(files_str)
+                size = int(size_str)
+            except Exception:
+                return None
+            if stored_commit == await self.get_commit_hash():
+                return DatasetStats(files=files, size=size)
+        return None
+
+    async def store_stats(self, stats: DatasetStats) -> None:
+        commit = await self.get_commit_hash()
+        value = f"{commit},{stats.files},{stats.size}"
+        self.ds.config.set("dandi.stats", value, scope="local")
+
+    async def get_commit_hash(self) -> str:
+        return await self.read_git("show", "-s", "--format=%H")
 
     def assert_no_duplicates_in_gitmodules(self) -> None:
         filepath = self.pathobj / ".gitmodules"
