@@ -169,6 +169,7 @@ class RemoteDandiset(SyncRemoteDandiset):
             self.aclient.paginate(
                 f"{self.version_api_path}assets/",
                 params={"order": "created", "metadata": "1", "page_size": "1000"},
+                timeout=60,
             )
         ) as ait:
             async for item in ait:
