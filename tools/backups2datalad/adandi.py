@@ -76,7 +76,7 @@ class AsyncDandiClient(AsyncResource):
             for item in r["results"]:
                 yield item
             if r.get("next"):
-                r = await self.get(r["next"])
+                r = await self.get(r["next"], **kwargs)
             else:
                 break
 
