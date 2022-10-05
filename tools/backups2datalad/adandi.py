@@ -157,9 +157,11 @@ class RemoteDandiset(SyncRemoteDandiset):
         )
 
     async def aget_versions(
-        self, include_draft: bool = True
+        self, include_draft: bool = True, order: Optional[str] = None
     ) -> AsyncGenerator[Version, None]:
-        async with aclosing(self.aclient.paginate(f"{self.api_path}versions/")) as ait:
+        async with aclosing(
+            self.aclient.paginate(f"{self.api_path}versions/", params={"order": order})
+        ) as ait:
             async for v in ait:
                 if v["version"] != "draft" or include_draft:
                     yield Version.parse_obj(v)
@@ -212,11 +214,24 @@ class RemoteDandiset(SyncRemoteDandiset):
             f" {json.dumps(about, indent=4)}"
         )
 
-    async def apublish(self) -> RemoteDandiset:
-        return self.for_version(
-            Version.parse_obj(
-                await self.aclient.post(f"{self.version_api_path}publish/")
-            )
+    async def apublish(self, max_time: float = 120) -> RemoteDandiset:
+        draft_api_path = f"/dandisets/{self.identifier}/versions/draft/"
+        await self.aclient.post(f"{draft_api_path}publish/")
+        log.debug(
+            "Waiting for Dandiset %s to complete publication ...", self.identifier
+        )
+        start = time()
+        while time() - start < max_time:
+            v = await self.aclient.get(f"{draft_api_path}info/")
+            if v["status"] == "Published":
+                break
+            await anyio.sleep(0.5)
+        else:
+            raise ValueError(f"Dandiset {self.identifier} did not publish in time")
+        async for v in self.aget_versions(order="-created"):
+            return self.for_version(v)
+        raise AssertionError(
+            f"No published versions found for Dandiset {self.identifier}"
         )
 
     async def adelete(self) -> None:
