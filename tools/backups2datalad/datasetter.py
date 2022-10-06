@@ -139,7 +139,7 @@ class DandiDatasetter(AsyncResource):
         dmanager = self.manager.with_sublogger(f"Dandiset {dandiset.identifier}")
         state = ds.get_assets_state()
         if state is None or state.timestamp < dandiset.version.modified:
-            changed, zarr_stats = await self.sync_dataset(dandiset, ds, dmanager)
+            changed, _ = await self.sync_dataset(dandiset, ds, dmanager)
         elif state.timestamp > dandiset.version.modified:
             raise RuntimeError(
                 f"Remote Dandiset {dandiset.identifier} has 'modified'"
@@ -147,7 +147,7 @@ class DandiDatasetter(AsyncResource):
                 f" {state.timestamp}"
             )
         elif dmanager.config.verify_timestamps:
-            changed, zarr_stats = await self.sync_dataset(
+            changed, _ = await self.sync_dataset(
                 dandiset, ds, dmanager, error_on_change=True
             )
         else:
@@ -155,12 +155,11 @@ class DandiDatasetter(AsyncResource):
                 "Remote Dandiset has not been modified since last backup; not syncing"
             )
             changed = False
-            zarr_stats = {}
         await self.ensure_github_remote(ds, dandiset.identifier)
         await self.tag_releases(
             dandiset, ds, push=self.config.gh_org is not None, log=dmanager.log
         )
-        stats, _ = await ds.get_stats(config=dmanager.config, cache=zarr_stats)
+        stats = await ds.get_stats(config=dmanager.config)
         if self.config.gh_org is not None:
             if changed:
                 dmanager.log.info("Pushing to sibling")
@@ -218,10 +217,17 @@ class DandiDatasetter(AsyncResource):
         ds_stats: list[DatasetStats] = []
         async for d in self.get_dandisets(dandiset_ids, exclude=exclude):
             ds = AsyncDataset(self.config.dandiset_root / d.identifier)
-            stats, zarrstats = await ds.get_stats(config=self.config)
+            stats = await ds.get_stats(config=self.config)
             await self.manager.set_dandiset_description(d, stats, ds)
-            for zarr_id, zarr_stat in zarrstats.items():
-                await self.manager.set_zarr_description(zarr_id, zarr_stat)
+
+            for sub_info in await ds.get_subdatasets():
+                # ATM we have only .zarr subdatasets
+                assert sub_info["path"].endswith(".zarr")
+                # here we will rely on get_stats to use cached during above
+                # recursive through subdatasets ds.get_stats call
+                await self.manager.set_zarr_description(
+                    *(await AsyncDataset.get_zarr_sub_stats(sub_info, self.config))
+                )
             ds_stats.append(stats)
         if not dandiset_ids and exclude is None:
             superds = AsyncDataset(self.config.dandiset_root)

@@ -473,7 +473,7 @@ async def sync_zarr(
             manager.log.info("no changes; not committing")
         if link is not None:
             manager.log.info("Counting up files ...")
-            link.stats = (await ds.get_stats(config=manager.config))[0]
+            link.stats = await ds.get_stats(config=manager.config)
             manager.log.info("Done counting up files")
             if manager.gh is not None:
                 await manager.set_zarr_description(asset.zarr, link.stats)
