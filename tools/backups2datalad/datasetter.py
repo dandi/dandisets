@@ -139,7 +139,7 @@ class DandiDatasetter(AsyncResource):
         dmanager = self.manager.with_sublogger(f"Dandiset {dandiset.identifier}")
         state = ds.get_assets_state()
         if state is None or state.timestamp < dandiset.version.modified:
-            changed, _ = await self.sync_dataset(dandiset, ds, dmanager)
+            changed = await self.sync_dataset(dandiset, ds, dmanager)
         elif state.timestamp > dandiset.version.modified:
             raise RuntimeError(
                 f"Remote Dandiset {dandiset.identifier} has 'modified'"
@@ -147,7 +147,7 @@ class DandiDatasetter(AsyncResource):
                 f" {state.timestamp}"
             )
         elif dmanager.config.verify_timestamps:
-            changed, _ = await self.sync_dataset(
+            changed = await self.sync_dataset(
                 dandiset, ds, dmanager, error_on_change=True
             )
         else:
@@ -173,10 +173,9 @@ class DandiDatasetter(AsyncResource):
         ds: AsyncDataset,
         manager: Manager,
         error_on_change: bool = False,
-    ) -> tuple[bool, dict[str, DatasetStats]]:
+    ) -> bool:
         # Returns:
         # - true iff any changes were committed to the repository
-        # - a mapping from Zarr IDs to their dataset stats
         manager.log.info("Syncing")
         if await ds.is_dirty():
             raise RuntimeError(f"Dirty {dandiset}; clean or save before running")
@@ -206,8 +205,7 @@ class DandiDatasetter(AsyncResource):
         manager.log.debug("Running `git gc`")
         await ds.gc()
         manager.log.debug("Finished running `git gc`")
-        assert syncer.report.zarr_stats is not None
-        return (syncer.report.commits > 0, syncer.report.zarr_stats)
+        return syncer.report.commits > 0
 
     async def update_github_metadata(
         self,
@@ -221,8 +219,8 @@ class DandiDatasetter(AsyncResource):
             await self.manager.set_dandiset_description(d, stats, ds)
 
             for sub_info in await ds.get_subdatasets():
-                # ATM we have only .zarr subdatasets
-                assert sub_info["path"].endswith(".zarr")
+                # ATM we have only .zarr-like subdatasets
+                assert Path(sub_info["path"]).suffix in (".zarr", ".ngff")
                 # here we will rely on get_stats to use cached during above
                 # recursive through subdatasets ds.get_stats call
                 await self.manager.set_zarr_description(
