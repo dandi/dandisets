@@ -216,7 +216,7 @@ class RemoteDandiset(SyncRemoteDandiset):
 
     async def apublish(self, max_time: float = 120) -> RemoteDandiset:
         draft_api_path = f"/dandisets/{self.identifier}/versions/draft/"
-        await self.aclient.post(f"{draft_api_path}publish/")
+        await arequest(self.aclient.session, "POST", f"{draft_api_path}publish/")
         log.debug(
             "Waiting for Dandiset %s to complete publication ...", self.identifier
         )
