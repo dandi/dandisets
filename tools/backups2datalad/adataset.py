@@ -135,6 +135,34 @@ class AsyncDataset:
             env=custom_commit_env(commit_date),
         )
 
+    async def commit_all(
+        self,
+        message: str,
+        commit_date: Optional[datetime] = None,
+    ) -> None:
+        """Use git commit directly, verify that all is committed
+
+        Raises RuntimeError if dataset remains dirty.
+
+        Primarily to be used to overcome inability of datalad save to save
+        updated states of subdatasets without them being installed in the tree.
+        Ref: https://github.com/datalad/datalad/issues/7074
+        """
+        await aruncmd(
+            "git",
+            "commit",
+            "-a",
+            "-m",
+            message,
+            cwd=self.path,
+            env=custom_commit_env(commit_date),
+        )
+        if await self.is_dirty():
+            raise RuntimeError(
+                f"{self.path} is still dirty after commit -a. "
+                "Please check if all changes were staged"
+            )
+
     async def push(self, to: str, jobs: int, data: Optional[str] = None) -> None:
         waits = exp_wait(attempts=6, base=2.1)
         while True:

@@ -571,7 +571,7 @@ async def async_assets(
                     manager.log.debug("Checking whether repository is dirty ...")
                     if await ds.is_unclean():
                         manager.log.info("Committing changes")
-                        await ds.save(
+                        await ds.commit_all(
                             message=dm.report.get_commit_message(),
                             commit_date=timestamp,
                         )
