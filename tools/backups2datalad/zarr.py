@@ -15,7 +15,7 @@ from botocore import UNSIGNED
 from dandi.dandiapi import RemoteZarrAsset
 from pydantic import BaseModel
 
-from .adataset import AsyncDataset, DatasetStats
+from .adataset import AsyncDataset
 from .annex import AsyncAnnex
 from .logging import PrefixedLogger
 from .manager import Manager
@@ -47,7 +47,6 @@ class ZarrLink:
     zarr_dspath: Path
     timestamp: Optional[datetime]
     asset_paths: list[str]
-    stats: Optional[DatasetStats] = None
     commit_hash: Optional[str] = None
 
 
@@ -472,9 +471,9 @@ async def sync_zarr(
         else:
             manager.log.info("no changes; not committing")
         if link is not None:
-            manager.log.info("Counting up files ...")
-            link.stats = (await ds.get_stats(config=manager.config))[0]
-            manager.log.info("Done counting up files")
             if manager.gh is not None:
-                await manager.set_zarr_description(asset.zarr, link.stats)
+                manager.log.info("Counting up files ...")
+                stats = await ds.get_stats(config=manager.config)
+                manager.log.info("Done counting up files")
+                await manager.set_zarr_description(asset.zarr, stats)
             link.commit_hash = await ds.get_commit_hash()

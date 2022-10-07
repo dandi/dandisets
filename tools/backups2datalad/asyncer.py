@@ -25,7 +25,7 @@ import httpx
 from identify.identify import tags_from_filename
 
 from .adandi import RemoteDandiset
-from .adataset import AssetsState, AsyncDataset, DatasetStats
+from .adataset import AssetsState, AsyncDataset
 from .aioutil import TextProcess, arequest, aruncmd, open_git_annex
 from .annex import AsyncAnnex
 from .config import BackupConfig
@@ -66,7 +66,6 @@ class Report:
     failed: int = 0
     hash_mismatches: int = 0
     old_unhashed: int = 0
-    zarr_stats: dict[str, DatasetStats] = field(default_factory=dict)
 
     def update(self, other: Report) -> None:
         self.commits += other.commits
@@ -495,9 +494,7 @@ async def async_assets(
             timestamp = dm.last_timestamp
             for zarr_id, zarrlink in dm.zarrs.items():
                 # We've left the task group, so all of the Zarr tasks have
-                # finished and set the timestamps & stats in their links
-                assert zarrlink.stats is not None
-                total_report.zarr_stats[zarr_id] = zarrlink.stats
+                # finished and set the timestamps in link
                 ts = zarrlink.timestamp
                 if ts is not None:
                     timestamp = maxdatetime(timestamp, ts)

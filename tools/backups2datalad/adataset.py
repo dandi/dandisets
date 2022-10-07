@@ -265,11 +265,15 @@ class AsyncDataset:
     async def get_stats(
         self,
         config: BackupConfig,  # for path to zarrs
-        cache: Optional[dict[str, DatasetStats]] = None,
-    ) -> tuple[DatasetStats, dict[str, DatasetStats]]:
+    ) -> DatasetStats:
+        stored_stats = await self.get_stored_stats()
+        if stored_stats is not None:
+            # stats were stored and state of the dataset did not change since then
+            return stored_stats
+
         files = 0
         size = 0
-        substats: dict[str, DatasetStats] = cache if cache is not None else {}
+
         # get them all and remap per path
         subdatasets = {s["path"]: s for s in await self.get_subdatasets()}
         for filestat in await self.get_file_stats():
@@ -279,32 +283,29 @@ class AsyncDataset:
                     # this zarr should not be present locally as a submodule
                     # so we should get its id from its information in submodules.
                     sub_info = subdatasets[str(self.pathobj / path)]
-                    zarr_id = Path(sub_info["gitmodule_url"]).name
-                    try:
-                        zarr_stat = substats[zarr_id]
-                    except KeyError:
-                        assert config.zarr_root is not None
-                        zarr_ds = AsyncDataset(config.zarr_root / zarr_id)
-                        # here we assume that HEAD among dandisets is the same as of
-                        # submodule, which might not necessarily be the case.
-                        # TODO: get for the specific commit
-                        opt_zarr_stat = await zarr_ds.get_stored_stats()
-                        if opt_zarr_stat is None:
-                            zarr_stat, subsubstats = await zarr_ds.get_stats(
-                                config=config
-                            )
-                            assert not subsubstats
-                            await zarr_ds.store_stats(zarr_stat)
-                        else:
-                            zarr_stat = opt_zarr_stat
-                        substats[zarr_id] = zarr_stat
+                    _, zarr_stat = await self.get_zarr_sub_stats(sub_info, config)
                     files += zarr_stat.files
                     size += zarr_stat.size
                 else:
                     files += 1
                     assert filestat.size is not None
                     size += filestat.size
-        return (DatasetStats(files=files, size=size), substats)
+        stats = DatasetStats(files=files, size=size)
+        await self.store_stats(stats)
+        return stats
+
+    @staticmethod
+    async def get_zarr_sub_stats(
+        sub_info: dict, config: BackupConfig
+    ) -> tuple[str, DatasetStats]:
+        zarr_id = Path(sub_info["gitmodule_url"]).name
+        assert config.zarr_root is not None
+        zarr_ds = AsyncDataset(config.zarr_root / zarr_id)
+        # here we assume that HEAD among dandisets is the same as of
+        # submodule, which might not necessarily be the case.
+        # TODO: get for the specific commit
+        zarr_stat = await zarr_ds.get_stats(config=config)
+        return zarr_id, zarr_stat
 
     async def get_stored_stats(self) -> Optional[DatasetStats]:
         if (stored_stats := self.ds.config.get("dandi.stats", None)) is not None:
