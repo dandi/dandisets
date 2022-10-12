@@ -31,10 +31,10 @@ jobs:
             noxenv: typing
     steps:
       - name: Check out repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Set up Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v4
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -69,7 +69,7 @@ jobs:
 
       - name: Upload coverage to Codecov
         if: matrix.noxenv == 'test'
-        uses: codecov/codecov-action@v2
+        uses: codecov/codecov-action@v3
         with:
           fail_ci_if_error: false
           files: tools/coverage.xml
