@@ -13,6 +13,7 @@ from aiobotocore.session import get_session
 import anyio
 from botocore import UNSIGNED
 from dandi.dandiapi import RemoteZarrAsset
+from dandi.support.digests import ZCDirectory
 from pydantic import BaseModel
 
 from .adataset import AsyncDataset
@@ -106,7 +107,7 @@ class ZarrReport:
 class ZarrSyncer:
     api_url: str
     zarr_id: str
-    repo: Path
+    ds: AsyncDataset
     annex: AsyncAnnex
     s3bucket: str
     s3prefix: str = field(init=False)
@@ -119,6 +120,10 @@ class ZarrSyncer:
 
     def __post_init__(self) -> None:
         self.s3prefix = f"zarr/{self.zarr_id}/"
+
+    @property
+    def repo(self) -> Path:
+        return self.ds.pathobj
 
     async def run(self) -> None:
         last_sync = self.read_sync_file()
@@ -391,6 +396,21 @@ class ZarrSyncer:
         self.log.info("%s: Registering URL %s", path, url)
         await self.annex.register_url(key, url)
 
+    async def get_local_zarr_checksum(self) -> str:
+        self.log.info("Computing Zarr checksum for locally-annexed files")
+        zcc = ZCDirectory()
+        async with aclosing(self.ds.aiter_annexed_files()) as afiles:
+            async for f in afiles:
+                if f.backend not in ("MD5", "MD5E"):
+                    raise RuntimeError(
+                        f"{f.file} in Zarr {self.zarr_id} has {f.backend}"
+                        " backend instead of required MD5 or MD5E"
+                    )
+                zcc.add(Path(f.file), key2hash(f.key), f.bytesize)
+        checksum = cast(str, zcc.get_digest_size()[0])
+        self.log.info("Computed Zarr checksum: %s", checksum)
+        return checksum
+
 
 async def sync_zarr(
     asset: RemoteZarrAsset,
@@ -440,7 +460,7 @@ async def sync_zarr(
             zsync = ZarrSyncer(
                 api_url=asset.client.api_url,
                 zarr_id=asset.zarr,
-                repo=dsdir,
+                ds=ds,
                 annex=annex,
                 s3bucket=manager.config.s3bucket,
                 backup_remote=backup_remote,

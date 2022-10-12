@@ -5,13 +5,12 @@ from dataclasses import InitVar, dataclass, field, replace
 from datetime import datetime
 from enum import Enum
 from functools import partial
-import json
 from operator import attrgetter
 from pathlib import Path
 import re
 import subprocess
 import sys
-from typing import Any, ClassVar, Optional, Sequence, cast
+from typing import Any, AsyncGenerator, ClassVar, Optional, Sequence, cast
 
 import anyio
 from datalad.api import Dataset
@@ -197,20 +196,28 @@ class AsyncDataset:
                     )
                     raise
                 filedict[fst.path] = fst
+        async with aclosing(self.aiter_annexed_files()) as afiles:
+            async for f in afiles:
+                filedict[f.file] = replace(filedict[f.file], size=f.bytesize)
+        return list(filedict.values())
+
+    async def aiter_annexed_files(self) -> AsyncGenerator[AnnexedFile, None]:
         async with await open_git_annex(
             "find", "--include=*", "--json", use_stdin=False, path=self.pathobj
         ) as p:
-            try:
-                async for line in p:
-                    data = json.loads(line)
-                    path = cast(str, data["file"])
-                    filedict[path] = replace(filedict[path], size=int(data["bytesize"]))
-            except Exception:
-                log.exception(
-                    "Error parsing `git-annex find` output for %s:", self.path
-                )
-                raise
-        return list(filedict.values())
+            async for line in p:
+                try:
+                    data = AnnexedFile.parse_raw(line)
+                except Exception:
+                    log.exception(
+                        "Error parsing `git-annex find` output for %s: bad"
+                        " output line %r",
+                        self.path,
+                        line,
+                    )
+                    raise
+                else:
+                    yield data
 
     async def create_github_sibling(
         self,
@@ -423,3 +430,16 @@ class DatasetStats:
 class AssetsState(BaseModel):
     PATH: ClassVar[Path] = Path(".dandi", "assets-state.json")
     timestamp: datetime
+
+
+class AnnexedFile(BaseModel):
+    backend: str
+    bytesize: int
+    # error-messages: list[str]
+    file: str
+    # hashdirlower: str
+    # hashdirmixed: str
+    # humansize: str
+    key: str
+    # keyname: str
+    # mtime: Literal["unknown"] | ???
