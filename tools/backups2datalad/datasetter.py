@@ -28,7 +28,7 @@ from packaging.version import Version as PkgVersion
 from .adandi import AsyncDandiClient, RemoteDandiset
 from .adataset import AssetsState, AsyncDataset, DatasetStats
 from .aioutil import aruncmd, pool_amap
-from .config import BackupConfig
+from .config import BackupConfig, Mode
 from .consts import DEFAULT_BRANCH
 from .logging import PrefixedLogger, log, quiet_filter
 from .manager import GitHub, Manager
@@ -138,7 +138,11 @@ class DandiDatasetter(AsyncResource):
             )
         dmanager = self.manager.with_sublogger(f"Dandiset {dandiset.identifier}")
         state = ds.get_assets_state()
-        if state is None or state.timestamp < dandiset.version.modified:
+        if (
+            dmanager.config.mode is Mode.FORCE
+            or state is None
+            or state.timestamp < dandiset.version.modified
+        ):
             changed = await self.sync_dataset(dandiset, ds, dmanager)
         elif state.timestamp > dandiset.version.modified:
             raise RuntimeError(
@@ -146,7 +150,7 @@ class DandiDatasetter(AsyncResource):
                 f" timestamp {dandiset.version.modified} BEFORE last-recorded"
                 f" {state.timestamp}"
             )
-        elif dmanager.config.verify_timestamps:
+        elif dmanager.config.mode is Mode.VERIFY:
             changed = await self.sync_dataset(
                 dandiset, ds, dmanager, error_on_change=True
             )
