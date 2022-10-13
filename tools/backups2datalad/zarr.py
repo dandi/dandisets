@@ -12,10 +12,10 @@ from aiobotocore.config import AioConfig
 from aiobotocore.session import get_session
 import anyio
 from botocore import UNSIGNED
-from dandi.dandiapi import RemoteZarrAsset
 from dandi.support.digests import ZCDirectory
 from pydantic import BaseModel
 
+from .adandi import RemoteZarrAsset
 from .adataset import AsyncDataset
 from .annex import AsyncAnnex
 from .config import ZarrMode
@@ -124,7 +124,7 @@ class ZarrSyncer:
     _local_checksum: Optional[str] = None
 
     def __post_init__(self) -> None:
-        self.api_url = self.asset.client.api_url
+        self.api_url = self.asset.aclient.api_url
         self.zarr_id = self.asset.zarr
         self.repo = self.ds.pathobj
         self.s3prefix = f"zarr/{self.zarr_id}/"
@@ -239,13 +239,13 @@ class ZarrSyncer:
                             )
         await anyio.to_thread.run_sync(self.prune_deleted, local_paths)
         final_checksum = cast(str, zcc.get_digest_size()[0])
-        modern_asset = await self.asset.refetch()  ### TODO: Implement
+        modern_asset = await self.asset.refetch()
         changed_during_sync = self.asset.modified != modern_asset.modified
         if changed_during_sync:
             self.log.info("`modified` timestamp on server changed during backup")
             if orig_checksum != final_checksum:
                 self.log.info("Local content changed during sync")
-        remote_checksum = cast(Optional[str], modern_asset.get_digest().value)
+        remote_checksum = modern_asset.get_digest_value()
         if remote_checksum is None:
             self.log.info("Checksum still not available from server")
         elif final_checksum != remote_checksum:

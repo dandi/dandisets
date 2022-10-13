@@ -5,21 +5,23 @@ from dataclasses import dataclass, field
 from datetime import datetime
 import json
 import os
-import random
 from pathlib import Path
+import random
 import sys
 import textwrap
 from types import TracebackType
-from typing import Any, Iterator, Optional, Type
+from typing import TYPE_CHECKING, Any, Iterator, Optional, Type
 
 from dandi.consts import dandiset_metadata_file
-from dandi.dandiapi import RemoteAsset, RemoteDandiset
 from dandi.dandiset import APIDandiset
 from datalad.api import Dataset
 from datalad.support.json_py import dump
 
 from .config import BackupConfig
 from .logging import PrefixedLogger
+
+if TYPE_CHECKING:
+    from .adandi import RemoteAsset, RemoteDandiset
 
 
 @dataclass
@@ -150,7 +152,7 @@ def pdb_excepthook(
 
 
 def asset2dict(asset: RemoteAsset) -> dict[str, Any]:
-    return {**asset.json_dict(), "metadata": asset.get_raw_metadata()}
+    return asset.json_dict()
 
 
 def assets_eq(remote_assets: list[RemoteAsset], local_assets: list[dict]) -> bool:
@@ -195,7 +197,7 @@ def exp_wait(
     base: float = 1.25,
     multiplier: float = 1,
     attempts: Optional[int] = None,
-    jitter: float = .1,
+    jitter: float = 0.1,
 ) -> Iterator[float]:
     """
     Returns a generator of values usable as `sleep()` times when retrying
@@ -211,7 +213,7 @@ def exp_wait(
     """
     n = 0
     while attempts is None or n < attempts:
-        yield (base**n * multiplier) * (1+(random.random() - 0.5)*jitter)
+        yield (base**n * multiplier) * (1 + (random.random() - 0.5) * jitter)
         n += 1
 
 

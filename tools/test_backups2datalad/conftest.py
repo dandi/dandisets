@@ -20,7 +20,7 @@ import pytest
 from test_util import find_filepaths
 import zarr
 
-from backups2datalad.adandi import AsyncDandiClient, RemoteDandiset
+from backups2datalad.adandi import AsyncDandiClient, RemoteDandiset, RemoteZarrAsset
 from backups2datalad.util import is_meta_file
 from backups2datalad.zarr import CHECKSUM_FILE
 
@@ -170,9 +170,10 @@ class SampleDandiset:
             assert zarr_root is not None
             for path, entries in self.zarr_assets.items():
                 asset = await self.dandiset.aget_asset_by_path(path)
+                assert isinstance(asset, RemoteZarrAsset)
                 zarr_ds = Dataset(zarr_root / asset.zarr)
                 try:
-                    checksum = asset.get_digest().value
+                    checksum = asset.get_digest_value()
                 except NotFoundError:
                     # Happens when Zarr is empty?
                     checksum = None

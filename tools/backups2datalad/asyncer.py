@@ -16,7 +16,7 @@ from urllib.parse import urlparse, urlunparse
 
 import anyio
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
-from dandi.dandiapi import AssetType, RemoteAsset, RemoteZarrAsset
+from dandi.dandiapi import AssetType
 from dandi.exceptions import NotFoundError
 from dandischema.models import DigestType
 import datalad
@@ -24,7 +24,7 @@ from datalad.api import clone
 import httpx
 from identify.identify import tags_from_filename
 
-from .adandi import RemoteDandiset
+from .adandi import RemoteAsset, RemoteDandiset, RemoteZarrAsset
 from .adataset import AssetsState, AsyncDataset
 from .aioutil import TextProcess, arequest, aruncmd, open_git_annex
 from .annex import AsyncAnnex
@@ -151,7 +151,7 @@ class Downloader:
                 if downloading:
                     if asset.asset_type == AssetType.ZARR:
                         try:
-                            zarr_digest = asset.get_digest().value
+                            zarr_digest = asset.get_digest_value()
                         except NotFoundError:
                             self.log.info(
                                 "%s: Zarr checksum has not been computed yet;"
@@ -168,7 +168,8 @@ class Downloader:
                             )
                     else:
                         try:
-                            sha256_digest = asset.get_raw_digest(DigestType.sha2_256)
+                            sha256_digest = asset.get_digest_value(DigestType.sha2_256)
+                            assert sha256_digest is not None
                         except NotFoundError:
                             self.log.info(
                                 "%s: SHA256 has not been computed yet;"
@@ -194,7 +195,7 @@ class Downloader:
                         and now - asset.created > timedelta(days=1)
                     ):
                         try:
-                            asset.get_raw_digest(DigestType.sha2_256)
+                            asset.get_digest_value(DigestType.sha2_256)
                         except NotFoundError:
                             self.log.error(
                                 "%s: Asset created more than a day ago"
