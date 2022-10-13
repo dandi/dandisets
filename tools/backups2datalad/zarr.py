@@ -18,6 +18,7 @@ from pydantic import BaseModel
 
 from .adataset import AsyncDataset
 from .annex import AsyncAnnex
+from .config import ZarrMode
 from .logging import PrefixedLogger
 from .manager import Manager
 from .util import UnexpectedChangeError, is_meta_file, key2hash, maxdatetime, quantify
@@ -112,8 +113,9 @@ class ZarrSyncer:
     s3bucket: str
     s3prefix: str = field(init=False)
     backup_remote: Optional[str]
-    checksum: str
+    checksum: Optional[str]
     log: PrefixedLogger
+    mode: ZarrMode
     last_timestamp: Optional[datetime] = None
     error_on_change: bool = False
     report: ZarrReport = field(default_factory=ZarrReport)
@@ -145,19 +147,21 @@ class ZarrSyncer:
                         )
                     self.log.info("%s: Syncing", entry)
                     local_paths.discard(str(entry))
-                    if last_sync is not None and entry.last_modified < last_sync:
-                        self.log.info("%s: file not modified since last backup", entry)
-                        continue
-                    if self.error_on_change:
-                        raise UnexpectedChangeError(
-                            f"Zarr {self.zarr_id}: entry {entry!r} was"
-                            " modified/added, but Dandiset draft timestamp was"
-                            " not updated on server"
-                        )
+                    if self.mode is ZarrMode.TIMESTAMP:
+                        if last_sync is not None and entry.last_modified < last_sync:
+                            self.log.info(
+                                "%s: file not modified since last backup", entry
+                            )
+                            continue
+                        self.check_change(f"entry {entry!r} was modified/added")
                     dest = self.repo / str(entry)
                     if dest.is_dir():
                         # File path is replacing a directory, which needs to be
                         # deleted
+                        self.check_change(
+                            "path type conflict between server & backup for"
+                            f" {str(entry)!r}"
+                        )
                         self.log.info(
                             "%s: deleting conflicting directory at same path",
                             entry,
@@ -169,6 +173,10 @@ class ZarrSyncer:
                             if pp.is_file() or pp.is_symlink():
                                 # Annexed file at parent path of `entry` needs
                                 # to be replaced with a directory
+                                self.check_change(
+                                    f"backup path {str(ep)!r} conflicts with"
+                                    f" server path {str(entry)!r}"
+                                )
                                 self.log.info(
                                     "%s: deleting conflicting file path %s",
                                     entry,
@@ -182,6 +190,7 @@ class ZarrSyncer:
                                 break
                     to_update = False
                     if not (dest.exists() or dest.is_symlink()):
+                        self.check_change(f"entry {str(entry)!r} added")
                         self.log.info("%s: Not in dataset; will add", entry)
                         to_update = True
                         self.report.added += 1
@@ -194,6 +203,7 @@ class ZarrSyncer:
                                 entry,
                             )
                         else:
+                            self.check_change(f"entry {str(entry)!r} modified")
                             self.log.info(
                                 "%s: Asset in dataset, and hash shows"
                                 " modification; will update",
@@ -223,18 +233,20 @@ class ZarrSyncer:
                                 "%s: Not in backup remote %s", entry, self.backup_remote
                             )
         await anyio.to_thread.run_sync(self.prune_deleted, local_paths)
-        old_checksum: Optional[str]
-        try:
-            old_checksum = (self.repo / CHECKSUM_FILE).read_text().strip()
-        except FileNotFoundError:
-            old_checksum = None
-        if old_checksum != self.checksum:
+        if self.get_stored_checksum() != self.checksum:
+            self.check_change("checksum modified")
             self.log.info("Updating checksum file")
             (self.repo / CHECKSUM_FILE).parent.mkdir(exist_ok=True)
             (self.repo / CHECKSUM_FILE).write_text(f"{self.checksum}\n")
             self.report.checksum = True
-        # Remove a possibly still present previous location for the checksum file
+        # Remove a possibly still present previous location for the checksum
+        # file
         if (self.repo / OLD_CHECKSUM_FILE).exists():
+            if self.error_on_change:
+                raise UnexpectedChangeError(
+                    f"Zarr {self.zarr_id}: old checksum file present, but we"
+                    " are in verify mode"
+                )
             (self.repo / OLD_CHECKSUM_FILE).unlink()
         self.write_sync_file()
 
@@ -268,56 +280,64 @@ class ZarrSyncer:
     async def needs_sync(
         self, client: S3Client, last_sync: Optional[datetime], local_paths: set[str]
     ) -> bool:
-        if last_sync is None:
+        if self.mode is ZarrMode.FORCE:
             return True
-        local_paths = local_paths.copy()
-        # We fetch a list of all objects from the server here (using
-        # `list_objects_v2`) in order to decide whether to sync, and then the
-        # actual syncing fetches all objects again using
-        # `list_object_versions`.  The latter endpoint is the only one that
-        # includes version IDs, yet it's also considerably slower than
-        # `list_objects_v2`, so we try to optimize for the presumed-common case
-        # of Zarrs rarely being modified.
-        leadlen = len(self.s3prefix)
-        async with aclosing(self.aiter_objects(client)) as ao:
-            async for obj in ao:
-                path = obj["Key"][leadlen:]
-                try:
-                    local_paths.remove(path)
-                except KeyError:
-                    if self.error_on_change:
-                        raise UnexpectedChangeError(
-                            f"Zarr {self.zarr_id}: entry {path!r} added, but"
-                            " Dandiset draft timestamp was not updated on server"
+        elif self.mode is ZarrMode.TIMESTAMP:
+            if last_sync is None:
+                return True
+            local_paths = local_paths.copy()
+            # We fetch a list of all objects from the server here (using
+            # `list_objects_v2`) in order to decide whether to sync, and then
+            # the actual syncing fetches all objects again using
+            # `list_object_versions`.  The latter endpoint is the only one that
+            # includes version IDs, yet it's also considerably slower than
+            # `list_objects_v2`, so we try to optimize for the presumed-common
+            # case of Zarrs rarely being modified.
+            leadlen = len(self.s3prefix)
+            async with aclosing(self.aiter_objects(client)) as ao:
+                async for obj in ao:
+                    path = obj["Key"][leadlen:]
+                    try:
+                        local_paths.remove(path)
+                    except KeyError:
+                        self.check_change(f"entry {path!r} added")
+                        self.log.info("%s on server but not in backup", path)
+                        return True
+                    if obj["LastModified"] > last_sync:
+                        self.check_change(f"entry {path!r} modified")
+                        self.log.info(
+                            "%s was modified on server at %s, after last sync at %s",
+                            path,
+                            obj["LastModified"],
+                            last_sync,
                         )
-                    self.log.info("%s on server but not in backup", path)
-                    return True
-                if obj["LastModified"] > last_sync:
-                    if self.error_on_change:
-                        raise UnexpectedChangeError(
-                            f"Zarr {self.zarr_id}: entry {path!r} modified, but"
-                            " Dandiset draft timestamp was not updated on server"
-                        )
-                    self.log.info(
-                        "%s was modified on server at %s, after last sync at %s",
-                        path,
-                        obj["LastModified"],
-                        last_sync,
-                    )
-                    return True
-        if local_paths:
-            if self.error_on_change:
-                raise UnexpectedChangeError(
-                    f"Zarr {self.zarr_id}: {quantify(len(local_paths), 'file')}"
-                    " deleted, but Dandiset draft timestamp was not updated on"
-                    " server"
+                        return True
+            if local_paths:
+                self.check_change(f"{quantify(len(local_paths), 'file')} deleted")
+                self.log.info(
+                    "%s in local backup but no longer on server",
+                    quantify(len(local_paths), "file"),
                 )
-            self.log.info(
-                "%s in local backup but no longer on server",
-                quantify(len(local_paths), "file"),
-            )
-            return True
-        return False
+                return True
+            return False
+        else:
+            assert self.mode is ZarrMode.CHECKSUM
+            stored_checksum = self.get_stored_checksum()
+            if stored_checksum is None:
+                self.log.info("No checksum stored for Zarr")
+                return True
+            elif stored_checksum != self.checksum:
+                self.check_change("Checksum on server differs from stored checksum")
+                self.log.info("Checksum on server differs from stored checksum")
+                return True
+            elif stored_checksum != await self.get_local_zarr_checksum():
+                self.check_change(
+                    "Checksum computed for local entries is not as expected"
+                )
+                self.log.info("Checksum computed for local entries is not as expected")
+                return True
+            else:
+                return False
 
     def rmtree(self, dirpath: Path, local_paths: set[str]) -> None:
         for p in list(dirpath.iterdir()):
@@ -331,12 +351,8 @@ class ZarrSyncer:
         dirpath.rmdir()
 
     def prune_deleted(self, local_paths: set[str]) -> None:
-        if local_paths and self.error_on_change:
-            raise UnexpectedChangeError(
-                f"Zarr {self.zarr_id}: {quantify(len(local_paths), 'file')}"
-                " deleted from Zarr, but Dandiset draft timestamp was not"
-                " updated on server"
-            )
+        if local_paths:
+            self.check_change(f"{quantify(len(local_paths), 'file')} deleted from Zarr")
         self.log.info("deleting extra files")
         for path in local_paths:
             self.log.info("deleting %s", path)
@@ -411,10 +427,23 @@ class ZarrSyncer:
         self.log.info("Computed Zarr checksum: %s", checksum)
         return checksum
 
+    def get_stored_checksum(self) -> Optional[str]:
+        try:
+            return (self.repo / CHECKSUM_FILE).read_text().strip()
+        except FileNotFoundError:
+            return None
+
+    def check_change(self, event: str) -> None:
+        if self.error_on_change:
+            raise UnexpectedChangeError(
+                f"Zarr {self.zarr_id}: {event}, but Dandiset draft timestamp"
+                " was not updated on server"
+            )
+
 
 async def sync_zarr(
     asset: RemoteZarrAsset,
-    checksum: str,
+    checksum: Optional[str],
     dsdir: Path,
     manager: Manager,
     link: Optional[ZarrLink] = None,
@@ -467,6 +496,7 @@ async def sync_zarr(
                 checksum=checksum,
                 log=manager.log,
                 error_on_change=error_on_change,
+                mode=manager.config.zarr_mode,
             )
             await zsync.run()
         report = zsync.report

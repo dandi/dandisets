@@ -297,7 +297,9 @@ class Downloader:
                         )
                     )
 
-    async def process_zarr(self, asset: RemoteZarrAsset, zarr_digest: str) -> None:
+    async def process_zarr(
+        self, asset: RemoteZarrAsset, zarr_digest: Optional[str]
+    ) -> None:
         self.tracker.register_asset(asset, force=self.config.force)
         self.tracker.finish_asset(asset.path)
         # In case the Zarr is empty:
