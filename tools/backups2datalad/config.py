@@ -26,7 +26,7 @@ class ResourceConfig(BaseModel):
     remote: Optional[Remote] = None
 
 
-class Mode(Enum):
+class Mode(str, Enum):
     TIMESTAMP = "timestamp"
     VERIFY = "verify"
     FORCE = "force"
@@ -35,7 +35,7 @@ class Mode(Enum):
         return self.value
 
 
-class ZarrMode(Enum):
+class ZarrMode(str, Enum):
     TIMESTAMP = "timestamp"
     CHECKSUM = "checksum"
     FORCE = "force"
