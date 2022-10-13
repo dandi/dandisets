@@ -106,9 +106,11 @@ class ZarrReport:
 
 @dataclass
 class ZarrSyncer:
-    api_url: str
-    zarr_id: str
+    asset: RemoteZarrAsset
+    api_url: str = field(init=False)
+    zarr_id: str = field(init=False)
     ds: AsyncDataset
+    repo: Path = field(init=False)
     annex: AsyncAnnex
     s3bucket: str
     s3prefix: str = field(init=False)
@@ -119,13 +121,13 @@ class ZarrSyncer:
     last_timestamp: Optional[datetime] = None
     error_on_change: bool = False
     report: ZarrReport = field(default_factory=ZarrReport)
+    _local_checksum: Optional[str] = None
 
     def __post_init__(self) -> None:
+        self.api_url = self.asset.client.api_url
+        self.zarr_id = self.asset.zarr
+        self.repo = self.ds.pathobj
         self.s3prefix = f"zarr/{self.zarr_id}/"
-
-    @property
-    def repo(self) -> Path:
-        return self.ds.pathobj
 
     async def run(self) -> None:
         last_sync = self.read_sync_file()
@@ -138,6 +140,8 @@ class ZarrSyncer:
                 self.log.info("backup up to date")
                 return
             self.log.info("sync needed")
+            orig_checksum = await self.get_local_checksum()
+            zcc = ZCDirectory()
             async with aclosing(self.aiter_file_entries(client)) as ait:
                 async for entry in ait:
                     if is_meta_file(str(entry)):
@@ -146,6 +150,7 @@ class ZarrSyncer:
                             f" {str(entry)!r}"
                         )
                     self.log.info("%s: Syncing", entry)
+                    zcc.add(Path(entry.path), entry.md5_digest, entry.size)
                     local_paths.discard(str(entry))
                     if self.mode is ZarrMode.TIMESTAMP:
                         if last_sync is not None and entry.last_modified < last_sync:
@@ -233,19 +238,43 @@ class ZarrSyncer:
                                 "%s: Not in backup remote %s", entry, self.backup_remote
                             )
         await anyio.to_thread.run_sync(self.prune_deleted, local_paths)
-        if self.get_stored_checksum() != self.checksum:
+        final_checksum = cast(str, zcc.get_digest_size()[0])
+        modern_asset = await self.asset.refetch()  ### TODO: Implement
+        changed_during_sync = self.asset.modified != modern_asset.modified
+        if changed_during_sync:
+            self.log.info("`modified` timestamp on server changed during backup")
+            if orig_checksum != final_checksum:
+                self.log.info("Local content changed during sync")
+        remote_checksum = cast(Optional[str], modern_asset.get_digest().value)
+        if remote_checksum is None:
+            self.log.info("Checksum still not available from server")
+        elif final_checksum != remote_checksum:
+            if changed_during_sync:
+                self.log.warning(
+                    "Zarr was modified during backup and there is a checksum"
+                    " mismatch: local=%s, remote=%s",
+                    final_checksum,
+                    remote_checksum,
+                )
+            else:
+                raise RuntimeError(
+                    f"Zarr {self.zarr_id}: local checksum {final_checksum!r}"
+                    " differs from remote checksum {remote_checksum!r} after"
+                    " backup, and no change on server was detected"
+                )
+        if self.get_stored_checksum() != final_checksum:
             self.check_change("checksum modified")
             self.log.info("Updating checksum file")
             (self.repo / CHECKSUM_FILE).parent.mkdir(exist_ok=True)
-            (self.repo / CHECKSUM_FILE).write_text(f"{self.checksum}\n")
+            (self.repo / CHECKSUM_FILE).write_text(f"{final_checksum}\n")
             self.report.checksum = True
-        # Remove a possibly still present previous location for the checksum
-        # file
+        # Remove a possibly still-present previous location for the checksum
+        # file:
         if (self.repo / OLD_CHECKSUM_FILE).exists():
             if self.error_on_change:
                 raise UnexpectedChangeError(
-                    f"Zarr {self.zarr_id}: old checksum file present, but we"
-                    " are in verify mode"
+                    f"Zarr {self.zarr_id}: old checksum file present, but"
+                    " we are in verify mode"
                 )
             (self.repo / OLD_CHECKSUM_FILE).unlink()
         self.write_sync_file()
@@ -330,7 +359,7 @@ class ZarrSyncer:
                 self.check_change("Checksum on server differs from stored checksum")
                 self.log.info("Checksum on server differs from stored checksum")
                 return True
-            elif stored_checksum != await self.get_local_zarr_checksum():
+            elif stored_checksum != await self.get_local_checksum():
                 self.check_change(
                     "Checksum computed for local entries is not as expected"
                 )
@@ -412,7 +441,12 @@ class ZarrSyncer:
         self.log.info("%s: Registering URL %s", path, url)
         await self.annex.register_url(key, url)
 
-    async def get_local_zarr_checksum(self) -> str:
+    async def get_local_checksum(self) -> str:
+        if self._local_checksum is None:
+            self._local_checksum = await self.compute_local_zarr_checksum()
+        return self._local_checksum
+
+    async def compute_local_zarr_checksum(self) -> str:
         self.log.info("Computing Zarr checksum for locally-annexed files")
         zcc = ZCDirectory()
         async with aclosing(self.ds.aiter_annexed_files()) as afiles:
@@ -487,8 +521,7 @@ async def sync_zarr(
             else:
                 backup_remote = None
             zsync = ZarrSyncer(
-                api_url=asset.client.api_url,
-                zarr_id=asset.zarr,
+                asset=asset,
                 ds=ds,
                 annex=annex,
                 s3bucket=manager.config.s3bucket,

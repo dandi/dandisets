@@ -184,6 +184,11 @@ class RemoteDandiset(SyncRemoteDandiset):
                 if isinstance(asset, RemoteZarrAsset):
                     yield asset
 
+    async def aget_asset(self, asset_id: str) -> RemoteAsset:
+        info = await self.aclient.get(f"{self.version_api_path}assets/{asset_id}/info/")
+        metadata = info.pop("metadata", None)
+        return RemoteAsset.from_data(self, info, metadata)
+
     async def aget_asset_by_path(self, path: str) -> RemoteAsset:
         async with aclosing(
             self.aclient.paginate(
