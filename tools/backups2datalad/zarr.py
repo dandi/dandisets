@@ -12,7 +12,7 @@ from aiobotocore.config import AioConfig
 from aiobotocore.session import get_session
 import anyio
 from botocore import UNSIGNED
-from dandi.support.digests import ZCDirectory
+from dandi.support.digests import ZCTree
 from pydantic import BaseModel
 
 from .adandi import RemoteZarrAsset
@@ -141,7 +141,7 @@ class ZarrSyncer:
                 return
             self.log.info("sync needed")
             orig_checksum = await self.get_local_checksum()
-            zcc = ZCDirectory()
+            zcc = ZCTree()
             async with aclosing(self.aiter_file_entries(client)) as ait:
                 async for entry in ait:
                     if is_meta_file(str(entry)):
@@ -238,7 +238,7 @@ class ZarrSyncer:
                                 "%s: Not in backup remote %s", entry, self.backup_remote
                             )
         await anyio.to_thread.run_sync(self.prune_deleted, local_paths)
-        final_checksum = cast(str, zcc.get_digest_size()[0])
+        final_checksum = cast(str, zcc.get_digest())
         modern_asset = await self.asset.refetch()
         changed_during_sync = self.asset.modified != modern_asset.modified
         if changed_during_sync:
@@ -448,7 +448,7 @@ class ZarrSyncer:
 
     async def compute_local_zarr_checksum(self) -> str:
         self.log.info("Computing Zarr checksum for locally-annexed files")
-        zcc = ZCDirectory()
+        zcc = ZCTree()
         async with aclosing(self.ds.aiter_annexed_files()) as afiles:
             async for f in afiles:
                 if f.backend not in ("MD5", "MD5E"):
@@ -457,7 +457,7 @@ class ZarrSyncer:
                         " backend instead of required MD5 or MD5E"
                     )
                 zcc.add(Path(f.file), key2hash(f.key), f.bytesize)
-        checksum = cast(str, zcc.get_digest_size()[0])
+        checksum = cast(str, zcc.get_digest())
         self.log.info("Computed Zarr checksum: %s", checksum)
         return checksum
 
