@@ -13,6 +13,7 @@ import sys
 from typing import Any, AsyncGenerator, ClassVar, Optional, Sequence, cast
 
 import anyio
+from dandi.support.digests import ZCTree
 from datalad.api import Dataset
 from datalad.runner.exception import CommandError
 from ghrepo import GHRepo
@@ -22,7 +23,7 @@ from .aioutil import areadcmd, aruncmd, open_git_annex, stream_null_command
 from .config import BackupConfig, Remote
 from .consts import DEFAULT_BRANCH
 from .logging import log
-from .util import custom_commit_env, exp_wait, is_meta_file
+from .util import custom_commit_env, exp_wait, is_meta_file, key2hash
 
 if sys.version_info[:2] >= (3, 10):
     from contextlib import aclosing
@@ -218,6 +219,23 @@ class AsyncDataset:
                     raise
                 else:
                     yield data
+
+    async def compute_zarr_checksum(self) -> str:
+        log.debug(
+            "Computing Zarr checksum for locally-annexed files in %s", self.pathobj
+        )
+        zcc = ZCTree()
+        async with aclosing(self.aiter_annexed_files()) as afiles:
+            async for f in afiles:
+                if f.backend not in ("MD5", "MD5E"):
+                    raise RuntimeError(
+                        f"{f.file} in {self.pathobj} has {f.backend} backend"
+                        " instead of MD5 or MD5E required for Zarr checksum"
+                    )
+                zcc.add(Path(f.file), key2hash(f.key), f.bytesize)
+        checksum = cast(str, zcc.get_digest())
+        log.debug("Computed Zarr checksum %s for %s", checksum, self.pathobj)
+        return checksum
 
     async def create_github_sibling(
         self,

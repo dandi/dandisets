@@ -21,6 +21,7 @@ from test_util import find_filepaths
 import zarr
 
 from backups2datalad.adandi import AsyncDandiClient, RemoteDandiset, RemoteZarrAsset
+from backups2datalad.adataset import AsyncDataset
 from backups2datalad.util import is_meta_file
 from backups2datalad.zarr import CHECKSUM_FILE
 
@@ -185,14 +186,21 @@ class SampleDandiset:
                 assert (
                     subds["state"] == "absent"
                 )  # we should have them uninstalled in the dataset
+                local_checksum = await AsyncDataset(
+                    zarr_ds.pathobj
+                ).compute_zarr_checksum()
                 zarr_keys2blobs.update(
-                    self.check_zarr_backup(zarr_ds, entries, checksum)
+                    self.check_zarr_backup(zarr_ds, entries, checksum, local_checksum)
                 )
         assert not subdatasets
         return PopulateManifest(zarr_keys2blobs)
 
     def check_zarr_backup(
-        self, zarr_ds: Dataset, entries: dict[str, bytes], checksum: Optional[str]
+        self,
+        zarr_ds: Dataset,
+        entries: dict[str, bytes],
+        checksum: Optional[str],
+        local_checksum: str,
     ) -> dict[str, bytes]:
         assert zarr_ds.is_installed()
         assert_repo_status(zarr_ds.path)
@@ -204,11 +212,10 @@ class SampleDandiset:
             p = zarr_ds.pathobj / path
             assert p.is_symlink() and not p.exists()
             keys2blobs[Path(os.readlink(p)).name] = blob
-        assert (zarr_ds.pathobj / CHECKSUM_FILE).is_file()
+        stored_checksum = (zarr_ds.pathobj / CHECKSUM_FILE).read_text().strip()
+        assert stored_checksum == local_checksum
         if checksum is not None:
-            assert (zarr_ds.pathobj / CHECKSUM_FILE).read_text().strip() == checksum
-        else:
-            assert (zarr_ds.pathobj / CHECKSUM_FILE).exists()
+            assert stored_checksum == checksum
         assert zarr_ds.repo.is_under_annex([str(CHECKSUM_FILE)]) == [False]
         return keys2blobs
 

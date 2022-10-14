@@ -443,23 +443,8 @@ class ZarrSyncer:
 
     async def get_local_checksum(self) -> str:
         if self._local_checksum is None:
-            self._local_checksum = await self.compute_local_zarr_checksum()
+            self._local_checksum = await self.ds.compute_zarr_checksum()
         return self._local_checksum
-
-    async def compute_local_zarr_checksum(self) -> str:
-        self.log.info("Computing Zarr checksum for locally-annexed files")
-        zcc = ZCTree()
-        async with aclosing(self.ds.aiter_annexed_files()) as afiles:
-            async for f in afiles:
-                if f.backend not in ("MD5", "MD5E"):
-                    raise RuntimeError(
-                        f"{f.file} in Zarr {self.zarr_id} has {f.backend}"
-                        " backend instead of required MD5 or MD5E"
-                    )
-                zcc.add(Path(f.file), key2hash(f.key), f.bytesize)
-        checksum = cast(str, zcc.get_digest())
-        self.log.info("Computed Zarr checksum: %s", checksum)
-        return checksum
 
     def get_stored_checksum(self) -> Optional[str]:
         try:

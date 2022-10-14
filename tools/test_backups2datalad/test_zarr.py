@@ -37,8 +37,12 @@ async def test_sync_zarr(new_dandiset: SampleDandiset, tmp_path: Path) -> None:
     await sync_zarr(
         asset, checksum, tmp_path, Manager(config=config, gh=None, log=plog)
     )
+    local_checksum = await AsyncDataset(tmp_path).compute_zarr_checksum()
     new_dandiset.check_zarr_backup(
-        Dataset(tmp_path), new_dandiset.zarr_assets["sample.zarr"], checksum
+        Dataset(tmp_path),
+        new_dandiset.zarr_assets["sample.zarr"],
+        checksum,
+        local_checksum,
     )
 
 
