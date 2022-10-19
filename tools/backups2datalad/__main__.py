@@ -135,7 +135,7 @@ async def main(
 @click.option("-w", "--workers", type=int, help="Number of workers to run in parallel")
 @click.option(
     "--zarr-mode",
-    type=click.Choice(list(Mode)),
+    type=click.Choice(list(ZarrMode)),
     default=None,
     help=(
         "How to decide whether to back up a Zarr.  'timestamp' — only if"
