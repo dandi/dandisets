@@ -255,6 +255,38 @@ class RemoteDandiset(SyncRemoteDandiset):
 
 
 class RemoteAsset(BaseModel):
+    """
+    A minimal, asynchronous version of `dandi.dandiapi.RemoteAsset`, which it
+    differs from in the following ways:
+
+    - `refetch()` method added
+    - `aclient` property added
+    - `get_digest()` and `get_raw_digest()` methods combined into
+      `get_digest_value()`
+    - No `BaseRemoteAsset` base class, as backups2datalad doesn't operate on
+      Dandiset-less asset URLs
+    - `dandiset` attribute added
+    - `dandiset_id` and `version_id` attributes are now properties
+    - `_metadata` attribute renamed to `metadata`
+    - The `metadata` attribute is now always set
+    - `from_data()` now expects ``metadata`` to be a field of ``data`` instead
+      of a separate argument
+    - The following methods & properties have been removed:
+
+      - `get_metadata()`
+      - `get_raw_metadata()` (Use the `metadata` attribute instead)
+      - `get_download_file_iter()`
+      - `download()`
+      - `set_metadata()`
+      - `set_raw_metadata()`
+      - `rename()`
+      - `delete()`
+      - `api_url`
+      - `download_url`
+
+    - `get_content_url()` does not take ``follow_redirects`` or ``strip_query``
+      parameters
+    """
 
     dandiset: RemoteDandiset
     #: The asset identifier
@@ -327,7 +359,7 @@ class RemoteAsset(BaseModel):
     def base_download_url(self) -> str:
         """
         The URL from which the asset can be downloaded, sans any Dandiset
-        identifiers (cf. `RemoteAsset.download_url`)
+        identifiers
         """
         return self.aclient.get_url(f"/assets/{self.identifier}/download/")
 
