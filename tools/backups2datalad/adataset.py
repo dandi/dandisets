@@ -225,6 +225,8 @@ class AsyncDataset:
             "Computing Zarr checksum for locally-annexed files in %s", self.pathobj
         )
         zcc = ZCTree()
+        # rely on the fact that every data component of zarr folder is in annex
+        # and we keep .dandi/ folder content directly in git
         async with aclosing(self.aiter_annexed_files()) as afiles:
             async for f in afiles:
                 if f.backend not in ("MD5", "MD5E"):
