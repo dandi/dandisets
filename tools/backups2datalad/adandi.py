@@ -304,10 +304,12 @@ class RemoteAsset(BaseModel):
 
     class Config:
         """Configuration for pydantic"""
-        # To use the non-pydantic RemoteDandiset as an attribute and 
-        # to be able tocreate instances with RemoteAsset(identifier=...) instead of
+
+        # To use the non-pydantic RemoteDandiset as an attribute and to be able
+        # to create instances with RemoteAsset(identifier=...) instead of
         # RemoteAsset(alias_id=...)
         allow_population_by_field_name = True
+        arbitrary_types_allowed = True
 
     @classmethod
     def from_data(cls, dandiset: RemoteDandiset, data: Dict[str, Any]) -> RemoteAsset:
