@@ -124,7 +124,8 @@ async def main(
         "How to decide whether to back up a Dandiset.  'timestamp' — only if"
         " timestamp of last backup is older than modified timestamp on server;"
         " 'force' — always; 'verify' — always, but error if there are any"
-        " changes without a change to the timestamp"
+        " changes without a change to the timestamp.  [default: timestamp,"
+        " unless different value set via config file]"
     ),
 )
 @click.option(
@@ -141,7 +142,8 @@ async def main(
         "How to decide whether to back up a Zarr.  'timestamp' — only if"
         " timestamp of last backup is older than some Zarr entry in S3;"
         "'checksum' — only if Zarr checksum is out of date or doesn't match"
-        " expected value; 'force' — always"
+        " expected value; 'force' — always.  [default: timestamp, unless"
+        " different value set via config file]"
     ),
 )
 @click.argument("dandisets", nargs=-1)
