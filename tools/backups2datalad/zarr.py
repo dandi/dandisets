@@ -350,7 +350,7 @@ class ZarrSyncer:
                 return True
             return False
         else:
-            assert self.mode is ZarrMode.CHECKSUM
+            assert self.mode in (ZarrMode.CHECKSUM, ZarrMode.ASSET_CHECKSUM)
             stored_checksum = self.get_stored_checksum()
             if stored_checksum is None:
                 self.log.info("No checksum stored for Zarr")

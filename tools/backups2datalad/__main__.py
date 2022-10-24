@@ -141,9 +141,11 @@ async def main(
     help=(
         "How to decide whether to back up a Zarr.  'timestamp' — only if"
         " timestamp of last backup is older than some Zarr entry in S3;"
-        "'checksum' — only if Zarr checksum is out of date or doesn't match"
-        " expected value; 'force' — always.  [default: timestamp, unless"
-        " different value set via config file]"
+        " 'checksum' — only if Zarr checksum is out of date or doesn't match"
+        " expected value; 'asset-checksum' — only if Zarr asset's 'modified'"
+        " timestamp is later than that in assets.json and checksum is out of"
+        " date or doesn't match expected value; 'force' — always.  [default:"
+        " timestamp, unless different value set via config file]"
     ),
 )
 @click.argument("dandisets", nargs=-1)

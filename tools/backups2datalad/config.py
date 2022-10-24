@@ -39,6 +39,7 @@ class ZarrMode(str, Enum):
     TIMESTAMP = "timestamp"
     CHECKSUM = "checksum"
     FORCE = "force"
+    ASSET_CHECKSUM = "asset-checksum"
 
     def __str__(self) -> str:
         return self.value

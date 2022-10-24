@@ -28,7 +28,7 @@ from .adandi import RemoteAsset, RemoteDandiset, RemoteZarrAsset
 from .adataset import AssetsState, AsyncDataset
 from .aioutil import TextProcess, arequest, aruncmd, open_git_annex
 from .annex import AsyncAnnex
-from .config import BackupConfig
+from .config import BackupConfig, ZarrMode
 from .consts import USER_AGENT
 from .logging import PrefixedLogger, log
 from .manager import Manager
@@ -301,7 +301,17 @@ class Downloader:
     async def process_zarr(
         self, asset: RemoteZarrAsset, zarr_digest: Optional[str]
     ) -> None:
-        self.tracker.register_asset(asset, force=self.config.force)
+        if self.manager.config.zarr_mode is ZarrMode.ASSET_CHECKSUM:
+            if not self.tracker.register_asset_by_timestamp(
+                asset, force=self.config.force
+            ):
+                self.log.info(
+                    "Zarr %s: asset timestamp up to date; not syncing", asset.zarr
+                )
+                self.tracker.finish_asset(asset.path)
+                return
+        else:
+            self.tracker.register_asset(asset, force=self.config.force)
         self.tracker.finish_asset(asset.path)
         # In case the Zarr is empty:
         self.last_timestamp = maxdatetime(self.last_timestamp, asset.created)

@@ -70,6 +70,19 @@ class AssetTracker:
         self.in_progress[asset.path] = adict
         return adict != self.asset_metadata.get(asset.path) or force == "assets-update"
 
+    def register_asset_by_timestamp(
+        self, asset: RemoteAsset, force: Optional[str]
+    ) -> bool:
+        # Returns True if the asset's `modified` timestamp has changed (or if
+        # we should act like it's changed) since the last sync
+        self.local_assets.discard(asset.path)
+        adict = asset2dict(asset)
+        self.in_progress[asset.path] = adict
+        return (
+            adict["modified"] != self.asset_metadata.get(asset.path, {}).get("modified")
+            or force == "assets-update"
+        )
+
     def finish_asset(self, asset_path: str) -> None:
         self.asset_metadata[asset_path] = self.in_progress.pop(asset_path)
 
