@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 from test_util import GitRepo
 
+from backups2datalad.adandi import RemoteZarrAsset
 from backups2datalad.adataset import AsyncDataset, DatasetStats
 from backups2datalad.aioutil import arequest
 from backups2datalad.config import BackupConfig, ResourceConfig
@@ -28,15 +29,20 @@ async def test_sync_zarr(new_dandiset: SampleDandiset, tmp_path: Path) -> None:
     new_dandiset.add_zarr("sample.zarr", np.arange(1000), np.arange(1000, 0, -1))
     await new_dandiset.upload()
     asset = await new_dandiset.dandiset.aget_asset_by_path("sample.zarr")
-    checksum = asset.get_digest().value
+    assert isinstance(asset, RemoteZarrAsset)
+    checksum = asset.get_digest_value()
     config = BackupConfig(
         s3bucket="dandi-api-staging-dandisets", zarrs=ResourceConfig(path="zarrs")
     )
     await sync_zarr(
         asset, checksum, tmp_path, Manager(config=config, gh=None, log=plog)
     )
+    local_checksum = await AsyncDataset(tmp_path).compute_zarr_checksum()
     new_dandiset.check_zarr_backup(
-        Dataset(tmp_path), new_dandiset.zarr_assets["sample.zarr"], checksum
+        Dataset(tmp_path),
+        new_dandiset.zarr_assets["sample.zarr"],
+        checksum,
+        local_checksum,
     )
 
 
@@ -45,6 +51,7 @@ async def test_backup_zarr(new_dandiset: SampleDandiset, tmp_path: Path) -> None
     new_dandiset.add_text("file.txt", "This is test text.\n")
     await new_dandiset.upload()
     asset = await new_dandiset.dandiset.aget_asset_by_path("sample.zarr")
+    assert isinstance(asset, RemoteZarrAsset)
 
     di = DandiDatasetter(
         dandi_client=new_dandiset.client,
@@ -177,6 +184,7 @@ async def test_backup_zarr_delete_zarr(
     await di.update_from_backup([dandiset_id])
 
     asset = await new_dandiset.dandiset.aget_asset_by_path("sample.zarr")
+    assert isinstance(asset, RemoteZarrAsset)
     await new_dandiset.client.delete(asset.api_path)
     new_dandiset.rmasset("sample.zarr")
 
@@ -196,6 +204,7 @@ async def test_backup_zarr_pathological(
     client = new_dandiset.client
     dandiset_id = new_dandiset.dandiset_id
     asset = await new_dandiset.dandiset.aget_asset_by_path("sample.zarr")
+    assert isinstance(asset, RemoteZarrAsset)
     sample_zarr_id = asset.zarr
 
     await client.post(

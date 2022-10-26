@@ -18,17 +18,16 @@ from typing import AsyncGenerator, Optional, Sequence
 import anyio
 from anyio.abc import AsyncResource
 from dandi.consts import dandiset_metadata_file
-from dandi.dandiapi import RemoteZarrAsset
 from dandi.exceptions import NotFoundError
 from datalad.api import clone
 from ghrepo import GHRepo
 from humanize import naturalsize
 from packaging.version import Version as PkgVersion
 
-from .adandi import AsyncDandiClient, RemoteDandiset
+from .adandi import AsyncDandiClient, RemoteDandiset, RemoteZarrAsset
 from .adataset import AssetsState, AsyncDataset, DatasetStats
 from .aioutil import aruncmd, pool_amap
-from .config import BackupConfig
+from .config import BackupConfig, Mode
 from .consts import DEFAULT_BRANCH
 from .logging import PrefixedLogger, log, quiet_filter
 from .manager import GitHub, Manager
@@ -138,7 +137,11 @@ class DandiDatasetter(AsyncResource):
             )
         dmanager = self.manager.with_sublogger(f"Dandiset {dandiset.identifier}")
         state = ds.get_assets_state()
-        if state is None or state.timestamp < dandiset.version.modified:
+        if (
+            dmanager.config.mode is Mode.FORCE
+            or state is None
+            or state.timestamp < dandiset.version.modified
+        ):
             changed = await self.sync_dataset(dandiset, ds, dmanager)
         elif state.timestamp > dandiset.version.modified:
             raise RuntimeError(
@@ -146,7 +149,7 @@ class DandiDatasetter(AsyncResource):
                 f" timestamp {dandiset.version.modified} BEFORE last-recorded"
                 f" {state.timestamp}"
             )
-        elif dmanager.config.verify_timestamps:
+        elif dmanager.config.mode is Mode.VERIFY:
             changed = await self.sync_dataset(
                 dandiset, ds, dmanager, error_on_change=True
             )
@@ -408,7 +411,8 @@ class DandiDatasetter(AsyncResource):
             await ds.call_git("push", "github", dandiset.version_id)
 
     async def backup_zarrs(self, dandiset: str, partial_dir: Path) -> None:
-        assert self.config.zarr_root is not None
+        zarr_root = self.config.zarr_root
+        assert zarr_root is not None
         partial_dir.mkdir(parents=True, exist_ok=True)
         d = await self.dandi_client.get_dandiset(dandiset, "draft")
         ds = AsyncDataset(self.config.dandiset_root / d.identifier)
@@ -416,14 +420,15 @@ class DandiDatasetter(AsyncResource):
 
         async def dobackup(asset: RemoteZarrAsset) -> None:
             try:
-                zarr_digest = asset.get_digest().value
+                zarr_digest = asset.get_digest_value()
             except NotFoundError:
                 log.info(
                     "%s: Zarr checksum has not been computed yet; not backing up",
                     asset.path,
                 )
                 return
-            ultimate_dspath = self.config.zarr_root / asset.zarr
+            assert zarr_root is not None
+            ultimate_dspath = zarr_root / asset.zarr
             if ultimate_dspath.exists():
                 log.info("%s: Zarr already backed up", asset.path)
                 return

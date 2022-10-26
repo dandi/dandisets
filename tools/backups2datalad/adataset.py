@@ -5,15 +5,15 @@ from dataclasses import InitVar, dataclass, field, replace
 from datetime import datetime
 from enum import Enum
 from functools import partial
-import json
 from operator import attrgetter
 from pathlib import Path
 import re
 import subprocess
 import sys
-from typing import Any, ClassVar, Optional, Sequence, cast
+from typing import Any, AsyncGenerator, ClassVar, Optional, Sequence, cast
 
 import anyio
+from dandi.support.digests import ZCTree
 from datalad.api import Dataset
 from datalad.runner.exception import CommandError
 from ghrepo import GHRepo
@@ -23,7 +23,7 @@ from .aioutil import areadcmd, aruncmd, open_git_annex, stream_null_command
 from .config import BackupConfig, Remote
 from .consts import DEFAULT_BRANCH
 from .logging import log
-from .util import custom_commit_env, exp_wait, is_meta_file
+from .util import custom_commit_env, exp_wait, is_meta_file, key2hash
 
 if sys.version_info[:2] >= (3, 10):
     from contextlib import aclosing
@@ -197,20 +197,47 @@ class AsyncDataset:
                     )
                     raise
                 filedict[fst.path] = fst
+        async with aclosing(self.aiter_annexed_files()) as afiles:
+            async for f in afiles:
+                filedict[f.file] = replace(filedict[f.file], size=f.bytesize)
+        return list(filedict.values())
+
+    async def aiter_annexed_files(self) -> AsyncGenerator[AnnexedFile, None]:
         async with await open_git_annex(
             "find", "--include=*", "--json", use_stdin=False, path=self.pathobj
         ) as p:
-            try:
-                async for line in p:
-                    data = json.loads(line)
-                    path = cast(str, data["file"])
-                    filedict[path] = replace(filedict[path], size=int(data["bytesize"]))
-            except Exception:
-                log.exception(
-                    "Error parsing `git-annex find` output for %s:", self.path
-                )
-                raise
-        return list(filedict.values())
+            async for line in p:
+                try:
+                    data = AnnexedFile.parse_raw(line)
+                except Exception:
+                    log.exception(
+                        "Error parsing `git-annex find` output for %s: bad"
+                        " output line %r",
+                        self.path,
+                        line,
+                    )
+                    raise
+                else:
+                    yield data
+
+    async def compute_zarr_checksum(self) -> str:
+        log.debug(
+            "Computing Zarr checksum for locally-annexed files in %s", self.pathobj
+        )
+        zcc = ZCTree()
+        # rely on the fact that every data component of zarr folder is in annex
+        # and we keep .dandi/ folder content directly in git
+        async with aclosing(self.aiter_annexed_files()) as afiles:
+            async for f in afiles:
+                if f.backend not in ("MD5", "MD5E"):
+                    raise RuntimeError(
+                        f"{f.file} in {self.pathobj} has {f.backend} backend"
+                        " instead of MD5 or MD5E required for Zarr checksum"
+                    )
+                zcc.add(Path(f.file), key2hash(f.key), f.bytesize)
+        checksum = cast(str, zcc.get_digest())
+        log.debug("Computed Zarr checksum %s for %s", checksum, self.pathobj)
+        return checksum
 
     async def create_github_sibling(
         self,
@@ -423,3 +450,16 @@ class DatasetStats:
 class AssetsState(BaseModel):
     PATH: ClassVar[Path] = Path(".dandi", "assets-state.json")
     timestamp: datetime
+
+
+class AnnexedFile(BaseModel):
+    backend: str
+    bytesize: int
+    # error-messages: list[str]
+    file: str
+    # hashdirlower: str
+    # hashdirmixed: str
+    # humansize: str
+    key: str
+    # keyname: str
+    # mtime: Literal["unknown"] | ???

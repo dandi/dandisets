@@ -15,7 +15,7 @@ from datalad.api import Dataset
 from .adandi import AsyncDandiClient
 from .adataset import AsyncDataset
 from .aioutil import open_git_annex, pool_amap
-from .config import BackupConfig
+from .config import BackupConfig, Mode, ZarrMode
 from .datasetter import DandiDatasetter
 from .logging import log
 from .util import format_errors, pdb_excepthook, quantify
@@ -117,17 +117,37 @@ async def main(
     ),
 )
 @click.option(
+    "--mode",
+    type=click.Choice(list(Mode)),
+    default=None,
+    help=(
+        "How to decide whether to back up a Dandiset.  'timestamp' — only if"
+        " timestamp of last backup is older than modified timestamp on server;"
+        " 'force' — always; 'verify' — always, but error if there are any"
+        " changes without a change to the timestamp.  [default: timestamp,"
+        " unless different value set via config file]"
+    ),
+)
+@click.option(
     "--tags/--no-tags",
     default=None,
     help="Enable/disable creation of tags for releases  [default: enabled]",
 )
-@click.option(
-    "--verify-timestamps",
-    is_flag=True,
-    default=None,
-    help="Error if a Dandiset has changed without an update to its timestamp",
-)
 @click.option("-w", "--workers", type=int, help="Number of workers to run in parallel")
+@click.option(
+    "--zarr-mode",
+    type=click.Choice(list(ZarrMode)),
+    default=None,
+    help=(
+        "How to decide whether to back up a Zarr.  'timestamp' — only if"
+        " timestamp of last backup is older than some Zarr entry in S3;"
+        " 'checksum' — only if Zarr checksum is out of date or doesn't match"
+        " expected value; 'asset-checksum' — only if Zarr asset's 'modified'"
+        " timestamp is later than that in assets.json and checksum is out of"
+        " date or doesn't match expected value; 'force' — always.  [default:"
+        " timestamp, unless different value set via config file]"
+    ),
+)
 @click.argument("dandisets", nargs=-1)
 @click.pass_obj
 async def update_from_backup(
@@ -138,8 +158,9 @@ async def update_from_backup(
     asset_filter: Optional[re.Pattern[str]],
     force: Optional[str],
     workers: Optional[int],
-    verify_timestamps: Optional[bool],
     gc_assets: Optional[bool],
+    mode: Optional[Mode],
+    zarr_mode: Optional[ZarrMode],
 ) -> None:
     async with datasetter:
         if asset_filter is not None:
@@ -150,8 +171,10 @@ async def update_from_backup(
             datasetter.config.enable_tags = tags
         if workers is not None:
             datasetter.config.workers = workers
-        if verify_timestamps is not None:
-            datasetter.config.verify_timestamps = verify_timestamps
+        if mode is not None:
+            datasetter.config.mode = mode
+        if zarr_mode is not None:
+            datasetter.config.zarr_mode = zarr_mode
         if gc_assets is not None:
             datasetter.config.gc_assets = gc_assets
         await datasetter.update_from_backup(dandisets, exclude=exclude)
@@ -381,7 +404,8 @@ async def populate(dirpath: Path, backup_remote: str, pathtype: str, jobs: int) 
                 str(jobs),
                 "--to",
                 backup_remote,
-                '--exclude', '.dandi/*',
+                "--exclude",
+                ".dandi/*",
                 path=dirpath,
             )
             await call_annex_json(
@@ -392,8 +416,10 @@ async def populate(dirpath: Path, backup_remote: str, pathtype: str, jobs: int) 
                 str(jobs),
                 "--to",
                 backup_remote,
-                "--not", "--in", backup_remote,
-                '.dandi/',
+                "--not",
+                "--in",
+                backup_remote,
+                ".dandi/",
                 path=dirpath,
             )
         except RuntimeError as e:
