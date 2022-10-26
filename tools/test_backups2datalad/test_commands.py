@@ -71,7 +71,7 @@ async def test_backup_command(text_dandiset: SampleDandiset, tmp_path: Path) -> 
             "-c",
             str(cfgfile),
             "update-from-backup",
-            "--verify-timestamps",
+            "--mode=verify",
             "--gc-assets",
             text_dandiset.dandiset_id,
         ],
@@ -243,7 +243,7 @@ async def test_backup_committed_zarr(
     (backup_root / "partial-zarrs" / a0.zarr).mkdir(parents=True, exist_ok=True)
     await sync_zarr(
         a0,
-        a0.get_digest().value,
+        a0.get_digest_value(),
         backup_root / "partial-zarrs" / a0.zarr,
         Manager(config=cfg, gh=None, log=plog),
     )

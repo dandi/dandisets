@@ -1,18 +1,24 @@
 from __future__ import annotations
 
+from abc import abstractmethod
 from dataclasses import dataclass
+from datetime import datetime
 import json
+import re
 import sys
 from time import time
-from typing import Any, AsyncGenerator, Optional, Sequence, cast
+from typing import Any, AsyncGenerator, Dict, Optional, Sequence, Type, cast
 
 import anyio
 from anyio.abc import AsyncResource
 from dandi.consts import known_instances
-from dandi.dandiapi import DandiAPIClient, RemoteAsset
+from dandi.dandiapi import AssetType, DandiAPIClient
 from dandi.dandiapi import RemoteDandiset as SyncRemoteDandiset
-from dandi.dandiapi import RemoteZarrAsset, Version
+from dandi.dandiapi import Version
+from dandi.exceptions import NotFoundError
+from dandischema.models import DigestType
 import httpx
+from pydantic import BaseModel, Field
 
 from .aioutil import arequest
 from .consts import USER_AGENT
@@ -27,6 +33,7 @@ else:
 @dataclass
 class AsyncDandiClient(AsyncResource):
     session: httpx.AsyncClient
+    api_url: str
 
     @classmethod
     def for_dandi_instance(
@@ -40,11 +47,18 @@ class AsyncDandiClient(AsyncResource):
                 base_url=known_instances[instance].api,
                 headers=headers,
                 follow_redirects=True,
-            )
+            ),
+            api_url=known_instances[instance].api,
         )
 
     async def aclose(self) -> None:
         await self.session.aclose()
+
+    def get_url(self, path: str) -> str:
+        if path.lower().startswith(("http://", "https://")):
+            return path
+        else:
+            return self.api_url.rstrip("/") + "/" + path.lstrip("/")
 
     async def get(self, path: str, **kwargs: Any) -> Any:
         return (await arequest(self.session, "GET", path, **kwargs)).json()
@@ -175,14 +189,17 @@ class RemoteDandiset(SyncRemoteDandiset):
             )
         ) as ait:
             async for item in ait:
-                metadata = item.pop("metadata", None)
-                yield RemoteAsset.from_data(self, item, metadata)
+                yield RemoteAsset.from_data(self, item)
 
     async def aget_zarr_assets(self) -> AsyncGenerator[RemoteZarrAsset, None]:
         async with aclosing(self.aget_assets()) as ait:
             async for asset in ait:
                 if isinstance(asset, RemoteZarrAsset):
                     yield asset
+
+    async def aget_asset(self, asset_id: str) -> RemoteAsset:
+        info = await self.aclient.get(f"{self.version_api_path}assets/{asset_id}/info/")
+        return RemoteAsset.from_data(self, info)
 
     async def aget_asset_by_path(self, path: str) -> RemoteAsset:
         async with aclosing(
@@ -193,8 +210,7 @@ class RemoteDandiset(SyncRemoteDandiset):
         ) as ait:
             async for item in ait:
                 if item["path"] == path:
-                    metadata = item.pop("metadata", None)
-                    return RemoteAsset.from_data(self, item, metadata)
+                    return RemoteAsset.from_data(self, item)
         raise ValueError(f"Asset not found: {path}")
 
     async def await_until_valid(self, max_time: float = 120) -> None:
@@ -236,3 +252,188 @@ class RemoteDandiset(SyncRemoteDandiset):
 
     async def adelete(self) -> None:
         await self.aclient.delete(self.api_path)
+
+
+class RemoteAsset(BaseModel):
+    """
+    A minimal, asynchronous version of `dandi.dandiapi.RemoteAsset`, which it
+    differs from in the following ways:
+
+    - `refetch()` method added
+    - `aclient` property added
+    - `get_digest()` and `get_raw_digest()` methods combined into
+      `get_digest_value()`
+    - No `BaseRemoteAsset` base class, as backups2datalad doesn't operate on
+      Dandiset-less asset URLs
+    - `dandiset` attribute added
+    - `dandiset_id` and `version_id` attributes are now properties
+    - `_metadata` attribute renamed to `metadata`
+    - The `metadata` attribute is now always set
+    - `from_data()` now expects ``metadata`` to be a field of ``data`` instead
+      of a separate argument
+    - The following methods & properties have been removed:
+
+      - `get_metadata()`
+      - `get_raw_metadata()` (Use the `metadata` attribute instead)
+      - `get_download_file_iter()`
+      - `download()`
+      - `set_metadata()`
+      - `set_raw_metadata()`
+      - `rename()`
+      - `delete()`
+      - `api_url`
+      - `download_url`
+
+    - `get_content_url()` does not take ``follow_redirects`` or ``strip_query``
+      parameters
+    """
+
+    dandiset: RemoteDandiset
+    #: The asset identifier
+    identifier: str = Field(alias="asset_id")
+    #: The asset's (forward-slash-separated) path
+    path: str
+    #: The size of the asset in bytes
+    size: int
+    #: The date at which the asset was created
+    created: datetime
+    #: The date at which the asset was last modified
+    modified: datetime
+    #: The asset's raw metadata
+    metadata: Dict[str, Any]
+
+    class Config:
+        """Configuration for pydantic"""
+
+        # To use the non-pydantic RemoteDandiset as an attribute and to be able
+        # to create instances with RemoteAsset(identifier=...) instead of
+        # RemoteAsset(alias_id=...)
+        allow_population_by_field_name = True
+        arbitrary_types_allowed = True
+
+    @classmethod
+    def from_data(cls, dandiset: RemoteDandiset, data: Dict[str, Any]) -> RemoteAsset:
+        """
+        Construct a `RemoteAsset` instance from a `RemoteDandiset` and a `dict`
+        of raw data in the same format as returned by the API's pagination
+        endpoints (including metadata).
+        """
+        klass: Type[RemoteAsset]
+        if data.get("blob") is not None:
+            klass = RemoteBlobAsset
+            if data.pop("zarr", None) is not None:
+                raise ValueError("Asset data contains both `blob` and `zarr`'")
+        elif data.get("zarr") is not None:
+            klass = RemoteZarrAsset
+            if data.pop("blob", None) is not None:
+                raise ValueError("Asset data contains both `blob` and `zarr`'")
+        else:
+            raise ValueError("Asset data contains neither `blob` nor `zarr`")
+        return klass(dandiset=dandiset, **data)  # type: ignore[call-arg]
+
+    @property
+    def aclient(self) -> AsyncDandiClient:
+        return self.dandiset.aclient
+
+    @property
+    def dandiset_id(self) -> str:
+        return cast(str, self.dandiset.identifier)
+
+    @property
+    def version_id(self) -> str:
+        return cast(str, self.dandiset.version_id)
+
+    def json_dict(self) -> dict[str, Any]:
+        return cast(
+            Dict[str, Any],
+            json.loads(self.json(exclude={"aclient", "dandiset"}, by_alias=True)),
+        )
+
+    @property
+    def api_path(self) -> str:
+        """
+        The path (relative to the base endpoint for a Dandi Archive API) at
+        which API requests for interacting with the asset itself are made
+        """
+        return (
+            f"/dandisets/{self.dandiset_id}/versions/{self.version_id}/assets"
+            f"/{self.identifier}/"
+        )
+
+    @property
+    def base_download_url(self) -> str:
+        """
+        The URL from which the asset can be downloaded, sans any Dandiset
+        identifiers
+        """
+        return self.aclient.get_url(f"/assets/{self.identifier}/download/")
+
+    def get_digest_value(self, algorithm: Optional[DigestType] = None) -> Optional[str]:
+        if algorithm is None:
+            algorithm = self.digest_type
+        try:
+            val = self.metadata["digest"][algorithm.value]
+        except KeyError:
+            raise NotFoundError(f"No {algorithm.value} digest found in metadata")
+        assert val is None or isinstance(val, str)
+        return val
+
+    def get_content_url(self, regex: str = r".*") -> str:
+        """
+        Returns a URL for downloading the asset, found by inspecting the
+        metadata; specifically, returns the first ``contentUrl`` that matches
+        ``regex``.  Raises `NotFoundError` if the metadata does not contain a
+        matching URL.
+        """
+        for url in self.metadata.get("contentUrl", []):
+            assert isinstance(url, str)
+            if re.search(regex, url):
+                return url
+        raise NotFoundError(
+            "No matching URL found in asset's contentUrl metadata field"
+        )
+
+    async def refetch(self) -> RemoteAsset:
+        return await self.dandiset.aget_asset(self.identifier)
+
+    @property
+    @abstractmethod
+    def asset_type(self) -> AssetType:
+        """The type of the asset's underlying data"""
+        ...
+
+    @property
+    def digest_type(self) -> DigestType:
+        """
+        The primary digest algorithm used by Dandi Archive for the asset,
+        determined based on its underlying data: dandi-etag for blob resources,
+        dandi-zarr-checksum for Zarr resources
+        """
+        if self.asset_type is AssetType.ZARR:
+            return DigestType.dandi_zarr_checksum
+        else:
+            return DigestType.dandi_etag
+
+
+class RemoteBlobAsset(RemoteAsset):
+    """A `RemoteAsset` whose actual data is a blob resource"""
+
+    #: The ID of the underlying blob resource
+    blob: str
+
+    @property
+    def asset_type(self) -> AssetType:
+        """The type of the asset's underlying data"""
+        return AssetType.BLOB
+
+
+class RemoteZarrAsset(RemoteAsset):
+    """A `RemoteAsset` whose actual data is a Zarr resource"""
+
+    #: The ID of the underlying Zarr resource
+    zarr: str
+
+    @property
+    def asset_type(self) -> AssetType:
+        """The type of the asset's underlying data"""
+        return AssetType.ZARR

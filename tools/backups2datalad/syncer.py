@@ -3,8 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
-from dandi.dandiapi import RemoteDandiset
-
+from .adandi import RemoteDandiset
 from .adataset import AsyncDataset
 from .asyncer import Report, async_assets
 from .config import BackupConfig

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from enum import Enum
 from functools import cached_property
 import json
 from pathlib import Path
@@ -25,6 +26,25 @@ class ResourceConfig(BaseModel):
     remote: Optional[Remote] = None
 
 
+class Mode(str, Enum):
+    TIMESTAMP = "timestamp"
+    VERIFY = "verify"
+    FORCE = "force"
+
+    def __str__(self) -> str:
+        return self.value
+
+
+class ZarrMode(str, Enum):
+    TIMESTAMP = "timestamp"
+    CHECKSUM = "checksum"
+    FORCE = "force"
+    ASSET_CHECKSUM = "asset-checksum"
+
+    def __str__(self) -> str:
+        return self.value
+
+
 class BackupConfig(BaseModel):
     # Give everything a default so we can construct an "empty" config when no
     # config file is given
@@ -44,8 +64,9 @@ class BackupConfig(BaseModel):
     workers: int = DEFAULT_WORKERS
     force: Optional[str] = None
     enable_tags: bool = True
-    verify_timestamps: bool = False
     gc_assets: bool = False
+    mode: Mode = Mode.TIMESTAMP
+    zarr_mode: ZarrMode = ZarrMode.TIMESTAMP
 
     class Config:
         # <https://github.com/samuelcolvin/pydantic/issues/1241>
