@@ -140,7 +140,7 @@ class AsyncDataset:
             env=custom_commit_env(commit_date),
         )
 
-    async def commit_all(
+    async def commit(
         self,
         message: str,
         commit_date: Optional[datetime] = None,
@@ -153,19 +153,16 @@ class AsyncDataset:
         updated states of subdatasets without them being installed in the tree.
         Ref: https://github.com/datalad/datalad/issues/7074
         """
-        await aruncmd(
-            "git",
+        await self.call_git(
             "commit",
-            "-a",
             "-m",
             message,
-            cwd=self.path,
             env=custom_commit_env(commit_date),
         )
         if await self.is_dirty():
             raise RuntimeError(
-                f"{self.path} is still dirty after commit -a. "
-                "Please check if all changes were staged"
+                f"{self.path} is still dirty after committing."
+                "  Please check if all changes were staged."
             )
 
     async def push(self, to: str, jobs: int, data: Optional[str] = None) -> None:
@@ -450,6 +447,7 @@ class AsyncDataset:
             f"submodule.{path}.datalad-id",
             datalad_id,
         )
+        await self.add(".gitmodules")
 
     async def update_submodule(self, path: str, commit_hash: str) -> None:
         await self.call_git(
