@@ -259,7 +259,7 @@ class ZarrSyncer:
             else:
                 raise RuntimeError(
                     f"Zarr {self.zarr_id}: local checksum {final_checksum!r}"
-                    " differs from remote checksum {remote_checksum!r} after"
+                    f" differs from remote checksum {remote_checksum!r} after"
                     " backup, and no change on server was detected"
                 )
         if self.get_stored_checksum() != final_checksum:
