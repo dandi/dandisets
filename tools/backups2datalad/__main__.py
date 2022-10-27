@@ -372,6 +372,19 @@ async def populate_zarrs(
             sys.exit(f"{quantify(len(report.failed), 'populate-zarr job')} failed")
 
 
+@main.command()
+@click.argument(
+    "dirpath", type=click.Path(file_okay=False, exists=True, path_type=Path)
+)
+async def zarr_checksum(dirpath: Path) -> None:
+    """
+    Compute the Zarr checksum for the git-annex dataset at `dirpath` using the
+    hashes stored in the annexed files' keys
+    """
+    ds = AsyncDataset(dirpath)
+    print(await ds.compute_zarr_checksum())
+
+
 async def populate(dirpath: Path, backup_remote: str, pathtype: str, jobs: int) -> None:
     desc = f"{pathtype} {dirpath.name}"
     log.info("Downloading files for %s", desc)

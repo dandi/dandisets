@@ -107,6 +107,11 @@ class AsyncDataset:
             else:
                 raise
 
+    async def get_datalad_id(self) -> str:
+        return await self.read_git(
+            "config", "--file", ".datalad/config", "--get", "datalad.dataset.id"
+        )
+
     async def call_git(self, *args: str | Path, **kwargs: Any) -> None:
         await aruncmd("git", *args, cwd=self.path, **kwargs)
 
@@ -134,6 +139,35 @@ class AsyncDataset:
             cwd=self.path,
             env=custom_commit_env(commit_date),
         )
+
+    async def commit(
+        self,
+        message: str,
+        commit_date: Optional[datetime] = None,
+        paths: Sequence[str | Path] = (),
+        check_dirty: bool = True,
+    ) -> None:
+        """Use git commit directly, verify that all is committed
+
+        Raises RuntimeError if dataset remains dirty.
+
+        Primarily to be used to overcome inability of datalad save to save
+        updated states of subdatasets without them being installed in the tree.
+        Ref: https://github.com/datalad/datalad/issues/7074
+        """
+        await self.call_git(
+            "commit",
+            "-m",
+            message,
+            "--",
+            *map(str, paths),
+            env=custom_commit_env(commit_date),
+        )
+        if check_dirty and await self.is_dirty():
+            raise RuntimeError(
+                f"{self.path} is still dirty after committing."
+                "  Please check if all changes were staged."
+            )
 
     async def push(self, to: str, jobs: int, data: Optional[str] = None) -> None:
         waits = exp_wait(attempts=6, base=2.1)
@@ -176,7 +210,7 @@ class AsyncDataset:
 
     async def remove(self, path: str) -> None:
         # `path` must be relative to the root of the dataset
-        await self.call_git("rm", path)
+        await self.call_git("rm", "-f", "--ignore-unmatch", "--", path)
 
     async def update(self, how: str, sibling: Optional[str] = None) -> None:
         await anyio.to_thread.run_sync(
@@ -372,10 +406,11 @@ class AsyncDataset:
         except FileNotFoundError:
             return None
 
-    def set_assets_state(self, state: AssetsState) -> None:
+    async def set_assets_state(self, state: AssetsState) -> None:
         path = self.pathobj / AssetsState.PATH
         path.parent.mkdir(exist_ok=True)
         path.write_text(state.json(indent=4) + "\n")
+        await self.add(str(AssetsState.PATH))
 
     async def get_subdatasets(self, **kwargs: Any) -> list:
         return await anyio.to_thread.run_sync(
@@ -406,14 +441,24 @@ class AsyncDataset:
             # yet another case where [] is treated as None?
             log.debug("No subdatasets to uninstall")
 
+    async def add_submodule(self, path: str, url: str, datalad_id: str) -> None:
+        await self.call_git("submodule", "add", "--", url, path)
+        await self.call_git(
+            "config",
+            "--file",
+            ".gitmodules",
+            "--replace-all",
+            f"submodule.{path}.datalad-id",
+            datalad_id,
+        )
+        await self.add(".gitmodules")
+
     async def update_submodule(self, path: str, commit_hash: str) -> None:
-        await aruncmd(
-            "git",
+        await self.call_git(
             "update-index",
             "-z",
             # apparently must be the last argument!
             "--index-info",
-            cwd=self.path,
             input=f"160000 commit {commit_hash}\t{path}\0".encode("utf-8"),
         )
 

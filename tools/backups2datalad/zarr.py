@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime
 import os
@@ -10,7 +11,6 @@ from urllib.parse import quote
 
 from aiobotocore.config import AioConfig
 from aiobotocore.session import get_session
-import anyio
 from botocore import UNSIGNED
 from dandi.support.digests import ZCTree
 from pydantic import BaseModel
@@ -171,7 +171,7 @@ class ZarrSyncer:
                             "%s: deleting conflicting directory at same path",
                             entry,
                         )
-                        await anyio.to_thread.run_sync(self.rmtree, dest, local_paths)
+                        await self.rmtree(dest, local_paths)
                     else:
                         for ep in entry.parents:
                             pp = self.repo / ep
@@ -187,7 +187,7 @@ class ZarrSyncer:
                                     entry,
                                     ep,
                                 )
-                                pp.unlink()
+                                await self.ds.remove(ep)
                                 local_paths.discard(ep)
                                 self.report.deleted += 1
                                 break
@@ -217,7 +217,7 @@ class ZarrSyncer:
                             to_update = True
                             self.report.updated += 1
                     if to_update:
-                        dest.unlink(missing_ok=True)
+                        await self.ds.remove(str(entry))
                         key = await self.annex.mkkey(
                             entry.name, entry.size, entry.md5_digest
                         )
@@ -237,7 +237,7 @@ class ZarrSyncer:
                             self.log.info(
                                 "%s: Not in backup remote %s", entry, self.backup_remote
                             )
-        await anyio.to_thread.run_sync(self.prune_deleted, local_paths)
+        await self.prune_deleted(local_paths)
         final_checksum = cast(str, zcc.get_digest())
         modern_asset = await self.asset.refetch()
         changed_during_sync = self.asset.modified != modern_asset.modified
@@ -268,6 +268,7 @@ class ZarrSyncer:
             (self.repo / CHECKSUM_FILE).parent.mkdir(exist_ok=True)
             (self.repo / CHECKSUM_FILE).write_text(f"{final_checksum}\n")
             self.report.checksum = True
+            await self.ds.add(str(CHECKSUM_FILE))
         # Remove a possibly still-present previous location for the checksum
         # file:
         if (self.repo / OLD_CHECKSUM_FILE).exists():
@@ -276,8 +277,9 @@ class ZarrSyncer:
                     f"Zarr {self.zarr_id}: old checksum file present, but"
                     " we are in verify mode"
                 )
-            (self.repo / OLD_CHECKSUM_FILE).unlink()
+            await self.ds.remove(str(OLD_CHECKSUM_FILE))
         self.write_sync_file()
+        await self.ds.add(str(SYNC_FILE))
 
     def read_sync_file(self) -> Optional[datetime]:
         sync_file_path = self.repo / SYNC_FILE
@@ -368,29 +370,32 @@ class ZarrSyncer:
             else:
                 return False
 
-    def rmtree(self, dirpath: Path, local_paths: set[str]) -> None:
+    async def rmtree(self, dirpath: Path, local_paths: set[str]) -> None:
         for p in list(dirpath.iterdir()):
             if p.is_dir():
-                self.rmtree(p, local_paths)
+                await self.rmtree(p, local_paths)
             else:
+                relpath = p.relative_to(self.repo).as_posix()
                 self.log.info("deleting %s", p)
-                p.unlink()
+                await self.ds.remove(relpath)
                 self.report.deleted += 1
-                local_paths.discard(p.relative_to(self.repo).as_posix())
-        dirpath.rmdir()
+                local_paths.discard(relpath)
+        with suppress(FileNotFoundError):
+            dirpath.rmdir()
 
-    def prune_deleted(self, local_paths: set[str]) -> None:
+    async def prune_deleted(self, local_paths: set[str]) -> None:
         if local_paths:
             self.check_change(f"{quantify(len(local_paths), 'file')} deleted from Zarr")
         self.log.info("deleting extra files")
         for path in local_paths:
             self.log.info("deleting %s", path)
+            await self.ds.remove(path)
             p = self.repo / path
-            p.unlink(missing_ok=True)
             self.report.deleted += 1
             d = p.parent
-            while d != self.repo and not any(d.iterdir()):
-                d.rmdir()
+            while d != self.repo and (not d.exists() or not any(d.iterdir())):
+                with suppress(FileNotFoundError):
+                    d.rmdir()
                 d = d.parent
         self.log.info("finished deleting extra files")
 
@@ -489,10 +494,12 @@ async def sync_zarr(
             (ds.pathobj / ".dandi" / ".gitattributes").write_text(
                 "* annex.largefiles=nothing\n"
             )
-            await ds.save(
+            await ds.add(".dandi/.gitattributes")
+            await ds.commit(
                 message="Exclude .dandi/ from git-annex",
-                path=[".dandi/.gitattributes"],
+                paths=[".dandi/.gitattributes"],
                 commit_date=asset.created,
+                check_dirty=False,
             )
         if (zgh := manager.config.zarrs.github_org) is not None:
             manager.log.debug("Creating GitHub sibling")
@@ -525,7 +532,9 @@ async def sync_zarr(
                 commit_ts = asset.created
             else:
                 commit_ts = zsync.last_timestamp
-            await ds.save(message=f"[backups2datalad] {summary}", commit_date=commit_ts)
+            await ds.commit(
+                message=f"[backups2datalad] {summary}", commit_date=commit_ts
+            )
             manager.log.debug("Commit made")
             manager.log.debug("Running `git gc`")
             await ds.gc()

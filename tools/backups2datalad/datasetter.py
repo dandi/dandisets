@@ -187,12 +187,12 @@ class DandiDatasetter(AsyncResource):
         await update_dandiset_metadata(dandiset, ds, log=manager.log)
         await syncer.sync_assets(error_on_change)
         await syncer.prune_deleted(error_on_change)
-        syncer.dump_asset_metadata()
+        await syncer.dump_asset_metadata()
         assert syncer.report is not None
         manager.log.debug("Checking whether repository is dirty ...")
         if await ds.is_unclean():
             manager.log.info("Committing changes")
-            await ds.save(
+            await ds.commit(
                 message=syncer.get_commit_message(),
                 commit_date=dandiset.version.modified,
             )
@@ -372,9 +372,9 @@ class DandiDatasetter(AsyncResource):
                 "checkout", "-b", f"release-{dandiset.version_id}", matching[0]
             )
             await update_dandiset_metadata(dandiset, ds, log)
-            ds.set_assets_state(AssetsState(timestamp=dandiset.version.created))
+            await ds.set_assets_state(AssetsState(timestamp=dandiset.version.created))
             log.debug("Committing changes")
-            await ds.save(
+            await ds.commit(
                 message=f"[backups2datalad] {dandiset_metadata_file} updated",
                 commit_date=dandiset.version.created,
             )
@@ -479,6 +479,11 @@ class DandiDatasetter(AsyncResource):
                         "github",
                         cwd=ds.pathobj / asset.path,
                     )
+                # Uncomment this if `ds.save()` below is ever changed to
+                # `ds.commit()`:
+                # await ds.add_submodule(
+                #     path=asset.path, url=src, datalad_id=await zds.get_datalad_id()
+                # )
                 log.debug("Zarr %s: Finished cloning", asset.zarr)
                 log.debug("Zarr %s: Saving changes to Dandiset dataset", asset.zarr)
                 ds.assert_no_duplicates_in_gitmodules()

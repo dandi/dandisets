@@ -22,6 +22,7 @@ from .logging import PrefixedLogger
 
 if TYPE_CHECKING:
     from .adandi import RemoteAsset, RemoteDandiset
+    from .adataset import AsyncDataset
 
 
 @dataclass
@@ -175,7 +176,7 @@ def assets_eq(remote_assets: list[RemoteAsset], local_assets: list[dict]) -> boo
 
 
 async def update_dandiset_metadata(
-    dandiset: RemoteDandiset, ds: Dataset, log: PrefixedLogger
+    dandiset: RemoteDandiset, ds: AsyncDataset, log: PrefixedLogger
 ) -> None:
     log.info("Updating metadata file")
     (ds.pathobj / dandiset_metadata_file).unlink(missing_ok=True)
