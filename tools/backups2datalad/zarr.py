@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime
 import os
@@ -379,7 +380,8 @@ class ZarrSyncer:
                 await self.ds.remove(relpath)
                 self.report.deleted += 1
                 local_paths.discard(relpath)
-        dirpath.rmdir()
+        with suppress(FileNotFoundError):
+            dirpath.rmdir()
 
     async def prune_deleted(self, local_paths: set[str]) -> None:
         if local_paths:
@@ -391,8 +393,9 @@ class ZarrSyncer:
             p = self.repo / path
             self.report.deleted += 1
             d = p.parent
-            while d != self.repo and not any(d.iterdir()):
-                d.rmdir()
+            while d != self.repo and (not d.exists() or not any(d.iterdir())):
+                with suppress(FileNotFoundError):
+                    d.rmdir()
                 d = d.parent
         self.log.info("finished deleting extra files")
 

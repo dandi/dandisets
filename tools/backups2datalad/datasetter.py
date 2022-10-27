@@ -479,6 +479,11 @@ class DandiDatasetter(AsyncResource):
                         "github",
                         cwd=ds.pathobj / asset.path,
                     )
+                # Uncomment this if `ds.save()` below is ever changed to
+                # `ds.commit_all()`:
+                # await ds.add_submodule(
+                #     path=asset.path, url=src, datalad_id=await zds.get_datalad_id()
+                # )
                 log.debug("Zarr %s: Finished cloning", asset.zarr)
                 log.debug("Zarr %s: Saving changes to Dandiset dataset", asset.zarr)
                 ds.assert_no_duplicates_in_gitmodules()

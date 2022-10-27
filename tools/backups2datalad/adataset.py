@@ -107,6 +107,11 @@ class AsyncDataset:
             else:
                 raise
 
+    async def get_datalad_id(self) -> str:
+        return await self.read_git(
+            "config", "--file", ".datalad/config", "--get", "datalad.dataset.id"
+        )
+
     async def call_git(self, *args: str | Path, **kwargs: Any) -> None:
         await aruncmd("git", *args, cwd=self.path, **kwargs)
 
@@ -435,14 +440,23 @@ class AsyncDataset:
             # yet another case where [] is treated as None?
             log.debug("No subdatasets to uninstall")
 
+    async def add_submodule(self, path: str, url: str, datalad_id: str) -> None:
+        await self.call_git("submodule", "add", "--", url, path)
+        await self.call_git(
+            "config",
+            "--file",
+            ".gitmodules",
+            "--replace-all",
+            f"submodule.{path}.datalad-id",
+            datalad_id,
+        )
+
     async def update_submodule(self, path: str, commit_hash: str) -> None:
-        await aruncmd(
-            "git",
+        await self.call_git(
             "update-index",
             "-z",
             # apparently must be the last argument!
             "--index-info",
-            cwd=self.path,
             input=f"160000 commit {commit_hash}\t{path}\0".encode("utf-8"),
         )
 

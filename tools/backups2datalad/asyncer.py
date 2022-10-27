@@ -527,14 +527,15 @@ async def async_assets(
                         manager.log.info("Zarr asset added at %s; cloning", asset_path)
                         dm.report.downloaded += 1
                         dm.report.added += 1
+                        assert manager.config.zarr_root is not None
+                        zarr_path = manager.config.zarr_root / zarr_id
                         if manager.config.zarr_gh_org is not None:
                             src = (
                                 "https://github.com/"
                                 f"{manager.config.zarr_gh_org}/{zarr_id}"
                             )
                         else:
-                            assert manager.config.zarr_root is not None
-                            src = str(manager.config.zarr_root / zarr_id)
+                            src = str(zarr_path)
                         await anyio.to_thread.run_sync(
                             partial(clone, source=src, path=ds.pathobj / asset_path)
                         )
@@ -547,6 +548,11 @@ async def async_assets(
                                 "github",
                                 cwd=ds.pathobj / asset_path,
                             )
+                        await ds.add_submodule(
+                            path=asset_path,
+                            url=src,
+                            datalad_id=await AsyncDataset(zarr_path).get_datalad_id(),
+                        )
                         manager.log.debug("Finished cloning Zarr to %s", asset_path)
                     elif ts is not None:
                         manager.log.info(
