@@ -111,7 +111,7 @@ class Report:
 class Downloader:
     dandiset_id: str
     addurl: TextProcess
-    repo: Path
+    ds: AsyncDataset
     manager: Manager
     tracker: AssetTracker
     s3client: httpx.AsyncClient
@@ -139,6 +139,10 @@ class Downloader:
     @property
     def log(self) -> PrefixedLogger:
         return self.manager.log
+
+    @property
+    def repo(self) -> Path:
+        return self.ds.pathobj
 
     async def asset_loop(self, aia: AsyncIterator[Optional[RemoteAsset]]) -> None:
         now = datetime.now(timezone.utc)
@@ -255,7 +259,7 @@ class Downloader:
                     self.report.updated += 1
             if to_update:
                 bucket_url = await self.get_file_bucket_url(asset)
-                dest.unlink(missing_ok=True)
+                await self.ds.remove(asset.path)
                 if "text" not in tags_from_filename(asset.path):
                     self.log.info(
                         "%s: File is binary; registering key with git-annex", asset.path
@@ -482,7 +486,7 @@ async def async_assets(
                     dm = Downloader(
                         dandiset_id=dandiset.identifier,
                         addurl=p,
-                        repo=ds.pathobj,
+                        ds=ds,
                         manager=manager,
                         tracker=tracker,
                         s3client=s3client,
@@ -495,6 +499,8 @@ async def async_assets(
                     nursery.start_soon(dm.read_addurl)
             finally:
                 tracker.dump()
+
+            await ds.add(".dandi/assets.json")
 
             for fpath in dm.need_add:
                 manager.log.info("Manually running `git add %s`", fpath)
@@ -521,14 +527,15 @@ async def async_assets(
                         manager.log.info("Zarr asset added at %s; cloning", asset_path)
                         dm.report.downloaded += 1
                         dm.report.added += 1
+                        assert manager.config.zarr_root is not None
+                        zarr_path = manager.config.zarr_root / zarr_id
                         if manager.config.zarr_gh_org is not None:
                             src = (
                                 "https://github.com/"
                                 f"{manager.config.zarr_gh_org}/{zarr_id}"
                             )
                         else:
-                            assert manager.config.zarr_root is not None
-                            src = str(manager.config.zarr_root / zarr_id)
+                            src = str(zarr_path)
                         await anyio.to_thread.run_sync(
                             partial(clone, source=src, path=ds.pathobj / asset_path)
                         )
@@ -541,6 +548,11 @@ async def async_assets(
                                 "github",
                                 cwd=ds.pathobj / asset_path,
                             )
+                        await ds.add_submodule(
+                            path=asset_path,
+                            url=src,
+                            datalad_id=await AsyncDataset(zarr_path).get_datalad_id(),
+                        )
                         manager.log.debug("Finished cloning Zarr to %s", asset_path)
                     elif ts is not None:
                         manager.log.info(
@@ -567,11 +579,11 @@ async def async_assets(
                         ts = dandiset.version.modified
                     else:
                         ts = timestamp
-                    ds.set_assets_state(AssetsState(timestamp=ts))
+                    await ds.set_assets_state(AssetsState(timestamp=ts))
                     manager.log.debug("Checking whether repository is dirty ...")
                     if await ds.is_unclean():
                         manager.log.info("Committing changes")
-                        await ds.save(
+                        await ds.commit(
                             message=dm.report.get_commit_message(),
                             commit_date=timestamp,
                         )
@@ -581,14 +593,16 @@ async def async_assets(
                         manager.log.debug("Repository is clean")
                 else:
                     if done_flag.is_set():
-                        ds.set_assets_state(
+                        await ds.set_assets_state(
                             AssetsState(timestamp=dandiset.version.modified)
                         )
                     manager.log.info(
                         "No assets downloaded for this version segment; not committing"
                     )
             else:
-                ds.set_assets_state(AssetsState(timestamp=dandiset.version.created))
+                await ds.set_assets_state(
+                    AssetsState(timestamp=dandiset.version.created)
+                )
             total_report.update(dm.report)
     return total_report
 

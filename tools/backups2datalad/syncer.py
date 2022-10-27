@@ -58,7 +58,7 @@ class Syncer:
             await self.ds.remove(asset_path)
             self.deleted += 1
 
-    def dump_asset_metadata(self) -> None:
+    async def dump_asset_metadata(self) -> None:
         self.garbage_assets = self.tracker.prune_metadata()
         if self.garbage_assets and not self.config.gc_assets:
             # to ease troubleshooting, let's list some which were GCed
@@ -70,6 +70,7 @@ class Syncer:
                 f" from assets.json: {listing}"
             )
         self.tracker.dump()
+        await self.ds.add(".dandi/assets.json")
 
     def get_commit_message(self) -> str:
         msgparts = []
