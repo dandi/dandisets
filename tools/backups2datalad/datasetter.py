@@ -187,7 +187,7 @@ class DandiDatasetter(AsyncResource):
         await update_dandiset_metadata(dandiset, ds, log=manager.log)
         await syncer.sync_assets(error_on_change)
         await syncer.prune_deleted(error_on_change)
-        syncer.dump_asset_metadata()
+        await syncer.dump_asset_metadata()
         assert syncer.report is not None
         manager.log.debug("Checking whether repository is dirty ...")
         if await ds.is_unclean():
@@ -372,7 +372,7 @@ class DandiDatasetter(AsyncResource):
                 "checkout", "-b", f"release-{dandiset.version_id}", matching[0]
             )
             await update_dandiset_metadata(dandiset, ds, log)
-            ds.set_assets_state(AssetsState(timestamp=dandiset.version.created))
+            await ds.set_assets_state(AssetsState(timestamp=dandiset.version.created))
             log.debug("Committing changes")
             await ds.save(
                 message=f"[backups2datalad] {dandiset_metadata_file} updated",

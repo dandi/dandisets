@@ -111,7 +111,7 @@ class Report:
 class Downloader:
     dandiset_id: str
     addurl: TextProcess
-    repo: Path
+    ds: AsyncDataset
     manager: Manager
     tracker: AssetTracker
     s3client: httpx.AsyncClient
@@ -139,6 +139,10 @@ class Downloader:
     @property
     def log(self) -> PrefixedLogger:
         return self.manager.log
+
+    @property
+    def repo(self) -> Path:
+        return self.ds.pathobj
 
     async def asset_loop(self, aia: AsyncIterator[Optional[RemoteAsset]]) -> None:
         now = datetime.now(timezone.utc)
@@ -255,7 +259,7 @@ class Downloader:
                     self.report.updated += 1
             if to_update:
                 bucket_url = await self.get_file_bucket_url(asset)
-                dest.unlink(missing_ok=True)
+                await self.ds.remove(asset.path)
                 if "text" not in tags_from_filename(asset.path):
                     self.log.info(
                         "%s: File is binary; registering key with git-annex", asset.path
@@ -482,7 +486,7 @@ async def async_assets(
                     dm = Downloader(
                         dandiset_id=dandiset.identifier,
                         addurl=p,
-                        repo=ds.pathobj,
+                        ds=ds,
                         manager=manager,
                         tracker=tracker,
                         s3client=s3client,
@@ -495,6 +499,8 @@ async def async_assets(
                     nursery.start_soon(dm.read_addurl)
             finally:
                 tracker.dump()
+
+            await ds.add(".dandi/assets.json")
 
             for fpath in dm.need_add:
                 manager.log.info("Manually running `git add %s`", fpath)
@@ -567,7 +573,7 @@ async def async_assets(
                         ts = dandiset.version.modified
                     else:
                         ts = timestamp
-                    ds.set_assets_state(AssetsState(timestamp=ts))
+                    await ds.set_assets_state(AssetsState(timestamp=ts))
                     manager.log.debug("Checking whether repository is dirty ...")
                     if await ds.is_unclean():
                         manager.log.info("Committing changes")
@@ -581,14 +587,16 @@ async def async_assets(
                         manager.log.debug("Repository is clean")
                 else:
                     if done_flag.is_set():
-                        ds.set_assets_state(
+                        await ds.set_assets_state(
                             AssetsState(timestamp=dandiset.version.modified)
                         )
                     manager.log.info(
                         "No assets downloaded for this version segment; not committing"
                     )
             else:
-                ds.set_assets_state(AssetsState(timestamp=dandiset.version.created))
+                await ds.set_assets_state(
+                    AssetsState(timestamp=dandiset.version.created)
+                )
             total_report.update(dm.report)
     return total_report
 

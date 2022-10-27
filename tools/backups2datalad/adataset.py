@@ -204,7 +204,7 @@ class AsyncDataset:
 
     async def remove(self, path: str) -> None:
         # `path` must be relative to the root of the dataset
-        await self.call_git("rm", path)
+        await self.call_git("rm", "-f", "--ignore-unmatch", "--", path)
 
     async def update(self, how: str, sibling: Optional[str] = None) -> None:
         await anyio.to_thread.run_sync(
@@ -400,10 +400,11 @@ class AsyncDataset:
         except FileNotFoundError:
             return None
 
-    def set_assets_state(self, state: AssetsState) -> None:
+    async def set_assets_state(self, state: AssetsState) -> None:
         path = self.pathobj / AssetsState.PATH
         path.parent.mkdir(exist_ok=True)
         path.write_text(state.json(indent=4) + "\n")
+        await self.add(str(AssetsState.PATH))
 
     async def get_subdatasets(self, **kwargs: Any) -> list:
         return await anyio.to_thread.run_sync(
