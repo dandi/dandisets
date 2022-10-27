@@ -192,7 +192,7 @@ class DandiDatasetter(AsyncResource):
         manager.log.debug("Checking whether repository is dirty ...")
         if await ds.is_unclean():
             manager.log.info("Committing changes")
-            await ds.save(
+            await ds.commit(
                 message=syncer.get_commit_message(),
                 commit_date=dandiset.version.modified,
             )
@@ -374,7 +374,7 @@ class DandiDatasetter(AsyncResource):
             await update_dandiset_metadata(dandiset, ds, log)
             await ds.set_assets_state(AssetsState(timestamp=dandiset.version.created))
             log.debug("Committing changes")
-            await ds.save(
+            await ds.commit(
                 message=f"[backups2datalad] {dandiset_metadata_file} updated",
                 commit_date=dandiset.version.created,
             )
@@ -480,7 +480,7 @@ class DandiDatasetter(AsyncResource):
                         cwd=ds.pathobj / asset.path,
                     )
                 # Uncomment this if `ds.save()` below is ever changed to
-                # `ds.commit_all()`:
+                # `ds.commit()`:
                 # await ds.add_submodule(
                 #     path=asset.path, url=src, datalad_id=await zds.get_datalad_id()
                 # )

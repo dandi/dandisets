@@ -494,10 +494,12 @@ async def sync_zarr(
             (ds.pathobj / ".dandi" / ".gitattributes").write_text(
                 "* annex.largefiles=nothing\n"
             )
-            await ds.save(
+            await ds.add(".dandi/.gitattributes")
+            await ds.commit(
                 message="Exclude .dandi/ from git-annex",
-                path=[".dandi/.gitattributes"],
+                paths=[".dandi/.gitattributes"],
                 commit_date=asset.created,
+                check_dirty=False,
             )
         if (zgh := manager.config.zarrs.github_org) is not None:
             manager.log.debug("Creating GitHub sibling")
@@ -530,7 +532,9 @@ async def sync_zarr(
                 commit_ts = asset.created
             else:
                 commit_ts = zsync.last_timestamp
-            await ds.save(message=f"[backups2datalad] {summary}", commit_date=commit_ts)
+            await ds.commit(
+                message=f"[backups2datalad] {summary}", commit_date=commit_ts
+            )
             manager.log.debug("Commit made")
             manager.log.debug("Running `git gc`")
             await ds.gc()

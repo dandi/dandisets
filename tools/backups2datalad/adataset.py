@@ -144,6 +144,8 @@ class AsyncDataset:
         self,
         message: str,
         commit_date: Optional[datetime] = None,
+        paths: Sequence[str | Path] = (),
+        check_dirty: bool = True,
     ) -> None:
         """Use git commit directly, verify that all is committed
 
@@ -157,9 +159,11 @@ class AsyncDataset:
             "commit",
             "-m",
             message,
+            "--",
+            *map(str, paths),
             env=custom_commit_env(commit_date),
         )
-        if await self.is_dirty():
+        if check_dirty and await self.is_dirty():
             raise RuntimeError(
                 f"{self.path} is still dirty after committing."
                 "  Please check if all changes were staged."
