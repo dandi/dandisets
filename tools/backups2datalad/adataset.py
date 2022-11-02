@@ -225,7 +225,7 @@ class AsyncDataset:
                 stderr=subprocess.STDOUT,
             )
         except subprocess.CalledProcessError as e:
-            lockfile = self.pathobj / ".git" / "lock"
+            lockfile = self.pathobj / ".git" / "index.lock"
             if str(lockfile) in e.stdout.decode("utf-8"):
                 r = await aruncmd("fuser", "-v", lockfile, stdout=subprocess.PIPE)
                 log.error(
