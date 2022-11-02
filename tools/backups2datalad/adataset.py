@@ -210,6 +210,9 @@ class AsyncDataset:
         await self.call_annex("add", path)
 
     async def remove(self, path: str) -> None:
+        # to avoid problems with locking etc. Same is done in DataLad's invocation
+        # of rm
+        self.ds.repo.precommit()
         # `path` must be relative to the root of the dataset
         try:
             await self.call_git(
