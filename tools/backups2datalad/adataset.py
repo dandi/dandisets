@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import textwrap
 from typing import Any, AsyncGenerator, ClassVar, Optional, Sequence, cast
 
 import anyio
@@ -210,7 +211,28 @@ class AsyncDataset:
 
     async def remove(self, path: str) -> None:
         # `path` must be relative to the root of the dataset
-        await self.call_git("rm", "-f", "--ignore-unmatch", "--", path)
+        try:
+            await self.call_git(
+                "rm",
+                "-f",
+                "--ignore-unmatch",
+                "--",
+                path,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
+        except subprocess.CalledProcessError as e:
+            lockfile = self.pathobj / ".git" / "lock"
+            if str(lockfile) in e.stdout.decode("utf-8"):
+                r = await aruncmd("fuser", "-v", lockfile, stdout=subprocess.PIPE)
+                log.error(
+                    "%s: Unable to remove %s due to lockfile; `fuser -v` output"
+                    " on lockfile:\n%s",
+                    self.pathobj,
+                    path,
+                    textwrap.indent(r.stdout.decode("utf-8"), "> "),
+                )
+            raise
 
     async def update(self, how: str, sibling: Optional[str] = None) -> None:
         await anyio.to_thread.run_sync(
