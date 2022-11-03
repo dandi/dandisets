@@ -242,16 +242,15 @@ async def stream_null_command(
         buff = ""
         assert p.stdout is not None
         async for text in TextReceiveStream(p.stdout):
+            buff += text
             while True:
                 try:
-                    i = text.index("\0")
+                    i = buff.index("\0")
                 except ValueError:
-                    buff = text
                     break
                 else:
-                    yield buff + text[:i]
-                    buff = ""
-                    text = text[i + 1 :]
+                    yield buff[:i]
+                    buff = buff[i + 1 :]
         if buff:
             yield buff
     log.log(
