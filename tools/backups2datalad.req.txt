@@ -11,5 +11,6 @@ ghrepo ~= 0.1
 httpx ~= 0.22.0
 humanize
 identify ~= 2.0
+linesep ~= 0.4
 packaging
 pydantic ~= 1.8
