@@ -51,14 +51,16 @@ class TextProcess(anyio.abc.ObjectStream[str]):
         )
 
     async def force_aclose(self, timeout: float = 5) -> None:
-        log.debug("Forcing command %s to terminate")
+        if self.p.stdin is not None:
+            await self.p.stdin.aclose()
+        log.debug("Forcing command %s to terminate", self.desc)
         self.p.terminate()
         try:
             with anyio.fail_after(timeout):
                 await self.p.wait()
-                log.debug("Command %s successfully terminated")
+                log.debug("Command %s successfully terminated", self.desc)
         except TimeoutError:
-            log.warning("Command %s did not terminate in time; killing")
+            log.warning("Command %s did not terminate in time; killing", self.desc)
             self.p.kill()
 
     async def send(self, s: str) -> None:
@@ -210,7 +212,7 @@ async def stream_null_command(
         desc += f" [cwd={cwd}]"
     log.debug("Opening pipe to %s", desc)
     async with kill_on_error(
-        await anyio.open_process(argstrs, cwd=cwd, stderr=None)
+        await anyio.open_process(argstrs, cwd=cwd, stderr=None), desc
     ) as p:
         assert p.stdout is not None
         async with TextReceiveStream(p.stdout) as stream:
@@ -239,7 +241,7 @@ async def stream_lines_command(
         desc += f" [cwd={cwd}]"
     log.debug("Opening pipe to %s", desc)
     async with kill_on_error(
-        await anyio.open_process(argstrs, cwd=cwd, stderr=None)
+        await anyio.open_process(argstrs, cwd=cwd, stderr=None), desc
     ) as p:
         assert p.stdout is not None
         async for line in LineReceiveStream(TextReceiveStream(p.stdout)):
@@ -255,12 +257,16 @@ async def stream_lines_command(
 
 @asynccontextmanager
 async def kill_on_error(
-    p: anyio.abc.Process, timeout: float = 5
+    p: anyio.abc.Process, desc: str, timeout: float = 5
 ) -> AsyncIterator[anyio.abc.Process]:
     """
     When used like so::
 
-        async with kill_on_error(await anyio.open_process(...), timeout=...) as p:
+        async with kill_on_error(
+            await anyio.open_process(...),
+            "command args ...",
+            timeout=...
+        ) as p:
             ...
 
     then the subprocess ``p``, in addition to being waited for on normal
@@ -274,11 +280,14 @@ async def kill_on_error(
             yield p
         except BaseException:
             with anyio.CancelScope(shield=True):
+                log.debug("Forcing command %s to terminate", desc)
                 p.terminate()
                 try:
                     with anyio.fail_after(timeout):
                         await p.wait()
+                        log.debug("Command %s successfully terminated", desc)
                 except TimeoutError:
+                    log.warning("Command %s did not terminate in time; killing", desc)
                     p.kill()
             raise
 
