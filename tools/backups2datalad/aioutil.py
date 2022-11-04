@@ -51,17 +51,22 @@ class TextProcess(anyio.abc.ObjectStream[str]):
         )
 
     async def force_aclose(self, timeout: float = 5) -> None:
-        if self.p.stdin is not None:
-            await self.p.stdin.aclose()
-        log.debug("Forcing command %s to terminate", self.desc)
-        self.p.terminate()
         try:
             with anyio.fail_after(timeout):
-                await self.p.wait()
-                log.debug("Command %s successfully terminated", self.desc)
+                await self.aclose()
+                return
         except TimeoutError:
-            log.warning("Command %s did not terminate in time; killing", self.desc)
-            self.p.kill()
+            log.debug(
+                "Command %s did not terminate in time; sending SIGTERM", self.desc
+            )
+            self.p.terminate()
+            try:
+                with anyio.fail_after(timeout):
+                    await self.p.wait()
+                    log.debug("Command %s successfully terminated", self.desc)
+            except TimeoutError:
+                log.warning("Command %s did not terminate in time; killing", self.desc)
+                self.p.kill()
 
     async def send(self, s: str) -> None:
         if self.p.returncode is not None:
