@@ -14,11 +14,16 @@ from datalad.api import Dataset
 
 from .adandi import AsyncDandiClient
 from .adataset import AsyncDataset
-from .aioutil import open_git_annex, pool_amap
+from .aioutil import pool_amap, stream_lines_command
 from .config import BackupConfig, Mode, ZarrMode
 from .datasetter import DandiDatasetter
 from .logging import log
 from .util import format_errors, pdb_excepthook, quantify
+
+if sys.version_info[:2] >= (3, 10):
+    from contextlib import aclosing
+else:
+    from async_generator import aclosing
 
 
 @click.group()
@@ -449,13 +454,15 @@ async def populate(dirpath: Path, backup_remote: str, pathtype: str, jobs: int) 
 async def call_annex_json(cmd: str, *args: str, path: Path) -> None:
     success = 0
     failed = 0
-    async with await open_git_annex(
-        cmd,
-        *args,
-        "--json",
-        "--json-error-messages",
-        use_stdin=False,
-        path=path,
+    async with aclosing(
+        stream_lines_command(
+            "git-annex",
+            cmd,
+            *args,
+            "--json",
+            "--json-error-messages",
+            cwd=path,
+        )
     ) as p:
         async for line in p:
             data = json.loads(line)

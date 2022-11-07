@@ -20,7 +20,7 @@ from datalad.runner.exception import CommandError
 from ghrepo import GHRepo
 from pydantic import BaseModel
 
-from .aioutil import areadcmd, aruncmd, open_git_annex, stream_null_command
+from .aioutil import areadcmd, aruncmd, stream_lines_command, stream_null_command
 from .config import BackupConfig, Remote
 from .consts import DEFAULT_BRANCH
 from .logging import log
@@ -262,8 +262,10 @@ class AsyncDataset:
         return list(filedict.values())
 
     async def aiter_annexed_files(self) -> AsyncGenerator[AnnexedFile, None]:
-        async with await open_git_annex(
-            "find", "--include=*", "--json", use_stdin=False, path=self.pathobj
+        async with aclosing(
+            stream_lines_command(
+                "git-annex", "find", "--include=*", "--json", cwd=self.pathobj
+            )
         ) as p:
             async for line in p:
                 try:
