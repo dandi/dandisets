@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator, AsyncIterator, Callable, Container, Mapping
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 import logging
 import math
@@ -7,21 +9,13 @@ from pathlib import Path
 import shlex
 import subprocess
 import sys
-from typing import (
-    Any,
-    AsyncGenerator,
-    Awaitable,
-    Callable,
-    Container,
-    Generic,
-    Optional,
-    TypeVar,
-)
+from typing import Any, Awaitable, Generic, Optional, TypeVar
 
 import anyio
 from anyio.streams.memory import MemoryObjectReceiveStream
 from anyio.streams.text import TextReceiveStream
 import httpx
+from linesep import SplitterEmptyError, TerminatedSplitter, get_newline_splitter
 
 from .consts import DEFAULT_WORKERS
 from .logging import log
@@ -30,8 +24,6 @@ from .util import exp_wait
 T = TypeVar("T")
 InT = TypeVar("InT")
 OutT = TypeVar("OutT")
-
-DEEP_DEBUG = 5
 
 if sys.version_info[:2] >= (3, 10):
     from contextlib import aclosing
@@ -42,11 +34,9 @@ else:
 @dataclass
 class TextProcess(anyio.abc.ObjectStream[str]):
     p: anyio.abc.Process
+    stdout: LineReceiveStream
     desc: str
     warn_on_fail: bool = True
-    encoding: str = "utf-8"
-    buff: bytes = b""
-    done: bool = False
 
     async def aclose(self) -> None:
         if self.p.stdin is not None:
@@ -60,6 +50,24 @@ class TextProcess(anyio.abc.ObjectStream[str]):
             rc,
         )
 
+    async def force_aclose(self, timeout: float = 5) -> None:
+        try:
+            with anyio.fail_after(timeout):
+                await self.aclose()
+                return
+        except TimeoutError:
+            log.debug(
+                "Command %s did not terminate in time; sending SIGTERM", self.desc
+            )
+            self.p.terminate()
+            try:
+                with anyio.fail_after(timeout):
+                    await self.p.wait()
+                    log.debug("Command %s successfully terminated", self.desc)
+            except TimeoutError:
+                log.warning("Command %s did not terminate in time; killing", self.desc)
+                self.p.kill()
+
     async def send(self, s: str) -> None:
         if self.p.returncode is not None:
             raise RuntimeError(
@@ -67,44 +75,10 @@ class TextProcess(anyio.abc.ObjectStream[str]):
                 f" {self.p.returncode}!"
             )
         assert self.p.stdin is not None
-        log.log(DEEP_DEBUG, "Sending to command %s: %r", self.desc, s)
-        await self.p.stdin.send(s.encode(self.encoding))
+        await self.p.stdin.send(s.encode("utf-8"))
 
     async def receive(self) -> str:
-        if self.done:
-            raise anyio.EndOfStream()
-        if self.p.returncode not in (None, 0):
-            raise RuntimeError(
-                f"Command {self.desc} suddenly exited with return code"
-                f" {self.p.returncode}!"
-            )
-        assert self.p.stdout is not None
-        while True:
-            try:
-                i = self.buff.index(b"\n")
-            except ValueError:
-                try:
-                    blob = await self.p.stdout.receive()
-                except anyio.EndOfStream:
-                    # EOF
-                    log.log(DEEP_DEBUG, "Stdout of command %s reached EOF", self.desc)
-                    line = self.buff.decode(self.encoding)
-                    self.buff = b""
-                    log.log(
-                        DEEP_DEBUG, "Decoded line from command %s: %r", self.desc, line
-                    )
-                    self.done = True
-                    if line:
-                        return line
-                    else:
-                        raise anyio.EndOfStream()
-                else:
-                    self.buff += blob
-            else:
-                line = self.buff[: i + 1].decode(self.encoding)
-                self.buff = self.buff[i + 1 :]
-                log.log(DEEP_DEBUG, "Decoded line from command %s: %r", self.desc, line)
-                return line
+        return await self.stdout.receive()
 
     async def send_eof(self) -> None:
         if self.p.stdin is not None:
@@ -114,21 +88,25 @@ class TextProcess(anyio.abc.ObjectStream[str]):
 async def open_git_annex(
     *args: str,
     path: Optional[Path] = None,
-    use_stdin: bool = True,
     warn_on_fail: bool = True,
 ) -> TextProcess:
+    # This is strictly for spawning git-annex processes that data will be both
+    # sent to and received from.  To open a process solely for receiving data,
+    # use `stream_lines_command()` or `stream_null_command()`.
     desc = f"`git-annex {shlex.join(args)}`"
     if path is not None:
         desc += f" [cwd={path}]"
     log.debug("Opening pipe to %s", desc)
     p = await anyio.open_process(
         ["git-annex", *args],
-        stdin=subprocess.PIPE if use_stdin else subprocess.DEVNULL,
+        stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=None,
         cwd=path,
     )
-    return TextProcess(p, desc, warn_on_fail=warn_on_fail)
+    assert p.stdout is not None
+    stdout = LineReceiveStream(TextReceiveStream(p.stdout))
+    return TextProcess(p, stdout, desc, warn_on_fail=warn_on_fail)
 
 
 async def arequest(
@@ -238,25 +216,18 @@ async def stream_null_command(
     if cwd is not None:
         desc += f" [cwd={cwd}]"
     log.debug("Opening pipe to %s", desc)
-    async with await anyio.open_process(argstrs, cwd=cwd, stderr=None) as p:
-        buff = ""
+    async with kill_on_error(
+        await anyio.open_process(argstrs, cwd=cwd, stderr=None), desc
+    ) as p:
         assert p.stdout is not None
-        async for text in TextReceiveStream(p.stdout):
+        async with TextReceiveStream(p.stdout) as stream:
             try:
-                buff += text
-                while True:
-                    try:
-                        i = buff.index("\0")
-                    except ValueError:
-                        break
-                    else:
-                        yield buff[:i]
-                        buff = buff[i + 1 :]
+                splitter = TerminatedSplitter("\0", retain=False)
+                async for chunk in splitter.aitersplit(stream):
+                    yield chunk
             except BaseException:
                 log.exception("Exception raised while handling output from %s", desc)
                 raise
-        if buff:
-            yield buff
     log.log(
         logging.DEBUG if p.returncode == 0 else logging.WARNING,
         "Command %s exited with return code %d",
@@ -264,3 +235,105 @@ async def stream_null_command(
         p.returncode,
     )
     ### TODO: Raise an exception if p.returncode is nonzero?
+
+
+async def stream_lines_command(
+    *args: str | Path, cwd: Optional[Path] = None
+) -> AsyncGenerator[str, None]:
+    argstrs = [str(a) for a in args]
+    desc = f"`{shlex.join(argstrs)}`"
+    if cwd is not None:
+        desc += f" [cwd={cwd}]"
+    log.debug("Opening pipe to %s", desc)
+    async with kill_on_error(
+        await anyio.open_process(argstrs, cwd=cwd, stderr=None), desc
+    ) as p:
+        assert p.stdout is not None
+        async for line in LineReceiveStream(TextReceiveStream(p.stdout)):
+            yield line
+    log.log(
+        logging.DEBUG if p.returncode == 0 else logging.WARNING,
+        "Command %s exited with return code %d",
+        desc,
+        p.returncode,
+    )
+    ### TODO: Raise an exception if p.returncode is nonzero?
+
+
+@asynccontextmanager
+async def kill_on_error(
+    p: anyio.abc.Process, desc: str, timeout: float = 5
+) -> AsyncIterator[anyio.abc.Process]:
+    """
+    When used like so::
+
+        async with kill_on_error(
+            await anyio.open_process(...),
+            "command args ...",
+            timeout=...
+        ) as p:
+            ...
+
+    then the subprocess ``p``, in addition to being waited for on normal
+    context manager exit, will be terminated if an error (including
+    cancellation) occurs in the body of the ``async with:`` block; if it
+    doesn't exit after ``timeout`` seconds, it will instead be killed.
+    """
+
+    async with p:
+        try:
+            yield p
+        except BaseException:
+            with anyio.CancelScope(shield=True):
+                log.debug("Forcing command %s to terminate", desc)
+                p.terminate()
+                try:
+                    with anyio.fail_after(timeout):
+                        await p.wait()
+                        log.debug("Command %s successfully terminated", desc)
+                except TimeoutError:
+                    log.warning("Command %s did not terminate in time; killing", desc)
+                    p.kill()
+            raise
+
+
+class LineReceiveStream(anyio.abc.ObjectReceiveStream[str]):
+    """
+    Stream wrapper that splits strings from ``transport_stream`` on newlines
+    and returns each line individually.  Requires the linesep_ package.
+
+    .. _linesep: https://github.com/jwodder/linesep
+    """
+
+    def __init__(
+        self,
+        transport_stream: anyio.abc.ObjectReceiveStream[str],
+        newline: Optional[str] = None,
+    ) -> None:
+        """
+        :param transport_stream: any `str`-based receive stream
+        :param newline:
+            controls how universal newlines mode works; has the same set of
+            allowed values and semantics as the ``newline`` argument to
+            `open()`
+        """
+        self._stream = transport_stream
+        self._splitter = get_newline_splitter(newline, retain=True)
+
+    async def receive(self) -> str:
+        while not self._splitter.nonempty and not self._splitter.closed:
+            try:
+                self._splitter.feed(await self._stream.receive())
+            except anyio.EndOfStream:
+                self._splitter.close()
+        try:
+            return self._splitter.get()
+        except SplitterEmptyError:
+            raise anyio.EndOfStream()
+
+    async def aclose(self) -> None:
+        await self._stream.aclose()
+
+    @property
+    def extra_attributes(self) -> Mapping[Any, Callable[[], Any]]:
+        return self._stream.extra_attributes

@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 import json
 from pathlib import Path
 import sys
+from types import TracebackType
 from typing import AsyncGenerator, Optional
 
 import anyio
@@ -20,7 +21,7 @@ else:
 
 
 @dataclass
-class AsyncAnnex(anyio.abc.AsyncResource):
+class AsyncAnnex:
     repo: Path
     digest_type: str = "SHA256"
     pfromkey: Optional[TextProcess] = None
@@ -31,10 +32,34 @@ class AsyncAnnex(anyio.abc.AsyncResource):
         init=False, default_factory=lambda: defaultdict(anyio.Lock)
     )
 
-    async def aclose(self) -> None:
-        for p in [self.pfromkey, self.pexaminekey, self.pwhereis, self.pregisterurl]:
-            if p is not None:
-                await p.aclose()
+    async def __aenter__(self) -> AsyncAnnex:
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: Optional[type[BaseException]],
+        _exc_val: Optional[BaseException],
+        _exc_tb: Optional[TracebackType],
+    ) -> None:
+        if exc_type is None:
+            for p in [
+                self.pfromkey,
+                self.pexaminekey,
+                self.pwhereis,
+                self.pregisterurl,
+            ]:
+                if p is not None:
+                    await p.aclose()
+        else:
+            with anyio.CancelScope(shield=True):
+                for p in [
+                    self.pfromkey,
+                    self.pexaminekey,
+                    self.pwhereis,
+                    self.pregisterurl,
+                ]:
+                    if p is not None:
+                        await p.force_aclose()
 
     async def from_key(self, key: str, path: str) -> None:
         async with self.locks["fromkey"]:
