@@ -394,7 +394,10 @@ class RemoteAsset(BaseModel):
         )
 
     async def refetch(self) -> RemoteAsset:
-        return await self.dandiset.aget_asset(self.identifier)
+        # Query the Dandiset-free asset endpoint in case the asset's been
+        # deleted from the Dandiset since we started running
+        info = await self.aclient.get(f"/assets/{self.identifier}/info/")
+        return RemoteAsset.from_data(self.dandiset, info)
 
     @property
     @abstractmethod
