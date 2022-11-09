@@ -23,7 +23,7 @@ zarr_ids = sys.argv[3:]
 
 print(f"Working on {len(zarr_ids)} for dandiset {dandiset_id} under {zarrs_folder}")
 
-async def amain():
+async def amain() -> None:
     config = BackupConfig(zarrs=ResourceConfig(path="dandizarrs"))
     async with AsyncDandiClient.for_dandi_instance("dandi") as client:
         dandiset = await client.get_dandiset(dandiset_id, "draft")
@@ -31,7 +31,7 @@ async def amain():
             async for asset in ait:
                 if asset.zarr in zarr_ids:
                     print(f"SYNCING {asset.zarr} ({asset.path})")
-                    checksum = asset.get_digest().value
+                    checksum = asset.get_digest_value()
                     await sync_zarr(
                         asset,
                         checksum,
