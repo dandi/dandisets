@@ -220,14 +220,14 @@ async def stream_null_command(
         await anyio.open_process(argstrs, cwd=cwd, stderr=None), desc
     ) as p:
         assert p.stdout is not None
-        async with TextReceiveStream(p.stdout) as stream:
-            try:
-                splitter = TerminatedSplitter("\0", retain=False)
-                async for chunk in splitter.aitersplit(stream):
-                    yield chunk
-            except BaseException:
-                log.exception("Exception raised while handling output from %s", desc)
-                raise
+        try:
+            stream = TextReceiveStream(p.stdout)
+            splitter = TerminatedSplitter("\0", retain=False)
+            async for chunk in splitter.aitersplit(stream):
+                yield chunk
+        except BaseException:
+            log.exception("Exception raised while handling output from %s", desc)
+            raise
     log.log(
         logging.DEBUG if p.returncode == 0 else logging.WARNING,
         "Command %s exited with return code %d",
