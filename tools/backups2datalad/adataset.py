@@ -358,10 +358,9 @@ class AsyncDataset:
         if stored_stats is not None:
             # stats were stored and state of the dataset did not change since then
             return stored_stats
-
+        log.info("%s: Counting up files ...", self.path)
         files = 0
         size = 0
-
         # get them all and remap per path
         subdatasets = {s["path"]: s for s in await self.get_subdatasets()}
         for filestat in await self.get_file_stats():
@@ -378,6 +377,7 @@ class AsyncDataset:
                     files += 1
                     assert filestat.size is not None
                     size += filestat.size
+        log.info("%s: Done counting up files", self.path)
         stats = DatasetStats(files=files, size=size)
         await self.store_stats(stats)
         return stats
