@@ -49,8 +49,9 @@ class Syncer:
         for asset_path in self.tracker.get_deleted(self.config):
             if error_on_change:
                 raise UnexpectedChangeError(
-                    f"Asset {asset_path!r} deleted from Dandiset but timestamp"
-                    " was not updated on server"
+                    f"Dandiset {self.dandiset.identifier}: Asset {asset_path!r}"
+                    " deleted from Dandiset but timestamp was not updated on"
+                    " server"
                 )
             self.log.info(
                 "%s: Asset is in dataset but not in Dandiarchive; deleting", asset_path
@@ -66,8 +67,9 @@ class Syncer:
             if len(self.garbage_assets) > 3:
                 listing += f" and {len(self.garbage_assets) - 3} more."
             raise UnexpectedChangeError(
-                f"{quantify(len(self.garbage_assets), 'asset')} garbage-collected"
-                f" from assets.json: {listing}"
+                f"Dandiset {self.dandiset.identifier}:"
+                f" {quantify(len(self.garbage_assets), 'asset')}"
+                f" garbage-collected from assets.json: {listing}"
             )
         self.tracker.dump()
         await self.ds.add(".dandi/assets.json")
