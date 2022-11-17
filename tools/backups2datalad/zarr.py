@@ -274,8 +274,8 @@ class ZarrSyncer:
         if (self.repo / OLD_CHECKSUM_FILE).exists():
             if self.error_on_change:
                 raise UnexpectedChangeError(
-                    f"Zarr {self.zarr_id}: old checksum file present, but"
-                    " we are in verify mode"
+                    f"Dandiset {self.asset.dandiset_id}: Zarr {self.zarr_id}:"
+                    " old checksum file present, but we are in verify mode"
                 )
             await self.ds.remove(str(OLD_CHECKSUM_FILE))
         self.write_sync_file()
@@ -460,8 +460,9 @@ class ZarrSyncer:
     def check_change(self, event: str) -> None:
         if self.error_on_change:
             raise UnexpectedChangeError(
-                f"Zarr {self.zarr_id}: {event}, but Dandiset draft timestamp"
-                " was not updated on server"
+                f"Dandiset {self.asset.dandiset_id}: Zarr {self.zarr_id}:"
+                f" {event}, but Dandiset draft timestamp was not updated on"
+                " server"
             )
 
 
@@ -478,8 +479,9 @@ async def sync_zarr(
         ds = AsyncDataset(dsdir)
         if error_on_change and not ds.pathobj.exists():
             raise UnexpectedChangeError(
-                f"Zarr {asset.zarr} added to Dandiset at {asset.path!r} but"
-                " draft timestamp was not updated on server"
+                f"Dandiset {asset.dandiset_id}: Zarr {asset.zarr} added to"
+                f" Dandiset at {asset.path!r} but draft timestamp was not"
+                " updated on server"
             )
         await ds.ensure_installed(
             desc=f"Zarr {asset.zarr}",

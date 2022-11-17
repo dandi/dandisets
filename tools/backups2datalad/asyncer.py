@@ -230,8 +230,9 @@ class Downloader:
                 return
             if self.error_on_change:
                 raise UnexpectedChangeError(
-                    f"Metadata for asset {asset.path} was changed/added but"
-                    " draft timestamp was not updated on server"
+                    f"Dandiset {self.dandiset_id}: Metadata for asset"
+                    f" {asset.path} was changed/added but draft timestamp was"
+                    " not updated on server"
                 )
             self.log.info("%s: Syncing", asset.path)
             dest.parent.mkdir(parents=True, exist_ok=True)
@@ -521,8 +522,9 @@ async def async_assets(
                     if not (ds.pathobj / asset_path).exists():
                         if error_on_change:
                             raise UnexpectedChangeError(
-                                f"Zarr asset added at {asset_path} but draft"
-                                " timestamp was not updated on server"
+                                f"Dandiset {dandiset.identifier}: Zarr asset"
+                                f" added at {asset_path} but draft timestamp"
+                                " was not updated on server"
                             )
                         manager.log.info("Zarr asset added at %s; cloning", asset_path)
                         dm.report.downloaded += 1
