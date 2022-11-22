@@ -509,6 +509,11 @@ async def sync_zarr(
                 owner=zgh, name=asset.zarr, backup_remote=manager.config.zarrs.remote
             )
             manager.log.debug("Created GitHub sibling")
+        if await ds.is_dirty():
+            raise RuntimeError(
+                f"Zarr {asset.zarr} in Dandiset {asset.dandiset_id} is dirty;"
+                " clean or save before running"
+            )
         async with AsyncAnnex(dsdir, digest_type="MD5") as annex:
             if (r := manager.config.zarrs.remote) is not None:
                 backup_remote = r.name
