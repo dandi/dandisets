@@ -226,7 +226,7 @@ class AsyncDataset:
             )
         except subprocess.CalledProcessError as e:
             lockfile = self.pathobj / ".git" / "index.lock"
-            if str(lockfile) in e.stdout.decode("utf-8"):
+            if lockfile.exists() and str(lockfile) in e.stdout.decode("utf-8"):
                 r = await aruncmd("fuser", "-v", lockfile, stdout=subprocess.PIPE)
                 log.error(
                     "%s: Unable to remove %s due to lockfile; `fuser -v` output"
