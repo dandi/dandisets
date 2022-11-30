@@ -17,7 +17,7 @@ from anyio.streams.text import TextReceiveStream
 import httpx
 from linesep import SplitterEmptyError, TerminatedSplitter, get_newline_splitter
 
-from .consts import DEFAULT_WORKERS
+from .consts import DEFAULT_WORKERS, GIT_OPTIONS
 from .logging import log
 from .util import exp_wait
 
@@ -93,12 +93,13 @@ async def open_git_annex(
     # This is strictly for spawning git-annex processes that data will be both
     # sent to and received from.  To open a process solely for receiving data,
     # use `stream_lines_command()` or `stream_null_command()`.
-    desc = f"`git-annex {shlex.join(args)}`"
+    allargs = ["git", *GIT_OPTIONS, "annex", *args]
+    desc = f"`{shlex.join(allargs)}`"
     if path is not None:
         desc += f" [cwd={path}]"
     log.debug("Opening pipe to %s", desc)
     p = await anyio.open_process(
-        ["git-annex", *args],
+        allargs,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=None,

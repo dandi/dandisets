@@ -11,6 +11,7 @@ from typing import AsyncGenerator, Optional
 import anyio
 
 from .aioutil import TextProcess, open_git_annex, stream_null_command
+from .consts import GIT_OPTIONS
 from .logging import log
 from .util import format_errors
 
@@ -148,6 +149,7 @@ class AsyncAnnex:
         async with aclosing(
             stream_null_command(
                 "git",
+                *GIT_OPTIONS,
                 "ls-tree",
                 "-r",
                 "--name-only",

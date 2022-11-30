@@ -29,7 +29,7 @@ from .adataset import AssetsState, AsyncDataset
 from .aioutil import TextProcess, arequest, aruncmd, open_git_annex
 from .annex import AsyncAnnex
 from .config import BackupConfig, ZarrMode
-from .consts import USER_AGENT
+from .consts import GIT_OPTIONS, USER_AGENT
 from .logging import PrefixedLogger, log
 from .manager import Manager
 from .util import (
@@ -544,6 +544,7 @@ async def async_assets(
                         if manager.config.zarr_gh_org is not None:
                             await aruncmd(
                                 "git",
+                                *GIT_OPTIONS,
                                 "remote",
                                 "rename",
                                 "origin",
@@ -590,6 +591,9 @@ async def async_assets(
                             commit_date=timestamp,
                         )
                         manager.log.debug("Commit made")
+                        manager.log.debug("Running `git gc`")
+                        await ds.gc()
+                        manager.log.debug("Finished running `git gc`")
                         total_report.commits += 1
                     else:
                         manager.log.debug("Repository is clean")

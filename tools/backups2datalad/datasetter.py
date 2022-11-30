@@ -28,7 +28,7 @@ from .adandi import AsyncDandiClient, RemoteDandiset, RemoteZarrAsset
 from .adataset import AssetsState, AsyncDataset, DatasetStats
 from .aioutil import aruncmd, pool_amap
 from .config import BackupConfig, Mode
-from .consts import DEFAULT_BRANCH
+from .consts import DEFAULT_BRANCH, GIT_OPTIONS
 from .logging import PrefixedLogger, log, quiet_filter
 from .manager import GitHub, Manager
 from .syncer import Syncer
@@ -379,6 +379,9 @@ class DandiDatasetter(AsyncResource):
                 commit_date=dandiset.version.created,
             )
             log.debug("Commit made")
+            log.debug("Running `git gc`")
+            await ds.gc()
+            log.debug("Finished running `git gc`")
         else:
             log.info(
                 "Assets in candidate commits do not match assets in version %s;"
@@ -473,6 +476,7 @@ class DandiDatasetter(AsyncResource):
                 if self.config.zarr_gh_org is not None:
                     await aruncmd(
                         "git",
+                        *GIT_OPTIONS,
                         "remote",
                         "rename",
                         "origin",

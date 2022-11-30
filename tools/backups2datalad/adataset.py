@@ -22,7 +22,7 @@ from pydantic import BaseModel
 
 from .aioutil import areadcmd, aruncmd, stream_lines_command, stream_null_command
 from .config import BackupConfig, Remote
-from .consts import DEFAULT_BRANCH
+from .consts import DEFAULT_BRANCH, GIT_OPTIONS
 from .logging import log
 from .util import custom_commit_env, exp_wait, is_meta_file, key2hash
 
@@ -114,13 +114,25 @@ class AsyncDataset:
         )
 
     async def call_git(self, *args: str | Path, **kwargs: Any) -> None:
-        await aruncmd("git", *args, cwd=self.path, **kwargs)
+        await aruncmd(
+            "git",
+            *GIT_OPTIONS,
+            *args,
+            cwd=self.path,
+            **kwargs,
+        )
 
     async def read_git(self, *args: str | Path, **kwargs: Any) -> str:
-        return await areadcmd("git", *args, cwd=self.path, **kwargs)
+        return await areadcmd(
+            "git",
+            *GIT_OPTIONS,
+            *args,
+            cwd=self.path,
+            **kwargs,
+        )
 
     async def call_annex(self, *args: str | Path, **kwargs: Any) -> None:
-        await aruncmd("git-annex", *args, cwd=self.path, **kwargs)
+        await aruncmd("git", *GIT_OPTIONS, "annex", *args, cwd=self.path, **kwargs)
 
     async def save(
         self,
@@ -264,7 +276,13 @@ class AsyncDataset:
     async def aiter_annexed_files(self) -> AsyncGenerator[AnnexedFile, None]:
         async with aclosing(
             stream_lines_command(
-                "git-annex", "find", "--include=*", "--json", cwd=self.pathobj
+                "git",
+                *GIT_OPTIONS,
+                "annex",
+                "find",
+                "--include=*",
+                "--json",
+                cwd=self.pathobj,
             )
         ) as p:
             async for line in p:
