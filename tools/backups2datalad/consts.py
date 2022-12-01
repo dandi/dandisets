@@ -18,3 +18,5 @@ USER_AGENT = (
         platform.python_version(),
     )
 )
+
+GIT_OPTIONS = ["-c", "receive.autogc=0", "-c", "gc.auto=0"]

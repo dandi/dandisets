@@ -16,6 +16,7 @@ from .adandi import AsyncDandiClient
 from .adataset import AsyncDataset
 from .aioutil import pool_amap, stream_lines_command
 from .config import BackupConfig, Mode, ZarrMode
+from .consts import GIT_OPTIONS
 from .datasetter import DandiDatasetter
 from .logging import log
 from .util import format_errors, pdb_excepthook, quantify
@@ -456,7 +457,9 @@ async def call_annex_json(cmd: str, *args: str, path: Path) -> None:
     failed = 0
     async with aclosing(
         stream_lines_command(
-            "git-annex",
+            "git",
+            *GIT_OPTIONS,
+            "annex",
             cmd,
             *args,
             "--json",
