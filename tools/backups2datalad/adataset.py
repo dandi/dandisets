@@ -36,6 +36,7 @@ else:
 class AsyncDataset:
     ds: Dataset = field(init=False)
     dirpath: InitVar[str | Path]
+    lock: anyio.Lock = field(init=False, default_factory=anyio.Lock)
 
     def __post_init__(self, dirpath: str | Path) -> None:
         self.ds = Dataset(dirpath)
@@ -227,15 +228,16 @@ class AsyncDataset:
         self.ds.repo.precommit()
         # `path` must be relative to the root of the dataset
         try:
-            await self.call_git(
-                "rm",
-                "-f",
-                "--ignore-unmatch",
-                "--",
-                path,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-            )
+            async with self.lock:
+                await self.call_git(
+                    "rm",
+                    "-f",
+                    "--ignore-unmatch",
+                    "--",
+                    path,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                )
         except subprocess.CalledProcessError as e:
             lockfile = self.pathobj / ".git" / "index.lock"
             output = e.stdout.decode("utf-8")
