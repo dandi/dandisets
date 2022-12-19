@@ -242,12 +242,20 @@ class AsyncDataset:
             lockfile = self.pathobj / ".git" / "index.lock"
             output = e.stdout.decode("utf-8")
             if lockfile.exists() and str(lockfile) in output:
-                r = await aruncmd("fuser", "-v", lockfile, stdout=subprocess.PIPE)
+                r = await aruncmd(
+                    "fuser",
+                    "-v",
+                    lockfile,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    check=False,
+                )
                 log.error(
                     "%s: Unable to remove %s due to lockfile; `fuser -v` output"
-                    " on lockfile:\n%s",
+                    " on lockfile (return code %d):\n%s",
                     self.pathobj,
                     path,
+                    r.returncode,
                     textwrap.indent(r.stdout.decode("utf-8"), "> "),
                 )
             else:
