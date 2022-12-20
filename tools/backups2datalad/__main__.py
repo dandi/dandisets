@@ -393,6 +393,10 @@ async def zarr_checksum(dirpath: Path) -> None:
 
 async def populate(dirpath: Path, backup_remote: str, pathtype: str, jobs: int) -> None:
     desc = f"{pathtype} {dirpath.name}"
+    ds = AsyncDataset(dirpath)
+    if await ds.populate_up_to_date():
+        log.info("%s: no need to populate", desc)
+        return
     log.info("Downloading files for %s", desc)
     await call_annex_json(
         "get",
@@ -450,6 +454,7 @@ async def populate(dirpath: Path, backup_remote: str, pathtype: str, jobs: int) 
                 raise
         else:
             break
+    await ds.update_populate_status()
 
 
 async def call_annex_json(cmd: str, *args: str, path: Path) -> None:

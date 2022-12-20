@@ -525,6 +525,17 @@ class AsyncDataset:
             input=f"160000 commit {commit_hash}\t{path}\0".encode("utf-8"),
         )
 
+    async def populate_up_to_date(self) -> bool:
+        return (await self.get_repo_config("dandi.populated")) == (
+            await self.get_commit_hash()
+        )
+
+    async def update_populate_status(self) -> None:
+        head = await self.get_commit_hash()
+        await self.call_git(
+            "config", "--local", "--replace-all", "dandi.populated", head
+        )
+
 
 class ObjectType(Enum):
     COMMIT = "commit"
