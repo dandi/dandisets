@@ -19,7 +19,3 @@ export DATALAD_LOG_LEVEL=WARNING  # otherwise too much noise
 mkdir -p .git/tmp
 
 set -x -o pipefail
-
-function foreach_push_gitannex() {
-	datalad -c datalad.ui.suppress-similar-results=off foreach-dataset -s -r -R $1 -J 5 --chpwd pwd --output-streams capture   git -C '{ds.path}' push github git-annex
-}

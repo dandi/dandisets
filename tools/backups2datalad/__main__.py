@@ -454,6 +454,7 @@ async def populate(dirpath: Path, backup_remote: str, pathtype: str, jobs: int) 
                 raise
         else:
             break
+    await ds.call_git("push", "github", "git-annex")
     await ds.update_populate_status()
 
 
