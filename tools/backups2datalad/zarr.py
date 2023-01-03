@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 import sys
 from typing import TYPE_CHECKING, AsyncGenerator, Iterator, Optional, cast
-from urllib.parse import quote
+from urllib.parse import quote, quote_plus
 
 from aiobotocore.config import AioConfig
 from aiobotocore.session import get_session
@@ -224,10 +224,14 @@ class ZarrSyncer:
                         remotes = await self.annex.get_key_remotes(key)
                         await self.annex.from_key(key, str(entry))
                         await self.register_url(str(entry), key, entry.bucket_url)
+                        prefix = quote_plus(str(entry))
                         await self.register_url(
                             str(entry),
                             key,
-                            f"{self.api_url}/zarr/{self.zarr_id}.zarr/{entry}",
+                            (
+                                f"{self.api_url}/zarr/{self.zarr_id}/files"
+                                f"?prefix={prefix}&download=true"
+                            ),
                         )
                         if (
                             remotes is not None
