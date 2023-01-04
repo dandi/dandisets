@@ -327,6 +327,7 @@ async def populate_cmd(
                 backup_remote=backup_remote,
                 pathtype="Dandiset",
                 jobs=datasetter.config.jobs,
+                has_github=datasetter.config.gh_org is not None,
             ),
             afilter_installed(dirs),
             workers=datasetter.config.workers,
@@ -370,6 +371,7 @@ async def populate_zarrs(
                 backup_remote=backup_remote,
                 pathtype="Zarr",
                 jobs=datasetter.config.jobs,
+                has_github=datasetter.config.gh_org is not None,
             ),
             afilter_installed(dirs),
             workers=datasetter.config.workers,
@@ -391,7 +393,9 @@ async def zarr_checksum(dirpath: Path) -> None:
     print(await ds.compute_zarr_checksum())
 
 
-async def populate(dirpath: Path, backup_remote: str, pathtype: str, jobs: int) -> None:
+async def populate(
+    dirpath: Path, backup_remote: str, pathtype: str, jobs: int, has_github: bool
+) -> None:
     desc = f"{pathtype} {dirpath.name}"
     ds = AsyncDataset(dirpath)
     if await ds.populate_up_to_date():
@@ -454,6 +458,8 @@ async def populate(dirpath: Path, backup_remote: str, pathtype: str, jobs: int) 
                 raise
         else:
             break
+    if has_github:
+        await ds.call_git("push", "github", "git-annex")
     await ds.update_populate_status()
 
 

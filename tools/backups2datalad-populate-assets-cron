@@ -1,16 +1,11 @@
 #!/bin/bash
 source "$(dirname "$0")"/backups2datalad-cron-common
 
-(
 python -m tools.backups2datalad \
    -l DEBUG \
    --backup-root "$backup_root" \
    --config tools/backups2datalad.cfg.yaml \
-   populate "$@"
-
-foreach_push_gitannex 1
-
-) 2>|.git/tmp/stderr-pa
+   populate "$@" 2>|.git/tmp/stderr-pa
 
 if [ -s .git/tmp/stderr-pa ]; then
 	echo "There was stderr from backup/datalad invocations:"
