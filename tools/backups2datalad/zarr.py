@@ -536,8 +536,11 @@ async def sync_zarr(
             )
             await zsync.run()
         report = zsync.report
-        if report:
-            summary = report.get_summary()
+        if report or await zsync.ds.is_dirty():
+            if report:
+                summary = report.get_summary()
+            else:
+                summary = "No changes to zarr content, some other changes"
             manager.log.info("%s; committing", summary)
             if zsync.last_timestamp is None:
                 commit_ts = asset.created
