@@ -149,12 +149,12 @@ class ZarrSyncer:
                             f"Zarr {self.zarr_id} contains file at meta path"
                             f" {str(entry)!r}"
                         )
-                    self.log.info("%s: Syncing", entry)
+                    self.log.debug("%s: Syncing", entry)
                     zcc.add(Path(entry.path), entry.md5_digest, entry.size)
                     local_paths.discard(str(entry))
                     if self.mode is ZarrMode.TIMESTAMP:
                         if last_sync is not None and entry.last_modified < last_sync:
-                            self.log.info(
+                            self.log.debug(
                                 "%s: file not modified since last backup", entry
                             )
                             continue
@@ -167,7 +167,7 @@ class ZarrSyncer:
                             "path type conflict between server & backup for"
                             f" {str(entry)!r}"
                         )
-                        self.log.info(
+                        self.log.debug(
                             "%s: deleting conflicting directory at same path",
                             entry,
                         )
@@ -182,7 +182,7 @@ class ZarrSyncer:
                                     f"backup path {str(ep)!r} conflicts with"
                                     f" server path {str(entry)!r}"
                                 )
-                                self.log.info(
+                                self.log.debug(
                                     "%s: deleting conflicting file path %s",
                                     entry,
                                     ep,
@@ -196,20 +196,20 @@ class ZarrSyncer:
                     to_update = False
                     if not (dest.exists() or dest.is_symlink()):
                         self.check_change(f"entry {str(entry)!r} added")
-                        self.log.info("%s: Not in dataset; will add", entry)
+                        self.log.debug("%s: Not in dataset; will add", entry)
                         to_update = True
                         self.report.added += 1
                     else:
                         self.log.debug("%s: About to fetch hash from annex", entry)
                         if entry.md5_digest == self.get_annex_hash(dest):
-                            self.log.info(
+                            self.log.debug(
                                 "%s: File in dataset, and hash shows no"
                                 " modification; will not update",
                                 entry,
                             )
                         else:
                             self.check_change(f"entry {str(entry)!r} modified")
-                            self.log.info(
+                            self.log.debug(
                                 "%s: Asset in dataset, and hash shows"
                                 " modification; will update",
                                 entry,
