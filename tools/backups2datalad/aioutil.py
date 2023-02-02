@@ -118,6 +118,9 @@ async def arequest(
     **kwargs: Any,
 ) -> httpx.Response:
     waits = exp_wait(attempts=15, base=2)
+    # custom timeout if was not specified to wait longer  in hope to overcome 
+    # https://github.com/dandi/dandisets/issues/298 and alike
+    kwargs.setdefault('timeout', 60)
     while True:
         try:
             r = await client.request(method, url, follow_redirects=True, **kwargs)
