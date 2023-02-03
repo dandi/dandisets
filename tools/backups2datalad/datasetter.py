@@ -46,6 +46,7 @@ class DandiDatasetter(AsyncResource):
     dandi_client: AsyncDandiClient
     manager: Manager = field(init=False)
     config: BackupConfig
+    logfile: Optional[Path] = None
 
     def __post_init__(self) -> None:
         if self.config.gh_org is not None:
@@ -535,8 +536,8 @@ class DandiDatasetter(AsyncResource):
         logdir = self.config.dandiset_root / ".git" / "dandi" / "backups2datalad"
         logdir.mkdir(exist_ok=True, parents=True)
         filename = "{:%Y.%m.%d.%H.%M.%SZ}.log".format(datetime.utcnow())
-        logfile = logdir / filename
-        handler = logging.FileHandler(logfile, encoding="utf-8")
+        self.logfile = logdir / filename
+        handler = logging.FileHandler(self.logfile, encoding="utf-8")
         handler.setLevel(logging.DEBUG)
         handler.addFilter(quiet_filter(logging.WARNING))
         fmter = logging.Formatter(
@@ -545,4 +546,4 @@ class DandiDatasetter(AsyncResource):
         )
         handler.setFormatter(fmter)
         root.addHandler(handler)
-        log.info("Saving logs to %s", logfile)
+        log.info("Saving logs to %s", self.logfile)
