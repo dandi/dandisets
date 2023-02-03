@@ -12,7 +12,7 @@ ds=$(dirname "$ds")
 zarrds=/mnt/backup/dandi/dandizarrs
 
 source ~/.bashrc-miniconda
-conda activate dandisets
+conda activate dandisets-2
 
 cd "$ds"
 chronic pip install -r tools/backups2datalad.req.txt

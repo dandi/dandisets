@@ -9,7 +9,7 @@ ds="$(realpath "$(dirname "$0")"/..)"
 backup_root="$(dirname "$ds")"
 
 source ~/.bashrc-miniconda
-conda activate dandisets
+conda activate dandisets-2
 
 cd "$ds"
 chronic pip install -r tools/backups2datalad.req.txt
