@@ -45,11 +45,9 @@ jobs:
 
       - name: Install git-annex
         run: |
-          datalad-installer --sudo ok neurodebian
-          # `datalad-installer git-annex -m neurodebian` would install
-          # git-annex-standalone, but we need the git-annex package.  See
-          # <https://github.com/dandi/dandisets/issues/310#issuecomment-1332866563>.
-          sudo apt-get install -y git-annex
+          datalad-installer --sudo ok neurodebian git-annex -m neurodebian
+          # make standalone git take precendence to guarantee compatibility with git-annex
+          echo "/usr/lib/git-annex.linux/" >> $GITHUB_PATH
 
       - name: Install hdf5
         if: matrix.python-version == '3.9'

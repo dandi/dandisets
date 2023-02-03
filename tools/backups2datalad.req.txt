@@ -1,5 +1,5 @@
 # Python ~= 3.8
-# git-annex >= 10.20220724
+# git-annex >= 10.20230126
 aiobotocore
 anyio ~= 3.6
 async_generator ~= 1.10; python_version < '3.10'
