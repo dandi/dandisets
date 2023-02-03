@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from functools import partial
+from collections.abc import Callable
+from functools import partial, wraps
 import json
 import logging
 from pathlib import Path
 import re
 import sys
-from typing import AsyncGenerator, Optional, Sequence
+from typing import AsyncGenerator, Awaitable, Optional, Sequence
 
 import asyncclick as click
 from dandi.consts import DANDISET_ID_REGEX
@@ -23,8 +24,10 @@ from .util import format_errors, pdb_excepthook, quantify
 
 if sys.version_info[:2] >= (3, 10):
     from contextlib import aclosing
+    from typing import Concatenate, ParamSpec
 else:
     from async_generator import aclosing
+    from typing_extensions import Concatenate, ParamSpec
 
 
 @click.group()
@@ -93,6 +96,29 @@ async def main(
     await ctx.obj.debug_logfile(quiet_debug)
 
 
+P = ParamSpec("P")
+
+
+def print_logfile(
+    f: Callable[Concatenate[DandiDatasetter, P], Awaitable[None]]
+) -> Callable[Concatenate[DandiDatasetter, P], Awaitable[None]]:
+    @wraps(f)
+    async def wrapped(
+        datasetter: DandiDatasetter, *args: P.args, **kwargs: P.kwargs
+    ) -> None:
+        ok = True
+        try:
+            await f(datasetter, *args, **kwargs)
+        except Exception:
+            log.exception("An error occurred:")
+            ok = False
+        if datasetter.logfile is not None:
+            print("Logs saved to", datasetter.logfile, file=sys.stderr)
+        sys.exit(0 if ok else 1)
+
+    return wrapped
+
+
 @main.command()
 @click.option(
     "--asset-filter",
@@ -156,6 +182,7 @@ async def main(
 )
 @click.argument("dandisets", nargs=-1)
 @click.pass_obj
+@print_logfile
 async def update_from_backup(
     datasetter: DandiDatasetter,
     dandisets: Sequence[str],
@@ -196,6 +223,7 @@ async def update_from_backup(
 @click.option("-w", "--workers", type=int, help="Number of workers to run in parallel")
 @click.argument("dandiset")
 @click.pass_obj
+@print_logfile
 async def backup_zarrs(
     datasetter: DandiDatasetter,
     dandiset: str,
@@ -222,6 +250,7 @@ async def backup_zarrs(
 )
 @click.argument("dandisets", nargs=-1)
 @click.pass_obj
+@print_logfile
 async def update_github_metadata(
     datasetter: DandiDatasetter,
     dandisets: Sequence[str],
@@ -257,6 +286,7 @@ async def update_github_metadata(
 @click.argument("dandiset")
 @click.argument("version")
 @click.pass_obj
+@print_logfile
 async def release(
     datasetter: DandiDatasetter,
     dandiset: str,
@@ -295,6 +325,7 @@ async def release(
 @click.option("-w", "--workers", type=int, help="Number of workers to run in parallel")
 @click.argument("dandisets", nargs=-1)
 @click.pass_obj
+@print_logfile
 async def populate_cmd(
     datasetter: DandiDatasetter,
     dandisets: Sequence[str],
@@ -340,6 +371,7 @@ async def populate_cmd(
 @click.option("-w", "--workers", type=int, help="Number of workers to run in parallel")
 @click.argument("zarrs", nargs=-1)
 @click.pass_obj
+@print_logfile
 async def populate_zarrs(
     datasetter: DandiDatasetter, zarrs: Sequence[str], workers: Optional[int]
 ) -> None:

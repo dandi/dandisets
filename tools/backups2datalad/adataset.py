@@ -73,6 +73,14 @@ class AsyncDataset:
                 "GIT_CONFIG_PARAMETERS": f"'init.defaultBranch={DEFAULT_BRANCH}'",
             },
         )
+        await self.call_annex(
+            "initremote",
+            "--sameas=web",
+            "dandiapi",
+            "type=web",
+            "urlinclude=*//api.dandiarchive.org/*",
+            "cost=300",
+        )
         if backup_remote is not None:
             await self.call_annex(
                 "initremote",
