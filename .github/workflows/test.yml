@@ -44,7 +44,10 @@ jobs:
           python -m pip install --upgrade --upgrade-strategy=eager datalad-installer nox
 
       - name: Install git-annex
-        run: datalad-installer --sudo ok neurodebian git-annex -m neurodebian
+        run: |
+          datalad-installer --sudo ok neurodebian git-annex -m neurodebian
+          # make standalone git take precendence to guarantee compatibility with git-annex
+          echo "/usr/lib/git-annex.linux/" >> $GITHUB_PATH
 
       - name: Install hdf5
         if: matrix.python-version == '3.9'
