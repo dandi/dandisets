@@ -12,8 +12,8 @@ from urllib.parse import quote, quote_plus
 from aiobotocore.config import AioConfig
 from aiobotocore.session import get_session
 from botocore import UNSIGNED
-from dandi.support.digests import ZCTree
 from pydantic import BaseModel
+from zarr_checksum import ZarrChecksumTree
 
 from .adandi import RemoteZarrAsset
 from .adataset import AsyncDataset
@@ -141,7 +141,7 @@ class ZarrSyncer:
                 return
             self.log.info("sync needed")
             orig_checksum = await self.get_local_checksum()
-            zcc = ZCTree()
+            zcc = ZarrChecksumTree()
             async with aclosing(self.aiter_file_entries(client)) as ait:
                 async for entry in ait:
                     if is_meta_file(str(entry)):
@@ -150,7 +150,7 @@ class ZarrSyncer:
                             f" {str(entry)!r}"
                         )
                     self.log.debug("%s: Syncing", entry)
-                    zcc.add(Path(entry.path), entry.md5_digest, entry.size)
+                    zcc.add_leaf(Path(entry.path), entry.size, entry.md5_digest)
                     local_paths.discard(str(entry))
                     if self.mode is ZarrMode.TIMESTAMP:
                         if last_sync is not None and entry.last_modified < last_sync:
@@ -242,7 +242,7 @@ class ZarrSyncer:
                                 "%s: Not in backup remote %s", entry, self.backup_remote
                             )
         await self.prune_deleted(local_paths)
-        final_checksum = cast(str, zcc.get_digest())
+        final_checksum = str(zcc.process())
         modern_asset = await self.asset.refetch()
         changed_during_sync = self.asset.modified != modern_asset.modified
         if changed_during_sync:

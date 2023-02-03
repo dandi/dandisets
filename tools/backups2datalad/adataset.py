@@ -14,11 +14,11 @@ import textwrap
 from typing import Any, AsyncGenerator, ClassVar, Optional, Sequence, cast
 
 import anyio
-from dandi.support.digests import ZCTree
 from datalad.api import Dataset
 from datalad.runner.exception import CommandError
 from ghrepo import GHRepo
 from pydantic import BaseModel
+from zarr_checksum import ZarrChecksumTree
 
 from .aioutil import areadcmd, aruncmd, stream_lines_command, stream_null_command
 from .config import BackupConfig, Remote
@@ -321,7 +321,7 @@ class AsyncDataset:
         log.debug(
             "Computing Zarr checksum for locally-annexed files in %s", self.pathobj
         )
-        zcc = ZCTree()
+        zcc = ZarrChecksumTree()
         # rely on the fact that every data component of zarr folder is in annex
         # and we keep .dandi/ folder content directly in git
         async with aclosing(self.aiter_annexed_files()) as afiles:
@@ -331,8 +331,8 @@ class AsyncDataset:
                         f"{f.file} in {self.pathobj} has {f.backend} backend"
                         " instead of MD5 or MD5E required for Zarr checksum"
                     )
-                zcc.add(Path(f.file), key2hash(f.key), f.bytesize)
-        checksum = cast(str, zcc.get_digest())
+                zcc.add_leaf(Path(f.file), f.bytesize, key2hash(f.key))
+        checksum = str(zcc.process())
         log.debug("Computed Zarr checksum %s for %s", checksum, self.pathobj)
         return checksum
 

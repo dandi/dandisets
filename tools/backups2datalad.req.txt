@@ -14,3 +14,4 @@ identify ~= 2.0
 linesep ~= 0.4
 packaging
 pydantic ~= 1.8
+zarr_checksum
