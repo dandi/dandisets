@@ -19,6 +19,7 @@ from .adandi import RemoteZarrAsset
 from .adataset import AsyncDataset
 from .annex import AsyncAnnex
 from .config import ZarrMode
+from .consts import MAX_ZARR_SYNCS
 from .logging import PrefixedLogger
 from .manager import Manager
 from .util import UnexpectedChangeError, is_meta_file, key2hash, maxdatetime, quantify
@@ -140,132 +141,154 @@ class ZarrSyncer:
                 self.log.info("backup up to date")
                 return
             self.log.info("sync needed")
-            orig_checksum = await self.get_local_checksum()
-            zcc = ZarrChecksumTree()
-            async with aclosing(self.aiter_file_entries(client)) as ait:
-                async for entry in ait:
-                    if is_meta_file(str(entry)):
-                        raise RuntimeError(
-                            f"Zarr {self.zarr_id} contains file at meta path"
-                            f" {str(entry)!r}"
-                        )
-                    self.log.debug("%s: Syncing", entry)
-                    zcc.add_leaf(Path(entry.path), entry.size, entry.md5_digest)
-                    local_paths.discard(str(entry))
-                    if self.mode is ZarrMode.TIMESTAMP:
-                        if last_sync is not None and entry.last_modified < last_sync:
+            i = 0
+            while True:
+                orig_checksum = await self.get_local_checksum()
+                zcc = ZarrChecksumTree()
+                async with aclosing(self.aiter_file_entries(client)) as ait:
+                    async for entry in ait:
+                        if is_meta_file(str(entry)):
+                            raise RuntimeError(
+                                f"Zarr {self.zarr_id} contains file at meta path"
+                                f" {str(entry)!r}"
+                            )
+                        self.log.debug("%s: Syncing", entry)
+                        zcc.add_leaf(Path(entry.path), entry.size, entry.md5_digest)
+                        local_paths.discard(str(entry))
+                        if self.mode is ZarrMode.TIMESTAMP:
+                            if (
+                                last_sync is not None
+                                and entry.last_modified < last_sync
+                            ):
+                                self.log.debug(
+                                    "%s: file not modified since last backup", entry
+                                )
+                                continue
+                            self.check_change(f"entry {entry!r} was modified/added")
+                        dest = self.repo / str(entry)
+                        if dest.is_dir():
+                            # File path is replacing a directory, which needs
+                            # to be deleted
+                            self.check_change(
+                                "path type conflict between server & backup for"
+                                f" {str(entry)!r}"
+                            )
                             self.log.debug(
-                                "%s: file not modified since last backup", entry
+                                "%s: deleting conflicting directory at same path",
+                                entry,
+                            )
+                            await self.rmtree(dest, local_paths)
+                        else:
+                            for ep in entry.parents:
+                                pp = self.repo / ep
+                                if pp.is_file() or pp.is_symlink():
+                                    # Annexed file at parent path of `entry`
+                                    # needs to be replaced with a directory
+                                    self.check_change(
+                                        f"backup path {str(ep)!r} conflicts with"
+                                        f" server path {str(entry)!r}"
+                                    )
+                                    self.log.debug(
+                                        "%s: deleting conflicting file path %s",
+                                        entry,
+                                        ep,
+                                    )
+                                    await self.ds.remove(ep)
+                                    local_paths.discard(ep)
+                                    self.report.deleted += 1
+                                    break
+                                elif pp.is_dir():
+                                    break
+                        to_update = False
+                        if not (dest.exists() or dest.is_symlink()):
+                            self.check_change(f"entry {str(entry)!r} added")
+                            self.log.debug("%s: Not in dataset; will add", entry)
+                            to_update = True
+                            self.report.added += 1
+                        else:
+                            self.log.debug("%s: About to fetch hash from annex", entry)
+                            if entry.md5_digest == self.get_annex_hash(dest):
+                                self.log.debug(
+                                    "%s: File in dataset, and hash shows no"
+                                    " modification; will not update",
+                                    entry,
+                                )
+                            else:
+                                self.check_change(f"entry {str(entry)!r} modified")
+                                self.log.debug(
+                                    "%s: Asset in dataset, and hash shows"
+                                    " modification; will update",
+                                    entry,
+                                )
+                                to_update = True
+                                self.report.updated += 1
+                        if to_update:
+                            await self.ds.remove(str(entry))
+                            key = await self.annex.mkkey(
+                                entry.name, entry.size, entry.md5_digest
+                            )
+                            remotes = await self.annex.get_key_remotes(key)
+                            await self.annex.from_key(key, str(entry))
+                            await self.register_url(str(entry), key, entry.bucket_url)
+                            prefix = quote_plus(str(entry))
+                            await self.register_url(
+                                str(entry),
+                                key,
+                                (
+                                    f"{self.api_url}/zarr/{self.zarr_id}/files"
+                                    f"?prefix={prefix}&download=true"
+                                ),
+                            )
+                            if (
+                                remotes is not None
+                                and self.backup_remote is not None
+                                and self.backup_remote not in remotes
+                            ):
+                                self.log.info(
+                                    "%s: Not in backup remote %s",
+                                    entry,
+                                    self.backup_remote,
+                                )
+                await self.prune_deleted(local_paths)
+                final_checksum = str(zcc.process())
+                modern_asset = await self.asset.refetch()
+                changed_during_sync = self.asset.modified != modern_asset.modified
+                if changed_during_sync:
+                    self.log.info(
+                        "`modified` timestamp on server changed during backup"
+                    )
+                    if orig_checksum != final_checksum:
+                        self.log.info("Local content changed during sync")
+                remote_checksum = modern_asset.get_digest_value()
+                if remote_checksum is None:
+                    self.log.info("Checksum still not available from server")
+                elif final_checksum != remote_checksum:
+                    if changed_during_sync:
+                        self.log.warning(
+                            "Zarr was modified during backup and there is a"
+                            " checksum mismatch: local=%s, remote=%s",
+                            final_checksum,
+                            remote_checksum,
+                        )
+                    else:
+                        i += 1
+                        if i < MAX_ZARR_SYNCS:
+                            self.log.warning(
+                                "Local checksum %r differs from remote checksum"
+                                " %r after backup, and no change on server was"
+                                " detected; running sync again",
+                                final_checksum,
+                                remote_checksum,
                             )
                             continue
-                        self.check_change(f"entry {entry!r} was modified/added")
-                    dest = self.repo / str(entry)
-                    if dest.is_dir():
-                        # File path is replacing a directory, which needs to be
-                        # deleted
-                        self.check_change(
-                            "path type conflict between server & backup for"
-                            f" {str(entry)!r}"
-                        )
-                        self.log.debug(
-                            "%s: deleting conflicting directory at same path",
-                            entry,
-                        )
-                        await self.rmtree(dest, local_paths)
-                    else:
-                        for ep in entry.parents:
-                            pp = self.repo / ep
-                            if pp.is_file() or pp.is_symlink():
-                                # Annexed file at parent path of `entry` needs
-                                # to be replaced with a directory
-                                self.check_change(
-                                    f"backup path {str(ep)!r} conflicts with"
-                                    f" server path {str(entry)!r}"
-                                )
-                                self.log.debug(
-                                    "%s: deleting conflicting file path %s",
-                                    entry,
-                                    ep,
-                                )
-                                await self.ds.remove(ep)
-                                local_paths.discard(ep)
-                                self.report.deleted += 1
-                                break
-                            elif pp.is_dir():
-                                break
-                    to_update = False
-                    if not (dest.exists() or dest.is_symlink()):
-                        self.check_change(f"entry {str(entry)!r} added")
-                        self.log.debug("%s: Not in dataset; will add", entry)
-                        to_update = True
-                        self.report.added += 1
-                    else:
-                        self.log.debug("%s: About to fetch hash from annex", entry)
-                        if entry.md5_digest == self.get_annex_hash(dest):
-                            self.log.debug(
-                                "%s: File in dataset, and hash shows no"
-                                " modification; will not update",
-                                entry,
-                            )
                         else:
-                            self.check_change(f"entry {str(entry)!r} modified")
-                            self.log.debug(
-                                "%s: Asset in dataset, and hash shows"
-                                " modification; will update",
-                                entry,
+                            raise RuntimeError(
+                                f"Zarr {self.zarr_id}: local checksum"
+                                f" {final_checksum!r} differs from remote"
+                                f" checksum {remote_checksum!r} after backup,"
+                                " and no change on server was detected"
                             )
-                            to_update = True
-                            self.report.updated += 1
-                    if to_update:
-                        await self.ds.remove(str(entry))
-                        key = await self.annex.mkkey(
-                            entry.name, entry.size, entry.md5_digest
-                        )
-                        remotes = await self.annex.get_key_remotes(key)
-                        await self.annex.from_key(key, str(entry))
-                        await self.register_url(str(entry), key, entry.bucket_url)
-                        prefix = quote_plus(str(entry))
-                        await self.register_url(
-                            str(entry),
-                            key,
-                            (
-                                f"{self.api_url}/zarr/{self.zarr_id}/files"
-                                f"?prefix={prefix}&download=true"
-                            ),
-                        )
-                        if (
-                            remotes is not None
-                            and self.backup_remote is not None
-                            and self.backup_remote not in remotes
-                        ):
-                            self.log.info(
-                                "%s: Not in backup remote %s", entry, self.backup_remote
-                            )
-        await self.prune_deleted(local_paths)
-        final_checksum = str(zcc.process())
-        modern_asset = await self.asset.refetch()
-        changed_during_sync = self.asset.modified != modern_asset.modified
-        if changed_during_sync:
-            self.log.info("`modified` timestamp on server changed during backup")
-            if orig_checksum != final_checksum:
-                self.log.info("Local content changed during sync")
-        remote_checksum = modern_asset.get_digest_value()
-        if remote_checksum is None:
-            self.log.info("Checksum still not available from server")
-        elif final_checksum != remote_checksum:
-            if changed_during_sync:
-                self.log.warning(
-                    "Zarr was modified during backup and there is a checksum"
-                    " mismatch: local=%s, remote=%s",
-                    final_checksum,
-                    remote_checksum,
-                )
-            else:
-                raise RuntimeError(
-                    f"Zarr {self.zarr_id}: local checksum {final_checksum!r}"
-                    f" differs from remote checksum {remote_checksum!r} after"
-                    " backup, and no change on server was detected"
-                )
+                break
         if self.get_stored_checksum() != final_checksum:
             self.check_change("checksum modified")
             self.log.info("Updating checksum file")
