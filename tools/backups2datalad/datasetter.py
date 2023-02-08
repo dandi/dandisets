@@ -25,7 +25,7 @@ from humanize import naturalsize
 from packaging.version import Version as PkgVersion
 
 from .adandi import AsyncDandiClient, RemoteDandiset, RemoteZarrAsset
-from .adataset import AssetsState, AsyncDataset, DatasetStats
+from .adataset import AssetsState, AsyncDataset
 from .aioutil import aruncmd, pool_amap
 from .config import BackupConfig, Mode
 from .consts import DEFAULT_BRANCH, GIT_OPTIONS
@@ -82,12 +82,9 @@ class DandiDatasetter(AsyncResource):
             workers=self.config.workers,
         )
         to_save: list[str] = []
-        ds_stats: list[DatasetStats] = []
-        for d, (changed, stats) in report.results:
+        for d, changed in report.results:
             if changed:
                 to_save.append(d.identifier)
-            if self.config.gh_org:
-                ds_stats.append(stats)
         if to_save:
             log.debug("Committing superdataset")
             superds.assert_no_duplicates_in_gitmodules()
@@ -98,8 +95,8 @@ class DandiDatasetter(AsyncResource):
             raise RuntimeError(
                 f"Backups for {quantify(len(report.failed), 'Dandiset')} failed"
             )
-        elif self.config.gh_org is not None and not dandiset_ids and exclude is None:
-            await self.set_superds_description(superds, ds_stats)
+        elif self.config.gh_org is not None:
+            await self.set_superds_description(superds)
 
     async def init_dataset(
         self, dsdir: Path, dandiset_id: str, create_time: datetime
@@ -126,10 +123,8 @@ class DandiDatasetter(AsyncResource):
 
     async def update_dandiset(
         self, dandiset: RemoteDandiset, ds: Optional[AsyncDataset] = None
-    ) -> tuple[bool, DatasetStats]:
-        # Returns:
-        # - true iff any changes were committed to the repository
-        # - the dataset stats for the dataset as a whole
+    ) -> bool:
+        # Returns true iff any changes were committed to the repository
         if ds is None:
             ds = await self.init_dataset(
                 self.config.dandiset_root / dandiset.identifier,
@@ -163,13 +158,15 @@ class DandiDatasetter(AsyncResource):
         await self.tag_releases(
             dandiset, ds, push=self.config.gh_org is not None, log=dmanager.log
         )
+        # Call `get_stats()` even if gh_org is None so that out-of-date stats
+        # get updated:
         stats = await ds.get_stats(config=dmanager.config)
         if self.config.gh_org is not None:
             if changed:
                 dmanager.log.info("Pushing to sibling")
                 await ds.push(to="github", jobs=self.config.jobs, data="nothing")
             await self.manager.set_dandiset_description(dandiset, stats, ds)
-        return (changed, stats)
+        return changed
 
     async def sync_dataset(
         self,
@@ -216,12 +213,10 @@ class DandiDatasetter(AsyncResource):
         dandiset_ids: Sequence[str],
         exclude: Optional[re.Pattern[str]],
     ) -> None:
-        ds_stats: list[DatasetStats] = []
         async for d in self.get_dandisets(dandiset_ids, exclude=exclude):
             ds = AsyncDataset(self.config.dandiset_root / d.identifier)
             stats = await ds.get_stats(config=self.config)
             await self.manager.set_dandiset_description(d, stats, ds)
-
             for sub_info in await ds.get_subdatasets():
                 # ATM we have only .zarr-like subdatasets
                 assert Path(sub_info["path"]).suffix in (".zarr", ".ngff")
@@ -230,10 +225,9 @@ class DandiDatasetter(AsyncResource):
                 await self.manager.set_zarr_description(
                     *(await AsyncDataset.get_zarr_sub_stats(sub_info, self.config))
                 )
-            ds_stats.append(stats)
         if not dandiset_ids and exclude is None:
             superds = AsyncDataset(self.config.dandiset_root)
-            await self.set_superds_description(superds, ds_stats)
+            await self.set_superds_description(superds)
 
     async def get_dandisets(
         self, dandiset_ids: Sequence[str], exclude: Optional[re.Pattern[str]]
@@ -249,14 +243,19 @@ class DandiDatasetter(AsyncResource):
                 else:
                     yield d
 
-    async def set_superds_description(
-        self, superds: AsyncDataset, ds_stats: list[DatasetStats]
-    ) -> None:
+    async def set_superds_description(self, superds: AsyncDataset) -> None:
         log.info("Setting repository description for superdataset")
         repo = await superds.get_ghrepo()
-        total_size = naturalsize(sum(s.size for s in ds_stats))
+        qty = 0
+        size = 0
+        for s in await superds.get_subdatasets():
+            qty += 1
+            ds = AsyncDataset(s["path"])
+            if (stats := await ds.get_stored_stats()) is not None:
+                size += stats.size
+        total_size = naturalsize(size)
         desc = (
-            f"{quantify(len(ds_stats), 'Dandiset')}, {total_size} total."
+            f"{quantify(qty, 'Dandiset')}, {total_size} total."
             "  DataLad super-dataset of all Dandisets from https://github.com/dandisets"
         )
         await self.manager.edit_github_repo(repo, description=desc)
