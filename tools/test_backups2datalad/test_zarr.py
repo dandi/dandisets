@@ -221,7 +221,7 @@ async def test_backup_zarr_pathological(
         f"{new_dandiset.dandiset.version_api_path}assets/",
         json={"metadata": {"path": "empty.zarr"}, "zarr_id": empty_zarr_id},
     )
-    await arequest(client.session, "POST", f"/zarr/{empty_zarr_id}/ingest/")
+    await arequest(client.session, "POST", f"/zarr/{empty_zarr_id}/finalize/")
     while True:
         sleep(2)
         r = await client.get(f"/zarr/{empty_zarr_id}/")
