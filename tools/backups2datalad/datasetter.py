@@ -358,10 +358,16 @@ class DandiDatasetter(AsyncResource):
         else:
             candidates = [commitish]
         matching = [c for c in candidates if await commit_has_assets(c)]
-        assert len(matching) < 2, (
-            f"Commits both before and after {dandiset.version.created} have"
-            " matching asset metadata"
-        )
+        if len(matching) > 1:
+            log.warning(
+                "While tagging version %s of Dandiset %s, found candidate"
+                " commits both before and after %s with matching asset"
+                " metadata: %s",
+                dandiset.version_id,
+                dandiset.identifier,
+                dandiset.version.created,
+                ", ".join(matching),
+            )
         if matching:
             log.info(
                 "Found commit %s with matching asset metadata;"
