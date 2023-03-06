@@ -433,52 +433,23 @@ async def populate(
     if await ds.populate_up_to_date():
         log.info("%s: no need to populate", desc)
         return
-    log.info("Downloading files for %s", desc)
-    await call_annex_json(
-        "get",
-        "-c",
-        "annex.retry=3",
-        "--jobs",
-        str(jobs),
-        "--from=web",
-        "--not",
-        "--in",
-        backup_remote,
-        "--and",
-        "--not",
-        "--in",
-        "here",
-        path=dirpath,
-    )
+
     i = 0
     while True:
-        log.info("Moving files for %s to backup remote", desc)
+        log.info("Copying files for %s to backup remote", desc)
         try:
             # everything but content of .dandi/ should be moved to backup
-            await call_annex_json(
-                "move",
-                "-c",
-                "annex.retry=3",
-                "--jobs",
-                str(jobs),
-                "--to",
-                backup_remote,
-                "--exclude",
-                ".dandi/*",
-                path=dirpath,
-            )
             await call_annex_json(
                 "copy",
                 "-c",
                 "annex.retry=3",
                 "--jobs",
                 str(jobs),
+                "--from=web",
                 "--to",
                 backup_remote,
-                "--not",
-                "--in",
-                backup_remote,
-                ".dandi/",
+                "--exclude",
+                ".dandi/*",
                 path=dirpath,
             )
         except RuntimeError as e:
