@@ -117,3 +117,9 @@ class GitHub(AsyncResource):
         # Retry on 404's in case we're calling this right after
         # create_github_sibling(), when the repo may not yet exist
         await arequest(self.client, "PATCH", repo.api_url, json=kwargs, retry_on=[404])
+
+    async def create_release(self, repo: GHRepo, tag: str) -> None:
+        log.debug("Creating GitHub release %s for %s", tag, repo)
+        await arequest(
+            self.client, "POST", f"{repo.api_url}/releases", json={"tag_name": tag}
+        )

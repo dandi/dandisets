@@ -418,6 +418,11 @@ class DandiDatasetter(AsyncResource):
         await ds.call_git("branch", "-D", f"release-{dandiset.version_id}")
         if push:
             await ds.call_git("push", "github", dandiset.version_id)
+            if self.config.gh_org is not None:
+                assert self.manager.gh is not None
+                await self.manager.gh.create_release(
+                    GHRepo(self.config.gh_org, dandiset.identifier), dandiset.version_id
+                )
 
     async def backup_zarrs(self, dandiset: str, partial_dir: Path) -> None:
         zarr_root = self.config.zarr_root
