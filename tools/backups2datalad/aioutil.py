@@ -118,9 +118,9 @@ async def arequest(
     **kwargs: Any,
 ) -> httpx.Response:
     waits = exp_wait(attempts=15, base=2)
-    # custom timeout if was not specified to wait longer  in hope to overcome 
+    # custom timeout if was not specified to wait longer  in hope to overcome
     # https://github.com/dandi/dandisets/issues/298 and alike
-    kwargs.setdefault('timeout', 60)
+    kwargs.setdefault("timeout", 60)
     while True:
         try:
             r = await client.request(method, url, follow_redirects=True, **kwargs)
@@ -190,11 +190,10 @@ async def aruncmd(
     *args: str | Path, **kwargs: Any
 ) -> subprocess.CompletedProcess[bytes]:
     argstrs = [str(a) for a in args]
+    desc = shlex.join(argstrs)
     if (cwd := kwargs.get("cwd")) is not None:
-        attrs = f" [cwd={cwd}]"
-    else:
-        attrs = ""
-    log.debug("Running: %s%s", shlex.join(argstrs), attrs)
+        desc += f" [cwd={cwd}]"
+    log.debug("Running: %s", desc)
     # Note: stdout/err will be output as ran and not along with the
     # exception if check was not set to False and command exits with
     # non-0 status leading to CalledProcessError -- hard to associate
@@ -202,7 +201,14 @@ async def aruncmd(
     # failed run/exception.
     kwargs.setdefault("stdout", None)
     kwargs.setdefault("stderr", None)
-    return await anyio.run_process(argstrs, **kwargs)
+    try:
+        r = await anyio.run_process(argstrs, **kwargs)
+    except subprocess.CalledProcessError as e:
+        log.debug("Finished [rc=%d]: %s", e.returncode, desc)
+        raise e
+    else:
+        log.debug("Finished [rc=%d]: %s", r.returncode, desc)
+        return r
 
 
 async def areadcmd(*args: str | Path, **kwargs: Any) -> str:
