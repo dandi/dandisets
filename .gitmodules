@@ -966,3 +966,27 @@
 	path = 000472
 	url = https://github.com/dandisets/000472.git
 	datalad-id = d9a81a37-5f14-436c-9d87-3ef0e3a72038
+[submodule "000473"]
+	path = 000473
+	url = https://github.com/dandisets/000473.git
+	datalad-id = edd9c91a-67f6-435b-9fbe-d0ed650b6cec
+[submodule "000474"]
+	path = 000474
+	url = https://github.com/dandisets/000474.git
+	datalad-id = 2e2da9c3-abe7-4150-9f88-0dddef2728d2
+[submodule "000476"]
+	path = 000476
+	url = https://github.com/dandisets/000476.git
+	datalad-id = 98a2c2d0-603f-4cc8-8c24-351e37554864
+[submodule "000477"]
+	path = 000477
+	url = https://github.com/dandisets/000477.git
+	datalad-id = dfc53759-6a4e-4315-90ac-646e95e96f18
+[submodule "000478"]
+	path = 000478
+	url = https://github.com/dandisets/000478.git
+	datalad-id = ba6ec0aa-cce5-4cc4-a31f-881ff7a7efc4
+[submodule "000479"]
+	path = 000479
+	url = https://github.com/dandisets/000479.git
+	datalad-id = 416626f4-2486-402f-b81e-75b84b764292
