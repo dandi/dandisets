@@ -7,6 +7,7 @@ import logging
 import math
 from pathlib import Path
 import shlex
+import ssl
 import subprocess
 import sys
 from typing import Any, Awaitable, Generic, Optional, TypeVar
@@ -125,8 +126,8 @@ async def arequest(
         try:
             r = await client.request(method, url, follow_redirects=True, **kwargs)
             r.raise_for_status()
-        except httpx.HTTPError as e:
-            if isinstance(e, httpx.RequestError) or (
+        except (httpx.HTTPError, ssl.SSLError) as e:
+            if isinstance(e, (httpx.RequestError, ssl.SSLError)) or (
                 isinstance(e, httpx.HTTPStatusError)
                 and (
                     e.response.status_code >= 500 or e.response.status_code in retry_on
