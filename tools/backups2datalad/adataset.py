@@ -36,7 +36,9 @@ else:
 class AsyncDataset:
     ds: Dataset = field(init=False)
     dirpath: InitVar[str | Path]
-    lock: anyio.Lock = field(init=False, default_factory=anyio.Lock)
+    lock: anyio.Semaphore = field(
+        init=False, default_factory=lambda: anyio.Semaphore(1)
+    )
 
     def __post_init__(self, dirpath: str | Path) -> None:
         self.ds = Dataset(dirpath)
