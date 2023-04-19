@@ -2,8 +2,6 @@
 # Just the update portion
 source "$(dirname "$0")"/backups2datalad-cron-common
 
-# 000026 is excluded for https://github.com/dandi/dandisets/issues/342 to be addressed first
-
 (
 python -m tools.backups2datalad \
    -l WARNING \
@@ -11,7 +9,7 @@ python -m tools.backups2datalad \
    --config tools/backups2datalad.cfg.yaml \
    update-from-backup \
    --workers 5 \
-   -e '000(026|108)$' \
+   -e '000108$' \
    "$@" 2>&1 | grep -v 'nothing to save, working tree clean'
 
 git pull --commit --no-edit
