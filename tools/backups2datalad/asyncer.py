@@ -378,10 +378,20 @@ class Downloader:
         async with self.addurl.p.stdin:
             async with self.download_receiver:
                 async for td in self.download_receiver:
+                    if not self.in_progress:
+                        # Lock dataset while there are any downloads in
+                        # progress in order to prevent conflicts with `git rm`.
+                        await self.ds.lock.acquire()
                     self.in_progress[td.path] = td
                     self.log.info("%s: Downloading from %s", td.path, td.url)
                     await self.addurl.send(f"{td.url} {td.path}\n")
                 self.log.debug("Done feeding URLs to addurl")
+
+    def pop_in_progress(self, path: str) -> ToDownload:
+        val = self.in_progress.pop(path)
+        if not self.in_progress:
+            self.ds.lock.release()
+        return val
 
     async def read_addurl(self) -> None:
         async with aclosing(self.addurl) as lineiter:
@@ -399,7 +409,7 @@ class Downloader:
                 elif not data["success"]:
                     msg = format_errors(data["error-messages"])
                     self.log.error("%s: download failed:%s", data["file"], msg)
-                    self.in_progress.pop(data["file"])
+                    self.pop_in_progress(data["file"])
                     if "exited 123" in msg:
                         self.log.info(
                             "Will try `git add`ing %s manually later", data["file"]
@@ -412,7 +422,7 @@ class Downloader:
                     key = data.get("key")
                     self.log.info("%s: Finished downloading (key = %s)", path, key)
                     self.report.downloaded += 1
-                    dl = self.in_progress.pop(path)
+                    dl = self.pop_in_progress(path)
                     self.tracker.finish_asset(dl.path)
                     self.nursery.start_soon(
                         self.check_unannexed_hash,

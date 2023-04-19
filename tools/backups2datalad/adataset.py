@@ -36,7 +36,9 @@ else:
 class AsyncDataset:
     ds: Dataset = field(init=False)
     dirpath: InitVar[str | Path]
-    lock: anyio.Lock = field(init=False, default_factory=anyio.Lock)
+    lock: anyio.Semaphore = field(
+        init=False, default_factory=lambda: anyio.Semaphore(1)
+    )
 
     def __post_init__(self, dirpath: str | Path) -> None:
         self.ds = Dataset(dirpath)
@@ -231,9 +233,6 @@ class AsyncDataset:
         await self.call_annex("add", path)
 
     async def remove(self, path: str) -> None:
-        # to avoid problems with locking etc. Same is done in DataLad's invocation
-        # of rm
-        self.ds.repo.precommit()
         # `path` must be relative to the root of the dataset
         try:
             async with self.lock:
