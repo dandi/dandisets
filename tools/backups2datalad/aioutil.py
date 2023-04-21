@@ -10,6 +10,7 @@ import shlex
 import ssl
 import subprocess
 import sys
+import textwrap
 from typing import Any, Awaitable, Generic, Optional, TypeVar
 
 import anyio
@@ -195,17 +196,24 @@ async def aruncmd(
     if (cwd := kwargs.get("cwd")) is not None:
         desc += f" [cwd={cwd}]"
     log.debug("Running: %s", desc)
-    # Note: stdout/err will be output as ran and not along with the
-    # exception if check was not set to False and command exits with
-    # non-0 status leading to CalledProcessError -- hard to associate
-    # the output produced by the command (might be an error) with the
-    # failed run/exception.
-    kwargs.setdefault("stdout", None)
-    kwargs.setdefault("stderr", None)
+    kwargs["stdout"] = subprocess.PIPE
+    kwargs.setdefault("stderr", subprocess.PIPE)
     try:
         r = await anyio.run_process(argstrs, **kwargs)
     except subprocess.CalledProcessError as e:
-        log.debug("Finished [rc=%d]: %s", e.returncode, desc)
+        label = "Stdout" if e.stderr is not None else "Output"
+        stdout = e.stdout.decode("utf-8", "surrogateescape")
+        if stdout:
+            output = f"{label}:\n\n" + textwrap.indent(stdout, " " * 4)
+        else:
+            output = f"{label}: <empty>"
+        if e.stderr is not None:
+            stderr = e.stderr.decode("utf-8", "surrogateescape")
+            if stderr:
+                output += "\n\nStderr:\n\n" + textwrap.indent(stderr, " " * 4)
+            else:
+                output += "\n\nStderr: <empty>"
+        log.warning("Failed [rc=%d]: %s\n\n%s", e.returncode, desc, output)
         raise e
     else:
         log.debug("Finished [rc=%d]: %s", r.returncode, desc)
