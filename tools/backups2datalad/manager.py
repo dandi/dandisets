@@ -114,9 +114,13 @@ class GitHub(AsyncResource):
 
     async def edit_repo(self, repo: GHRepo, **kwargs: Any) -> None:
         log.debug("Editing repository %s", repo)
+        # Retry on 403's - very rarely we hit it (may be some race somewhere),
+        # see https://github.com/dandi/dandisets/issues/283 .
         # Retry on 404's in case we're calling this right after
         # create_github_sibling(), when the repo may not yet exist
-        await arequest(self.client, "PATCH", repo.api_url, json=kwargs, retry_on=[404])
+        await arequest(
+            self.client, "PATCH", repo.api_url, json=kwargs, retry_on=[403, 404]
+        )
 
     async def create_release(self, repo: GHRepo, tag: str) -> None:
         log.debug("Creating GitHub release %s for %s", tag, repo)
