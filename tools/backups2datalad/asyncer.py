@@ -436,42 +436,41 @@ class Downloader:
 
     async def read_addurl(self) -> None:
         assert self.addurl is not None
-        async with aclosing(self.addurl) as lineiter:
-            async for line in lineiter:
-                data = json.loads(line)
-                if "byte-progress" in data:
-                    # Progress message
+        async for line in self.addurl:
+            data = json.loads(line)
+            if "byte-progress" in data:
+                # Progress message
+                self.log.info(
+                    "%s: Downloaded %d / %s bytes (%s)",
+                    data["action"]["file"],
+                    data["byte-progress"],
+                    data.get("total-size", "???"),
+                    data.get("percent-progress", "??.??%"),
+                )
+            elif not data["success"]:
+                msg = format_errors(data["error-messages"])
+                self.log.error("%s: download failed:%s", data["file"], msg)
+                self.pop_in_progress(data["file"])
+                if "exited 123" in msg:
                     self.log.info(
-                        "%s: Downloaded %d / %s bytes (%s)",
-                        data["action"]["file"],
-                        data["byte-progress"],
-                        data.get("total-size", "???"),
-                        data.get("percent-progress", "??.??%"),
+                        "Will try `git add`ing %s manually later", data["file"]
                     )
-                elif not data["success"]:
-                    msg = format_errors(data["error-messages"])
-                    self.log.error("%s: download failed:%s", data["file"], msg)
-                    self.pop_in_progress(data["file"])
-                    if "exited 123" in msg:
-                        self.log.info(
-                            "Will try `git add`ing %s manually later", data["file"]
-                        )
-                        self.need_add.append(data["file"])
-                    else:
-                        self.report.failed += 1
+                    self.need_add.append(data["file"])
                 else:
-                    path = data["file"]
-                    key = data.get("key")
-                    self.log.info("%s: Finished downloading (key = %s)", path, key)
-                    self.report.downloaded += 1
-                    dl = self.pop_in_progress(path)
-                    self.tracker.finish_asset(dl.path)
-                    self.nursery.start_soon(
-                        self.check_unannexed_hash,
-                        dl.path,
-                        dl.sha256_digest,
-                        name=f"check_unannexed_hash:{dl.path}",
-                    )
+                    self.report.failed += 1
+            else:
+                path = data["file"]
+                key = data.get("key")
+                self.log.info("%s: Finished downloading (key = %s)", path, key)
+                self.report.downloaded += 1
+                dl = self.pop_in_progress(path)
+                self.tracker.finish_asset(dl.path)
+                self.nursery.start_soon(
+                    self.check_unannexed_hash,
+                    dl.path,
+                    dl.sha256_digest,
+                    name=f"check_unannexed_hash:{dl.path}",
+                )
         self.log.debug("Done reading from addurl")
 
     async def register_url(self, path: str, key: str, url: str) -> None:
