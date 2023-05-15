@@ -233,12 +233,12 @@ class AsyncDataset:
         await self.call_annex("add", path)
 
     async def remove(self, path: str) -> None:
-        # to avoid problems with locking etc. Same is done in DataLad's invocation
-        # of rm
-        self.ds.repo.precommit()
         # `path` must be relative to the root of the dataset
-        try:
-            async with self.lock:
+        async with self.lock:
+            # to avoid problems with locking etc. Same is done in DataLad's
+            # invocation of rm
+            self.ds.repo.precommit()
+            try:
                 await self.call_git(
                     "rm",
                     "-f",
@@ -248,34 +248,34 @@ class AsyncDataset:
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                 )
-        except subprocess.CalledProcessError as e:
-            lockfile = self.pathobj / ".git" / "index.lock"
-            output = e.stdout.decode("utf-8")
-            if lockfile.exists() and str(lockfile) in output:
-                r = await aruncmd(
-                    "fuser",
-                    "-v",
-                    lockfile,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    check=False,
-                )
-                log.error(
-                    "%s: Unable to remove %s due to lockfile; `fuser -v` output"
-                    " on lockfile (return code %d):\n%s",
-                    self.pathobj,
-                    path,
-                    r.returncode,
-                    textwrap.indent(r.stdout.decode("utf-8"), "> "),
-                )
-            else:
-                log.error(
-                    "%s: `git rm` on %s failed with output:\n%s",
-                    self.pathobj,
-                    path,
-                    textwrap.indent(output, "> "),
-                )
-            raise
+            except subprocess.CalledProcessError as e:
+                lockfile = self.pathobj / ".git" / "index.lock"
+                output = e.stdout.decode("utf-8")
+                if lockfile.exists() and str(lockfile) in output:
+                    r = await aruncmd(
+                        "fuser",
+                        "-v",
+                        lockfile,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        check=False,
+                    )
+                    log.error(
+                        "%s: Unable to remove %s due to lockfile; `fuser -v`"
+                        " output on lockfile (return code %d):\n%s",
+                        self.pathobj,
+                        path,
+                        r.returncode,
+                        textwrap.indent(r.stdout.decode("utf-8"), "> "),
+                    )
+                else:
+                    log.error(
+                        "%s: `git rm` on %s failed with output:\n%s",
+                        self.pathobj,
+                        path,
+                        textwrap.indent(output, "> "),
+                    )
+                raise
 
     async def update(self, how: str, sibling: Optional[str] = None) -> None:
         await anyio.to_thread.run_sync(
