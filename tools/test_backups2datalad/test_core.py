@@ -357,9 +357,9 @@ async def test_4(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
         }
 
 
-async def test_binary(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
+async def test_binary(new_dandiset: SampleDandiset, tmp_path: Path) -> None:
     di = DandiDatasetter(
-        dandi_client=text_dandiset.client,
+        dandi_client=new_dandiset.client,
         config=BackupConfig(
             backup_root=tmp_path,
             dandi_instance="dandi-staging",
@@ -367,12 +367,12 @@ async def test_binary(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
             enable_tags=True,
         ),
     )
-    text_dandiset.add_blob("data.dat", b"\0\1\2\3\4\5")
-    await text_dandiset.upload()
-    dandiset_id = text_dandiset.dandiset_id
+    new_dandiset.add_blob("data.dat", b"\0\1\2\3\4\5")
+    await new_dandiset.upload()
+    dandiset_id = new_dandiset.dandiset_id
     log.info("test_binary: Syncing test dandiset")
     await di.update_from_backup([dandiset_id])
-    await text_dandiset.check_backup(Dataset(tmp_path / "dandisets" / dandiset_id))
+    await new_dandiset.check_backup(Dataset(tmp_path / "dandisets" / dandiset_id))
 
 
 async def test_custom_commit_date(tmp_path: Path) -> None:

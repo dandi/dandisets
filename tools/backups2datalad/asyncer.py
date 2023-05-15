@@ -11,6 +11,7 @@ import os.path
 from pathlib import Path, PurePosixPath
 import subprocess
 import sys
+from types import TracebackType
 from typing import AsyncGenerator, AsyncIterator, Optional
 from urllib.parse import urlparse, urlunparse
 
@@ -110,7 +111,6 @@ class Report:
 @dataclass
 class Downloader:
     dandiset_id: str
-    addurl: TextProcess
     ds: AsyncDataset
     manager: Manager
     tracker: AssetTracker
@@ -118,6 +118,8 @@ class Downloader:
     annex: AsyncAnnex
     nursery: anyio.abc.TaskGroup
     error_on_change: bool = False
+    addurl: Optional[TextProcess] = None
+    addurl_lock: anyio.Lock = field(init=False, default_factory=anyio.Lock)
     last_timestamp: Optional[datetime] = None
     report: Report = field(init=False, default_factory=Report)
     in_progress: dict[str, ToDownload] = field(init=False, default_factory=dict)
@@ -143,6 +145,23 @@ class Downloader:
     @property
     def repo(self) -> Path:
         return self.ds.pathobj
+
+    async def __aenter__(self) -> Downloader:
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: Optional[type[BaseException]],
+        _exc_val: Optional[BaseException],
+        _exc_tb: Optional[TracebackType],
+    ) -> None:
+        if exc_type is None:
+            if self.addurl is not None:
+                await self.addurl.aclose()
+        else:
+            with anyio.CancelScope(shield=True):
+                if self.addurl is not None:
+                    await self.addurl.force_aclose()
 
     async def asset_loop(self, aia: AsyncIterator[Optional[RemoteAsset]]) -> None:
         now = datetime.now(timezone.utc)
@@ -294,6 +313,7 @@ class Downloader:
                         asset.path,
                         bucket_url,
                     )
+                    await self.ensure_addurl()
                     await sender.send(
                         ToDownload(
                             path=asset.path,
@@ -373,7 +393,28 @@ class Downloader:
             )
             return await self.asha256(filepath)
 
+    async def ensure_addurl(self) -> None:
+        async with self.addurl_lock:
+            if self.addurl is None:
+                self.addurl = await open_git_annex(
+                    "addurl",
+                    "-c",
+                    "annex.alwayscompact=false",
+                    "--batch",
+                    "--with-files",
+                    "--jobs",
+                    str(self.manager.config.jobs),
+                    "--json",
+                    "--json-error-messages",
+                    "--json-progress",
+                    "--raw",
+                    path=self.ds.pathobj,
+                )
+                self.nursery.start_soon(self.feed_addurl)
+                self.nursery.start_soon(self.read_addurl)
+
     async def feed_addurl(self) -> None:
+        assert self.addurl is not None
         assert self.addurl.p.stdin is not None
         async with self.addurl.p.stdin:
             async with self.download_receiver:
@@ -394,6 +435,7 @@ class Downloader:
         return val
 
     async def read_addurl(self) -> None:
+        assert self.addurl is not None
         async with aclosing(self.addurl) as lineiter:
             async for line in lineiter:
                 data = json.loads(line)
@@ -478,25 +520,11 @@ async def async_assets(
     async with aclosing(aiterassets(dandiset, done_flag)) as aia:
         while not done_flag.is_set():
             try:
-                async with await open_git_annex(
-                    "addurl",
-                    "-c",
-                    "annex.alwayscompact=false",
-                    "--batch",
-                    "--with-files",
-                    "--jobs",
-                    str(manager.config.jobs),
-                    "--json",
-                    "--json-error-messages",
-                    "--json-progress",
-                    "--raw",
-                    path=ds.pathobj,
-                ) as p, AsyncAnnex(ds.pathobj) as annex, httpx.AsyncClient(
+                async with AsyncAnnex(ds.pathobj) as annex, httpx.AsyncClient(
                     headers={"User-Agent": USER_AGENT}
                 ) as s3client, anyio.create_task_group() as nursery:
                     dm = Downloader(
                         dandiset_id=dandiset.identifier,
-                        addurl=p,
                         ds=ds,
                         manager=manager,
                         tracker=tracker,
@@ -505,9 +533,8 @@ async def async_assets(
                         nursery=nursery,
                         error_on_change=error_on_change,
                     )
-                    nursery.start_soon(dm.asset_loop, aia)
-                    nursery.start_soon(dm.feed_addurl)
-                    nursery.start_soon(dm.read_addurl)
+                    async with dm:
+                        nursery.start_soon(dm.asset_loop, aia)
             finally:
                 tracker.dump()
 
