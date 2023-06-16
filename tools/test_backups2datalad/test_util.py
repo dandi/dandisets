@@ -46,6 +46,9 @@ class GitRepo:
     def get_commit_subject(self, commitish: str) -> str:
         return self.readcmd("show", "-s", "--format=%s", f"{commitish}^{{commit}}")
 
+    def get_commit_message(self, commitish: str) -> str:
+        return self.readcmd("show", "-s", "--format=%B", f"{commitish}^{{commit}}")
+
     def get_commitish_hash(self, commitish: str) -> str:
         return self.readcmd("rev-parse", f"{commitish}^{{commit}}")
 

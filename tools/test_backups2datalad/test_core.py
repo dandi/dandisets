@@ -37,7 +37,7 @@ async def test_1(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
 
     dandisets_root = tmp_path / "dandisets"
 
-    with pytest.raises(Exception):
+    with pytest.raises(Exception):  # noqa: B017
         log.info("test_1: Testing sync of nonexistent Dandiset")
         await di.update_from_backup(["999999"])
     assert not (dandisets_root / "999999").exists()
@@ -163,6 +163,7 @@ async def test_2(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
     dandiset = text_dandiset.dandiset
     log.info("test_2: Creating new backup of Dandiset")
     await di.update_from_backup([dandiset_id])
+    superrepo = GitRepo(tmp_path / "dandisets")
     backupdir = tmp_path / "dandisets" / dandiset_id
     repo = GitRepo(backupdir)
 
@@ -217,6 +218,23 @@ async def test_2(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
         assert repo.get_asset_files(c) == {
             asset["path"] for asset in repo.get_assets_json(c)
         }
+
+    commits = superrepo.readcmd("rev-list", "HEAD").splitlines()
+    assert superrepo.get_commit_message(commits[0]) == (
+        f"1 updated ({dandiset_id})\n"
+        "\n"
+        f"{dandiset_id}:\n"
+        " - [backups2datalad] 1 file deleted\n"
+        " - [backups2datalad] 2 files added, 1 file updated"
+    )
+    assert superrepo.get_commit_message(commits[-3]) == (
+        f"1 added ({dandiset_id})\n"
+        "\n"
+        f"{dandiset_id}:\n"
+        " - [backups2datalad] 5 files added\n"
+        " - Instruct annex to add text files to Git\n"
+        " - [DATALAD] new dataset"
+    )
 
 
 async def test_3(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
