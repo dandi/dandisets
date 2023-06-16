@@ -221,14 +221,14 @@ async def test_2(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
 
     commits = superrepo.readcmd("rev-list", "HEAD").splitlines()
     assert superrepo.get_commit_message(commits[0]) == (
-        f"dandisets: 1 updated ({dandiset_id})\n"
+        f"1 updated ({dandiset_id})\n"
         "\n"
         f"{dandiset_id}:\n"
         " - [backups2datalad] 1 file deleted\n"
         " - [backups2datalad] 2 files added, 1 file updated"
     )
     assert superrepo.get_commit_message(commits[-3]) == (
-        f"dandisets: 1 added ({dandiset_id})\n"
+        f"1 added ({dandiset_id})\n"
         "\n"
         f"{dandiset_id}:\n"
         " - [backups2datalad] 5 files added\n"
