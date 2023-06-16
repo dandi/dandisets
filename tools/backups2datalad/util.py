@@ -13,7 +13,7 @@ from types import TracebackType
 from typing import TYPE_CHECKING, Any, Iterator, Optional, Type
 
 from dandi.consts import dandiset_metadata_file
-from dandi.dandiset import APIDandiset
+from dandi.dandiset import Dandiset
 from datalad.api import Dataset
 from datalad.support.json_py import dump
 
@@ -181,7 +181,7 @@ async def update_dandiset_metadata(
     log.info("Updating metadata file")
     (ds.pathobj / dandiset_metadata_file).unlink(missing_ok=True)
     metadata = await dandiset.aget_raw_metadata()
-    APIDandiset(ds.pathobj, allow_empty=True).update_metadata(metadata)
+    Dandiset(ds.pathobj, allow_empty=True).update_metadata(metadata)
     await ds.add(dandiset_metadata_file)
 
 
