@@ -89,7 +89,7 @@ class DandiDatasetter(AsyncResource):
         if to_save:
             log.debug("Committing superdataset")
             superds.assert_no_duplicates_in_gitmodules()
-            msg = await self.get_superds_commit_message(superds)
+            msg = await self.get_superds_commit_message(superds, to_save)
             await superds.save(message=msg, path=to_save)
             superds.assert_no_duplicates_in_gitmodules()
             log.debug("Superdataset committed")
@@ -560,13 +560,21 @@ class DandiDatasetter(AsyncResource):
         root.addHandler(handler)
         log.info("Saving logs to %s", self.logfile)
 
-    async def get_superds_commit_message(self, superds: AsyncDataset) -> str:
+    async def get_superds_commit_message(
+        self, superds: AsyncDataset, submodules: list[str]
+    ) -> str:
         added = []
         modified = []
         other = False
         for entry in split_terminated(
             await superds.read_git(
-                "status", "--porcelain", "--ignore-submodules=dirty", "-z", strip=False
+                "status",
+                "--porcelain",
+                "--ignore-submodules=dirty",
+                "-z",
+                "--",
+                *[f":(literal){p}" for p in submodules],
+                strip=False,
             ),
             "\0",
         ):
