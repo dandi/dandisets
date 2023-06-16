@@ -220,11 +220,14 @@ async def aruncmd(
         return r
 
 
-async def areadcmd(*args: str | Path, **kwargs: Any) -> str:
+async def areadcmd(*args: str | Path, strip: bool = True, **kwargs: Any) -> str:
     kwargs["stdout"] = subprocess.PIPE
     kwargs.setdefault("stderr", None)
     r = await aruncmd(*args, **kwargs)
-    return r.stdout.decode("utf-8").strip()
+    s = r.stdout.decode("utf-8")
+    if strip:
+        s = s.strip()
+    return s
 
 
 async def stream_null_command(

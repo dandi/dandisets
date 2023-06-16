@@ -22,6 +22,7 @@ from dandi.exceptions import NotFoundError
 from datalad.api import clone
 from ghrepo import GHRepo
 from humanize import naturalsize
+from linesep import split_terminated
 from packaging.version import Version as PkgVersion
 
 from .adandi import AsyncDandiClient, RemoteDandiset, RemoteZarrAsset
@@ -88,7 +89,8 @@ class DandiDatasetter(AsyncResource):
         if to_save:
             log.debug("Committing superdataset")
             superds.assert_no_duplicates_in_gitmodules()
-            await superds.save(message="CRON update", path=to_save)
+            msg = await self.get_superds_commit_message(superds)
+            await superds.save(message=msg, path=to_save)
             superds.assert_no_duplicates_in_gitmodules()
             log.debug("Superdataset committed")
         if report.failed:
@@ -557,3 +559,72 @@ class DandiDatasetter(AsyncResource):
         handler.setFormatter(fmter)
         root.addHandler(handler)
         log.info("Saving logs to %s", self.logfile)
+
+    async def get_superds_commit_message(self, superds: AsyncDataset) -> str:
+        added = []
+        modified = []
+        other = False
+        for entry in split_terminated(
+            await superds.read_git(
+                "status", "--porcelain", "--ignore-submodules=dirty", "-z", strip=False
+            ),
+            "\0",
+        ):
+            status = entry[:2]
+            path = entry[3:].rstrip("/")
+            if status[0] == "A" or status == "??":
+                added.append(path)
+            elif status[0] == "M" or status[1] == "M":
+                modified.append(path)
+            else:
+                other = True
+        added_datasets: dict[str, list[str]] = {}
+        modified_datasets: dict[str, list[str]] = {}
+        for path in added:
+            if (superds.pathobj / path / ".git").exists():
+                commits = (
+                    await AsyncDataset(superds.pathobj / path).read_git(
+                        "log", "--format=%s"
+                    )
+                ).splitlines()
+                added_datasets[path] = commits
+            else:
+                other = True
+        for path in modified:
+            if (superds.pathobj / path / ".git").exists():
+                # Assumes the changes to the submodule have not been "git
+                # add"ed
+                last_commit = await superds.read_git(
+                    "ls-files", "--format=%(objectname)", "--", path
+                )
+                commits = (
+                    await AsyncDataset(superds.pathobj / path).read_git(
+                        "log", "--format=%s", f"{last_commit}.."
+                    )
+                ).splitlines()
+                modified_datasets[path] = commits
+            else:
+                other = True
+        msg = ""
+        if added_datasets:
+            msg += f"{len(added_datasets)} added"
+            if len(added_datasets) <= 3:
+                msg += " (" + ", ".join(sorted(added_datasets.keys())) + ")"
+        if modified_datasets:
+            if msg:
+                msg += ", "
+            msg += f"{len(modified_datasets)} updated"
+            if len(modified_datasets) <= 3:
+                msg += " (" + ", ".join(sorted(modified_datasets.keys())) + ")"
+        if other:
+            if msg:
+                msg += "; "
+            msg += "other updates"
+        if not msg:
+            msg = "unknown updates"
+        msg = f"dandisets: {msg}"
+        for path, commits in sorted({**added_datasets, **modified_datasets}.items()):
+            msg += f"\n\n{path}:"
+            for c in commits:
+                msg += f"\n - {c}"
+        return msg
