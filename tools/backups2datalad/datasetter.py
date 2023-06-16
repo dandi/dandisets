@@ -592,10 +592,10 @@ class DandiDatasetter(AsyncResource):
                 other = True
         for path in modified:
             if (superds.pathobj / path / ".git").exists():
-                # Assumes the changes to the submodule have not been "git
-                # add"ed
-                last_commit = await superds.read_git(
-                    "ls-files", "--format=%(objectname)", "--", path
+                last_commit = (
+                    (await superds.read_git("ls-tree", "-z", "HEAD", "--", path))
+                    .partition("\t")[0]
+                    .split()[2]
                 )
                 commits = (
                     await AsyncDataset(superds.pathobj / path).read_git(
