@@ -621,8 +621,7 @@ class DandiDatasetter(AsyncResource):
                 msg += "; "
             msg += "other updates"
         if not msg:
-            msg = "unknown updates"
-        msg = f"dandisets: {msg}"
+            msg = "miscellaneous changes"
         for path, commits in sorted({**added_datasets, **modified_datasets}.items()):
             msg += f"\n\n{path}:"
             for c in commits:
