@@ -218,7 +218,7 @@ class RemoteDandiset(SyncRemoteDandiset):
         start = time()
         while time() - start < max_time:
             r = await self.aclient.get(f"{self.version_api_path}info/")
-            if r["status"] == "Valid":
+            if r["status"] == "Valid" and not r.get("asset_validation_errors"):
                 return
             await anyio.sleep(0.5)
         about = {
