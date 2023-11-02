@@ -7,4 +7,4 @@ eval python -m tools.backups2datalad \
    --backup-root "$backup_root" \
    --config tools/backups2datalad.cfg.yaml \
    update-from-backup \
-   '000108'
+   '0000026' '000108' '000243'
