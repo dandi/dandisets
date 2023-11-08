@@ -8,6 +8,7 @@ nox.options.stop_on_first_error = True
 def typing(session):
     session.install("-r", "backups2datalad.req.txt")
     session.install("-r", "get-upload-stats.req.txt")
+    session.install("pytest", "zarr")
     # trio-typing contains the stubs for async_generator
     session.install(
         "mypy", "trio-typing", "types-aiobotocore[s3]", "types-python-dateutil"
