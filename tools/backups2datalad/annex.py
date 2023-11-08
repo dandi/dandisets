@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import AsyncGenerator
 from contextlib import aclosing
 from dataclasses import dataclass, field
 import json
 from pathlib import Path
 from types import TracebackType
-from typing import AsyncGenerator, Optional
 
 import anyio
 
@@ -20,10 +20,10 @@ from .util import format_errors
 class AsyncAnnex:
     repo: Path
     digest_type: str = "SHA256"
-    pfromkey: Optional[TextProcess] = None
-    pexaminekey: Optional[TextProcess] = None
-    pwhereis: Optional[TextProcess] = None
-    pregisterurl: Optional[TextProcess] = None
+    pfromkey: TextProcess | None = None
+    pexaminekey: TextProcess | None = None
+    pwhereis: TextProcess | None = None
+    pregisterurl: TextProcess | None = None
     locks: dict[str, anyio.Lock] = field(
         init=False, default_factory=lambda: defaultdict(anyio.Lock)
     )
@@ -33,9 +33,9 @@ class AsyncAnnex:
 
     async def __aexit__(
         self,
-        exc_type: Optional[type[BaseException]],
-        _exc_val: Optional[BaseException],
-        _exc_tb: Optional[TracebackType],
+        exc_type: type[BaseException] | None,
+        _exc_val: BaseException | None,
+        _exc_tb: TracebackType | None,
     ) -> None:
         if exc_type is None:
             for p in [
@@ -94,7 +94,7 @@ class AsyncAnnex:
             )
             return (await self.pexaminekey.receive()).strip()
 
-    async def get_key_remotes(self, key: str) -> Optional[list[str]]:
+    async def get_key_remotes(self, key: str) -> list[str] | None:
         # Returns None if key is not known to git-annex
         async with self.locks["whereis"]:
             if self.pwhereis is None:

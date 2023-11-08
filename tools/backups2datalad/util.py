@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import datetime
 import json
@@ -10,7 +11,7 @@ import random
 import sys
 import textwrap
 from types import TracebackType
-from typing import TYPE_CHECKING, Any, Iterator, Optional, Type
+from typing import TYPE_CHECKING, Any
 
 from dandi.consts import dandiset_metadata_file
 from dandi.dandiset import Dandiset
@@ -63,7 +64,7 @@ class AssetTracker:
             filepath=filepath, local_assets=local_assets, asset_metadata=asset_metadata
         )
 
-    def register_asset(self, asset: RemoteAsset, force: Optional[str]) -> bool:
+    def register_asset(self, asset: RemoteAsset, force: str | None) -> bool:
         # Returns True if the asset's metadata has changed (or if we should act
         # like it's changed) since the last sync
         self.local_assets.discard(asset.path)
@@ -72,7 +73,7 @@ class AssetTracker:
         return adict != self.asset_metadata.get(asset.path) or force == "assets-update"
 
     def register_asset_by_timestamp(
-        self, asset: RemoteAsset, force: Optional[str]
+        self, asset: RemoteAsset, force: str | None
     ) -> bool:
         # Returns True if the asset's `modified` timestamp has changed (or if
         # we should act like it's changed) since the last sync
@@ -117,7 +118,7 @@ class AssetTracker:
         return len(self.future_assets)
 
 
-def custom_commit_env(dt: Optional[datetime]) -> dict[str, str]:
+def custom_commit_env(dt: datetime | None) -> dict[str, str]:
     env = os.environ.copy()
     if dt is not None:
         env["GIT_AUTHOR_NAME"] = "DANDI User"
@@ -153,7 +154,7 @@ def is_interactive() -> bool:
 
 
 def pdb_excepthook(
-    exc_type: Type[BaseException], exc_value: BaseException, tb: Optional[TracebackType]
+    exc_type: type[BaseException], exc_value: BaseException, tb: TracebackType | None
 ) -> None:
     import traceback
 
@@ -185,7 +186,7 @@ async def update_dandiset_metadata(
     await ds.add(dandiset_metadata_file)
 
 
-def quantify(qty: int, singular: str, plural: Optional[str] = None) -> str:
+def quantify(qty: int, singular: str, plural: str | None = None) -> str:
     if qty == 1:
         return f"{qty} {singular}"
     elif plural is None:
@@ -210,7 +211,7 @@ def format_errors(messages: list[str]) -> str:
 def exp_wait(
     base: float = 1.25,
     multiplier: float = 1,
-    attempts: Optional[int] = None,
+    attempts: int | None = None,
     jitter: float = 0.1,
 ) -> Iterator[float]:
     """
@@ -231,7 +232,7 @@ def exp_wait(
         n += 1
 
 
-def maxdatetime(state: Optional[datetime], candidate: datetime) -> datetime:
+def maxdatetime(state: datetime | None, candidate: datetime) -> datetime:
     if state is None or state < candidate:
         return candidate
     else:

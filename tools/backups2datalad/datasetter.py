@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator, Sequence
 from contextlib import aclosing
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -13,7 +14,6 @@ import re
 import shutil
 from socket import gethostname
 import subprocess
-from typing import AsyncGenerator, Optional, Sequence
 
 import anyio
 from anyio.abc import AsyncResource
@@ -42,7 +42,7 @@ class DandiDatasetter(AsyncResource):
     dandi_client: AsyncDandiClient
     manager: Manager = field(init=False)
     config: BackupConfig
-    logfile: Optional[Path] = None
+    logfile: Path | None = None
 
     def __post_init__(self) -> None:
         if self.config.gh_org is not None:
@@ -69,7 +69,7 @@ class DandiDatasetter(AsyncResource):
     async def update_from_backup(
         self,
         dandiset_ids: Sequence[str] = (),
-        exclude: Optional[re.Pattern[str]] = None,
+        exclude: re.Pattern[str] | None = None,
     ) -> None:
         superds = await self.ensure_superdataset()
         report = await pool_amap(
@@ -119,7 +119,7 @@ class DandiDatasetter(AsyncResource):
                 )
 
     async def update_dandiset(
-        self, dandiset: RemoteDandiset, ds: Optional[AsyncDataset] = None
+        self, dandiset: RemoteDandiset, ds: AsyncDataset | None = None
     ) -> bool:
         # Returns true iff any changes were committed to the repository
         if ds is None:
@@ -208,7 +208,7 @@ class DandiDatasetter(AsyncResource):
     async def update_github_metadata(
         self,
         dandiset_ids: Sequence[str],
-        exclude: Optional[re.Pattern[str]],
+        exclude: re.Pattern[str] | None,
     ) -> None:
         async for d in self.get_dandisets(dandiset_ids, exclude=exclude):
             ds = AsyncDataset(self.config.dandiset_root / d.identifier)
@@ -227,7 +227,7 @@ class DandiDatasetter(AsyncResource):
             await self.set_superds_description(superds)
 
     async def get_dandisets(
-        self, dandiset_ids: Sequence[str], exclude: Optional[re.Pattern[str]]
+        self, dandiset_ids: Sequence[str], exclude: re.Pattern[str] | None
     ) -> AsyncGenerator[RemoteDandiset, None]:
         if dandiset_ids:
             diter = self.dandi_client.get_dandisets_by_ids(dandiset_ids)
@@ -308,7 +308,7 @@ class DandiDatasetter(AsyncResource):
         ds: AsyncDataset,
         push: bool,
         log: PrefixedLogger,
-        commitish: Optional[str] = None,
+        commitish: str | None = None,
     ) -> None:
         # `dandiset` must have its version set to the published version
         remote_assets = [asset async for asset in dandiset.aget_assets()]
@@ -542,7 +542,7 @@ class DandiDatasetter(AsyncResource):
         await self.ensure_superdataset()
         logdir = self.config.dandiset_root / ".git" / "dandi" / "backups2datalad"
         logdir.mkdir(exist_ok=True, parents=True)
-        filename = "{:%Y.%m.%d.%H.%M.%SZ}.log".format(datetime.utcnow())
+        filename = f"{datetime.utcnow():%Y.%m.%d.%H.%M.%SZ}.log"
         self.logfile = logdir / filename
         handler = logging.FileHandler(self.logfile, encoding="utf-8")
         handler.setLevel(logging.DEBUG)

@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator, AsyncIterator, Callable, Container, Mapping
+from collections.abc import (
+    AsyncGenerator,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Container,
+    Mapping,
+)
 from contextlib import aclosing, asynccontextmanager
 from dataclasses import dataclass, field
 import logging
@@ -10,7 +17,7 @@ import shlex
 import ssl
 import subprocess
 import textwrap
-from typing import Any, Awaitable, Generic, Optional, TypeVar
+from typing import Any, Generic, TypeVar
 
 import anyio
 from anyio.streams.memory import MemoryObjectReceiveStream
@@ -83,7 +90,7 @@ class TextProcess(anyio.abc.ObjectStream[str]):
 
 async def open_git_annex(
     *args: str,
-    path: Optional[Path] = None,
+    path: Path | None = None,
     warn_on_fail: bool = True,
 ) -> TextProcess:
     # This is strictly for spawning git-annex processes that data will be both
@@ -225,7 +232,7 @@ async def areadcmd(*args: str | Path, strip: bool = True, **kwargs: Any) -> str:
 
 
 async def stream_null_command(
-    *args: str | Path, cwd: Optional[Path] = None
+    *args: str | Path, cwd: Path | None = None
 ) -> AsyncGenerator[str, None]:
     argstrs = [str(a) for a in args]
     desc = f"`{shlex.join(argstrs)}`"
@@ -254,7 +261,7 @@ async def stream_null_command(
 
 
 async def stream_lines_command(
-    *args: str | Path, cwd: Optional[Path] = None
+    *args: str | Path, cwd: Path | None = None
 ) -> AsyncGenerator[str, None]:
     argstrs = [str(a) for a in args]
     desc = f"`{shlex.join(argstrs)}`"
@@ -324,7 +331,7 @@ class LineReceiveStream(anyio.abc.ObjectReceiveStream[str]):
     def __init__(
         self,
         transport_stream: anyio.abc.ObjectReceiveStream[str],
-        newline: Optional[str] = None,
+        newline: str | None = None,
     ) -> None:
         """
         :param transport_stream: any `str`-based receive stream

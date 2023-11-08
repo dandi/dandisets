@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from abc import abstractmethod
+from collections.abc import AsyncGenerator, Sequence
 from contextlib import aclosing
 from dataclasses import dataclass
 from datetime import datetime
 import json
 import re
 from time import time
-from typing import Any, AsyncGenerator, Dict, Optional, Sequence, Type
+from typing import Any
 
 import anyio
 from anyio.abc import AsyncResource
@@ -32,7 +33,7 @@ class AsyncDandiClient(AsyncResource):
 
     @classmethod
     def for_dandi_instance(
-        cls, instance: str, token: Optional[str] = None
+        cls, instance: str, token: str | None = None
     ) -> AsyncDandiClient:
         headers = {"User-Agent": USER_AGENT}
         if token is not None:
@@ -67,8 +68,8 @@ class AsyncDandiClient(AsyncResource):
     async def paginate(
         self,
         path: str,
-        page_size: Optional[int] = None,
-        params: Optional[dict] = None,
+        page_size: int | None = None,
+        params: dict | None = None,
         **kwargs: Any,
     ) -> AsyncGenerator:
         """
@@ -90,7 +91,7 @@ class AsyncDandiClient(AsyncResource):
                 break
 
     async def get_dandiset(
-        self, dandiset_id: str, version_id: Optional[str] = None
+        self, dandiset_id: str, version_id: str | None = None
     ) -> RemoteDandiset:
         data = await self.get(f"/dandisets/{dandiset_id}/")
         d = RemoteDandiset.from_data(self, data)
@@ -168,7 +169,7 @@ class RemoteDandiset(SyncRemoteDandiset):
         )
 
     async def aget_versions(
-        self, include_draft: bool = True, order: Optional[str] = None
+        self, include_draft: bool = True, order: str | None = None
     ) -> AsyncGenerator[Version, None]:
         async with aclosing(
             self.aclient.paginate(f"{self.api_path}versions/", params={"order": order})
@@ -297,7 +298,7 @@ class RemoteAsset(BaseModel):
     #: The date at which the asset was last modified
     modified: datetime
     #: The asset's raw metadata
-    metadata: Dict[str, Any]
+    metadata: dict[str, Any]
 
     class Config:
         """Configuration for pydantic"""
@@ -309,13 +310,13 @@ class RemoteAsset(BaseModel):
         arbitrary_types_allowed = True
 
     @classmethod
-    def from_data(cls, dandiset: RemoteDandiset, data: Dict[str, Any]) -> RemoteAsset:
+    def from_data(cls, dandiset: RemoteDandiset, data: dict[str, Any]) -> RemoteAsset:
         """
         Construct a `RemoteAsset` instance from a `RemoteDandiset` and a `dict`
         of raw data in the same format as returned by the API's pagination
         endpoints (including metadata).
         """
-        klass: Type[RemoteAsset]
+        klass: type[RemoteAsset]
         if data.get("blob") is not None:
             klass = RemoteBlobAsset
             if data.pop("zarr", None) is not None:
@@ -368,7 +369,7 @@ class RemoteAsset(BaseModel):
         """
         return self.aclient.get_url(f"/assets/{self.identifier}/download/")
 
-    def get_digest_value(self, algorithm: Optional[DigestType] = None) -> Optional[str]:
+    def get_digest_value(self, algorithm: DigestType | None = None) -> str | None:
         if algorithm is None:
             algorithm = self.digest_type
         try:

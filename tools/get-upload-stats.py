@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from collections import Counter
+from collections.abc import Iterator
 from datetime import datetime, time, timezone
 import json
 import logging
@@ -7,7 +8,7 @@ from operator import attrgetter
 from pathlib import Path, PurePosixPath
 import re
 import subprocess
-from typing import Any, Dict, Iterator, List, Optional, Set, TextIO, Tuple, Union
+from typing import Any, TextIO
 
 import click
 from datalad.support.annexrepo import AnnexRepo
@@ -30,8 +31,8 @@ class AddedRemoved(BaseModel):
 
 
 class SetAddedRemoved(BaseModel):
-    added: Set[str]
-    removed: Set[str]
+    added: set[str]
+    removed: set[str]
 
     def __bool__(self) -> bool:
         return bool(self.added or self.removed)
@@ -41,7 +42,7 @@ class AssetInfo(BaseModel):
     path: str
     size: int
     key: str
-    subject: Optional[str]
+    subject: str | None
 
 
 class CommitInfo(BaseModel):
@@ -51,27 +52,27 @@ class CommitInfo(BaseModel):
 
 
 class MetadataSummary(BaseModel):
-    specimens: Optional[Set[str]]
-    species: Optional[Set[str]]
-    modalities: Optional[Set[str]]
-    techniques: Optional[Set[str]]
-    anatomies: Set[str]
+    specimens: set[str] | None
+    species: set[str] | None
+    modalities: set[str] | None
+    techniques: set[str] | None
+    anatomies: set[str]
 
     class Config:
         json_encoders = {set: sorted}
 
     @classmethod
     def from_metadata(
-        cls, dandiset_metadata: dict, asset_metadata: Optional[List[dict]]
+        cls, dandiset_metadata: dict, asset_metadata: list[dict] | None
     ) -> "MetadataSummary":
-        specimens: Optional[Set[str]]
+        specimens: set[str] | None
         if asset_metadata is not None:
             specimens = {sp for am in asset_metadata for sp in cls.get_specimens(am)}
         else:
             specimens = None
-        species: Optional[Set[str]]
-        techniques: Optional[Set[str]]
-        modalities: Optional[Set[str]]
+        species: set[str] | None
+        techniques: set[str] | None
+        modalities: set[str] | None
         try:
             summary = dandiset_metadata["assetsSummary"]
         except KeyError:
@@ -113,7 +114,7 @@ class MetadataSummary(BaseModel):
             ("Anatomical Structures", "anatomies"),
         ]:
             s += f"* **{label}:** "
-            v: Optional[Set[str]] = getattr(self, field)
+            v: set[str] | None = getattr(self, field)
             if v is None:
                 s += "[data not available]"
             elif not v:
@@ -125,17 +126,15 @@ class MetadataSummary(BaseModel):
 
 
 class MetadataDiff(BaseModel):
-    specimens: Optional[SetAddedRemoved]
-    species: Optional[SetAddedRemoved]
-    modalities: Optional[SetAddedRemoved]
-    techniques: Optional[SetAddedRemoved]
+    specimens: SetAddedRemoved | None
+    species: SetAddedRemoved | None
+    modalities: SetAddedRemoved | None
+    techniques: SetAddedRemoved | None
     anatomies: SetAddedRemoved
 
     @classmethod
     def compare(cls, first: MetadataSummary, second: MetadataSummary) -> "MetadataDiff":
-        def cmp(
-            one: Optional[Set[str]], two: Optional[Set[str]]
-        ) -> Optional[SetAddedRemoved]:
+        def cmp(one: set[str] | None, two: set[str] | None) -> SetAddedRemoved | None:
             if one is None:
                 one = set()
             if two is None:
@@ -166,7 +165,7 @@ class MetadataDiff(BaseModel):
             ("Anatomical Structures", "anatomies"),
         ]:
             s += f"* **{label}:**"
-            v: Optional[SetAddedRemoved] = getattr(self, field)
+            v: SetAddedRemoved | None = getattr(self, field)
             if v is None:
                 s += " [data not available]\n"
             elif not v:
@@ -256,11 +255,11 @@ class CommitDelta(BaseModel):
 
 class Report(BaseModel):
     dandiset_id: str
-    from_dt: Optional[datetime]
-    to_dt: Optional[datetime]
-    commit_delta: Optional[CommitDelta]
-    published_versions: List[CommitInfo]
-    since_latest: Optional[CommitDelta]
+    from_dt: datetime | None
+    to_dt: datetime | None
+    commit_delta: CommitDelta | None
+    published_versions: list[CommitInfo]
+    since_latest: CommitDelta | None
 
     def to_markdown(self) -> str:
         start_time = self.from_dt
@@ -315,7 +314,7 @@ class Report(BaseModel):
 class DandiDataSet(BaseModel):
     path: Path
 
-    def readgit(self, *args: Union[str, Path], **kwargs: Any) -> str:
+    def readgit(self, *args: str | Path, **kwargs: Any) -> str:
         txt = subprocess.run(
             ["git", *args],
             cwd=self.path,
@@ -328,8 +327,8 @@ class DandiDataSet(BaseModel):
         return txt.strip()
 
     def get_first_and_last_commit(
-        self, from_dt: Optional[datetime], to_dt: Optional[datetime]
-    ) -> Tuple[CommitInfo, CommitInfo]:
+        self, from_dt: datetime | None, to_dt: datetime | None
+    ) -> tuple[CommitInfo, CommitInfo]:
         # --before orders by commit date, not author date, so we need to filter
         # commits ourselves.
         cmtlines = self.readgit(
@@ -338,7 +337,7 @@ class DandiDataSet(BaseModel):
             r"--grep=Ran backups2datalad\.py",
             "--format=%H %aI %p",
         ).splitlines()
-        commits: List[CommitInfo] = []
+        commits: list[CommitInfo] = []
         warned_nonlinear = False
         for cmt in cmtlines:
             committish, created, *parents = cmt.strip().split()
@@ -356,8 +355,8 @@ class DandiDataSet(BaseModel):
         return (commits[0], commits[-1])
 
     def get_tags(
-        self, from_dt: Optional[datetime], to_dt: Optional[datetime]
-    ) -> List[CommitInfo]:
+        self, from_dt: datetime | None, to_dt: datetime | None
+    ) -> list[CommitInfo]:
         # Tags are returned in ascending order of creation
         taglines = self.readgit(
             "tag",
@@ -365,7 +364,7 @@ class DandiDataSet(BaseModel):
             "--sort=creatordate",
             "--format=%(creatordate:iso-strict) %(refname:strip=2)",
         ).splitlines()
-        tags: List[CommitInfo] = []
+        tags: list[CommitInfo] = []
         for tl in taglines:
             ts, _, tag = tl.partition(" ")
             tags.append(CommitInfo(committish=tag, short_id=tag, created=ts))
@@ -377,7 +376,7 @@ class DandiDataSet(BaseModel):
             relpath = p.relative_to(self.path)
             if info.get("type") == "file" and relpath.parts[0] not in IGNORED:
                 path = str(PurePosixPath(relpath))
-                subject: Optional[str]
+                subject: str | None
                 if m := re.match(r"sub-([^/]+)/", path):
                     subject = m.group(1)
                 else:
@@ -399,7 +398,7 @@ class DandiDataSet(BaseModel):
                         subject=subject,
                     )
 
-    def get_dandiset_metadata(self, commit: Union[str, CommitInfo]) -> dict:
+    def get_dandiset_metadata(self, commit: str | CommitInfo) -> dict:
         if isinstance(commit, str):
             committish = commit
         else:
@@ -408,7 +407,7 @@ class DandiDataSet(BaseModel):
         assert isinstance(md, dict)
         return md
 
-    def get_asset_metadata(self, commit: CommitInfo) -> Optional[List[dict]]:
+    def get_asset_metadata(self, commit: CommitInfo) -> list[dict] | None:
         assets = json.loads(
             self.readgit("show", f"{commit.committish}:.dandi/assets.json")
         )
@@ -420,13 +419,13 @@ class DandiDataSet(BaseModel):
     def cmp_commit_assets(
         self, commit1: CommitInfo, commit2: CommitInfo
     ) -> CommitDelta:
-        asset_sizes: Dict[str, int] = {}
-        key_qtys: List[Dict[str, int]] = []
-        subjects_sets: List[Set[str]] = []
-        metadata_summaries: List[MetadataSummary] = []
+        asset_sizes: dict[str, int] = {}
+        key_qtys: list[dict[str, int]] = []
+        subjects_sets: list[set[str]] = []
+        metadata_summaries: list[MetadataSummary] = []
         for cmt in [commit1, commit2]:
-            keys: Dict[str, int] = Counter()
-            subjects: Set[str] = set()
+            keys: dict[str, int] = Counter()
+            subjects: set[str] = set()
             for asset in self.get_assets(cmt):
                 asset_sizes[asset.key] = asset.size
                 keys[asset.key] += 1
@@ -515,8 +514,8 @@ class InsufficientCommitsError(Exception):
 )
 def main(
     dandiset: Path,
-    from_dt: Optional[datetime],
-    to_dt: Optional[datetime],
+    from_dt: datetime | None,
+    to_dt: datetime | None,
     outfile: TextIO,
     fmt: str,
 ) -> None:
@@ -551,8 +550,8 @@ def main(
     dd = DandiDataSet(path=dandiset)
     did = re.sub(r"^.+?:", "", dd.get_dandiset_metadata("HEAD")["identifier"])
     tags = dd.get_tags(from_dt, to_dt)
-    commit_delta: Optional[CommitDelta]
-    since_latest: Optional[CommitDelta]
+    commit_delta: CommitDelta | None
+    since_latest: CommitDelta | None
     try:
         commit1, commit2 = dd.get_first_and_last_commit(from_dt, to_dt)
     except InsufficientCommitsError:
@@ -583,8 +582,8 @@ def main(
 
 
 def filter_commits(
-    commits: List[CommitInfo], from_dt: Optional[datetime], to_dt: Optional[datetime]
-) -> List[CommitInfo]:
+    commits: list[CommitInfo], from_dt: datetime | None, to_dt: datetime | None
+) -> list[CommitInfo]:
     # `commits` must be sorted by `created` in ascending order
     if from_dt is not None:
         while commits and commits[0].created < from_dt:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import InitVar, dataclass, field, replace
-from typing import Any, Optional
+from typing import Any
 
 from anyio.abc import AsyncResource
 from ghrepo import GHRepo
@@ -24,7 +24,7 @@ class Manager(AsyncResource):
     """
 
     config: BackupConfig
-    gh: Optional[GitHub]
+    gh: GitHub | None
     log: PrefixedLogger
 
     async def aclose(self) -> None:

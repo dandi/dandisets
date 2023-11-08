@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import aclosing
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -12,7 +13,6 @@ import os.path
 from pathlib import Path, PurePosixPath
 import subprocess
 from types import TracebackType
-from typing import AsyncGenerator, AsyncIterator, Optional
 from urllib.parse import urlparse, urlunparse
 
 import anyio
@@ -113,9 +113,9 @@ class Downloader:
     annex: AsyncAnnex
     nursery: anyio.abc.TaskGroup
     error_on_change: bool = False
-    addurl: Optional[TextProcess] = None
+    addurl: TextProcess | None = None
     addurl_lock: anyio.Lock = field(init=False, default_factory=anyio.Lock)
-    last_timestamp: Optional[datetime] = None
+    last_timestamp: datetime | None = None
     report: Report = field(init=False, default_factory=Report)
     in_progress: dict[str, ToDownload] = field(init=False, default_factory=dict)
     download_sender: MemoryObjectSendStream[ToDownload] = field(init=False)
@@ -146,9 +146,9 @@ class Downloader:
 
     async def __aexit__(
         self,
-        exc_type: Optional[type[BaseException]],
-        _exc_val: Optional[BaseException],
-        _exc_tb: Optional[TracebackType],
+        exc_type: type[BaseException] | None,
+        _exc_val: BaseException | None,
+        _exc_tb: TracebackType | None,
     ) -> None:
         if exc_type is None:
             if self.addurl is not None:
@@ -158,7 +158,7 @@ class Downloader:
                 if self.addurl is not None:
                     await self.addurl.force_aclose()
 
-    async def asset_loop(self, aia: AsyncIterator[Optional[RemoteAsset]]) -> None:
+    async def asset_loop(self, aia: AsyncIterator[RemoteAsset | None]) -> None:
         now = datetime.now(timezone.utc)
         downloading = True
         async with self.download_sender:
@@ -319,7 +319,7 @@ class Downloader:
                     )
 
     async def process_zarr(
-        self, asset: RemoteZarrAsset, zarr_digest: Optional[str]
+        self, asset: RemoteZarrAsset, zarr_digest: str | None
     ) -> None:
         if self.manager.config.zarr_mode is ZarrMode.ASSET_CHECKSUM:
             if not self.tracker.register_asset_by_timestamp(
@@ -646,8 +646,8 @@ async def async_assets(
 
 async def aiterassets(
     dandiset: RemoteDandiset, done_flag: anyio.Event
-) -> AsyncGenerator[Optional[RemoteAsset], None]:
-    last_ts: Optional[datetime] = None
+) -> AsyncGenerator[RemoteAsset | None, None]:
+    last_ts: datetime | None = None
     if dandiset.version_id == "draft":
         vs = [v async for v in dandiset.aget_versions(include_draft=False)]
         vs.sort(key=attrgetter("created"))

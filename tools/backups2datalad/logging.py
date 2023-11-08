@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 import logging
-from typing import Any, Callable, Optional
+from typing import Any
 
 
 @dataclass
 class PrefixedLogger:
     logger: logging.Logger
-    prefix: Optional[str] = None
+    prefix: str | None = None
 
     def setLevel(self, level: int) -> None:
         self.logger.setLevel(level)
