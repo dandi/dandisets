@@ -304,7 +304,7 @@ async def test_3(text_dandiset: SampleDandiset, tmp_path: Path) -> None:
             )
             assert repo.is_ancestor(v.identifier, DEFAULT_BRANCH)
         assert repo.get_diff_tree(v.identifier) == status
-        state = AssetsState.parse_raw(
+        state = AssetsState.model_validate_json(
             repo.get_blob(v.identifier, ".dandi/assets-state.json")
         )
         assert state.timestamp == v.created

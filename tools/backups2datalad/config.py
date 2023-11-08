@@ -2,14 +2,12 @@ from __future__ import annotations
 
 from enum import Enum
 from functools import cached_property
-import json
 from pathlib import Path
 from re import Pattern
-from typing import Any
 
 import anyio
 from dandi.utils import yaml_dump, yaml_load
-from pydantic import BaseModel, Field, root_validator
+from pydantic import BaseModel, Field, model_validator
 
 from .consts import DEFAULT_GIT_ANNEX_JOBS, DEFAULT_WORKERS, ZARR_LIMIT
 
@@ -58,8 +56,7 @@ class BackupConfig(BaseModel):
 
     # Also settable via CLI options:
     backup_root: Path = Field(default_factory=Path)
-    # <https://github.com/samuelcolvin/pydantic/issues/2636>
-    asset_filter: Pattern | None = None
+    asset_filter: Pattern[str] | None = None
     jobs: int = DEFAULT_GIT_ANNEX_JOBS
     workers: int = DEFAULT_WORKERS
     force: str | None = None
@@ -68,17 +65,11 @@ class BackupConfig(BaseModel):
     mode: Mode = Mode.TIMESTAMP
     zarr_mode: ZarrMode = ZarrMode.TIMESTAMP
 
-    class Config:
-        # <https://github.com/samuelcolvin/pydantic/issues/1241>
-        arbitrary_types_allowed = True
-        keep_untouched = (cached_property,)
-
-    @root_validator
-    def _validate(cls, values: dict[str, Any]) -> dict[str, Any]:  # noqa: B902, U100
-        gh_org = values["dandisets"].github_org
-        zcfg: ResourceConfig | None
-        if (zcfg := values["zarrs"]) is not None:
-            zarr_gh_org = zcfg.github_org
+    @model_validator(mode="after")
+    def _validate(self) -> BackupConfig:
+        gh_org = self.dandisets.github_org
+        if self.zarrs is not None:
+            zarr_gh_org = self.zarrs.github_org
         else:
             zarr_gh_org = None
         if (gh_org is None) != (zarr_gh_org is None):
@@ -86,16 +77,16 @@ class BackupConfig(BaseModel):
                 "dandisets.github_org and zarrs.github_org must be either both"
                 " set or both unset"
             )
-        return values
+        return self
 
     @classmethod
     def load_yaml(cls, filepath: Path) -> BackupConfig:
-        with filepath.open("r") as fp:
+        with filepath.open() as fp:
             data = yaml_load(fp)
-        return cls.parse_obj(data)
+        return cls.model_validate(data)
 
     def dump_yaml(self, filepath: Path) -> None:
-        filepath.write_text(yaml_dump(json.loads(self.json(exclude_unset=True))))
+        filepath.write_text(yaml_dump(self.model_dump(mode="json", exclude_unset=True)))
 
     @property
     def dandiset_root(self) -> Path:

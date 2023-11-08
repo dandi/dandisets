@@ -10,8 +10,8 @@ import click
 )
 def main(gitmodules):
     blocks = {}
-    with gitmodules.open("r") as fp:
-        for (name, block) in parse_gitmodules(fp):
+    with gitmodules.open() as fp:
+        for name, block in parse_gitmodules(fp):
             if name not in blocks:
                 blocks[name] = block
     with gitmodules.open("w") as fp:

@@ -140,7 +140,7 @@ class RemoteDandiset(SyncRemoteDandiset):
         return cls(
             aclient=aclient,
             identifier=data["identifier"],
-            version=Version.parse_obj(data["draft_version"]),
+            version=Version.model_validate(data["draft_version"]),
             data=data,
         )
 
@@ -164,7 +164,7 @@ class RemoteDandiset(SyncRemoteDandiset):
         return md
 
     async def aget_version(self, version_id: str) -> Version:
-        return Version.parse_obj(
+        return Version.model_validate(
             self.aclient.get(f"/dandisets/{self.identifier}/versions/{version_id}/info")
         )
 
@@ -176,7 +176,7 @@ class RemoteDandiset(SyncRemoteDandiset):
         ) as ait:
             async for v in ait:
                 if v["version"] != "draft" or include_draft:
-                    yield Version.parse_obj(v)
+                    yield Version.model_validate(v)
 
     async def aget_assets(self) -> AsyncGenerator[RemoteAsset, None]:
         async with aclosing(
@@ -252,7 +252,9 @@ class RemoteDandiset(SyncRemoteDandiset):
         await self.aclient.delete(self.api_path)
 
 
-class RemoteAsset(BaseModel):
+class RemoteAsset(BaseModel, populate_by_name=True, arbitrary_types_allowed=True):
+    # `arbitrary_types_allowed` is needed in order to use the non-Pydantic
+    # RemoteDandiset as an attribute
     """
     A minimal, asynchronous version of `dandi.dandiapi.RemoteAsset`, which it
     differs from in the following ways:
@@ -300,15 +302,6 @@ class RemoteAsset(BaseModel):
     #: The asset's raw metadata
     metadata: dict[str, Any]
 
-    class Config:
-        """Configuration for pydantic"""
-
-        # To use the non-pydantic RemoteDandiset as an attribute and to be able
-        # to create instances with RemoteAsset(identifier=...) instead of
-        # RemoteAsset(alias_id=...)
-        allow_population_by_field_name = True
-        arbitrary_types_allowed = True
-
     @classmethod
     def from_data(cls, dandiset: RemoteDandiset, data: dict[str, Any]) -> RemoteAsset:
         """
@@ -346,9 +339,9 @@ class RemoteAsset(BaseModel):
         return vid
 
     def json_dict(self) -> dict[str, Any]:
-        data = json.loads(self.json(exclude={"aclient", "dandiset"}, by_alias=True))
-        assert isinstance(data, dict)
-        return data
+        return self.model_dump(
+            mode="json", exclude={"aclient", "dandiset"}, by_alias=True
+        )
 
     @property
     def api_path(self) -> str:

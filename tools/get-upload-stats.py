@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
 from collections import Counter
 from collections.abc import Iterator
 from datetime import datetime, time, timezone
@@ -8,13 +10,14 @@ from operator import attrgetter
 from pathlib import Path, PurePosixPath
 import re
 import subprocess
-from typing import Any, TextIO
+from typing import Annotated, Any, TextIO
 
 import click
 from datalad.support.annexrepo import AnnexRepo
 from dateutil.parser import parse
 from humanize import naturalsize
 from pydantic import BaseModel
+from pydantic.functional_serializers import PlainSerializer
 from ruamel.yaml import YAML  # type: ignore[attr-defined]
 
 log = logging.getLogger("get-upload-stats")
@@ -51,20 +54,20 @@ class CommitInfo(BaseModel):
     created: datetime
 
 
-class MetadataSummary(BaseModel):
-    specimens: set[str] | None
-    species: set[str] | None
-    modalities: set[str] | None
-    techniques: set[str] | None
-    anatomies: set[str]
+SortedSet = Annotated[set[str], PlainSerializer(lambda s: sorted(s))]
 
-    class Config:
-        json_encoders = {set: sorted}
+
+class MetadataSummary(BaseModel):
+    specimens: SortedSet | None
+    species: SortedSet | None
+    modalities: SortedSet | None
+    techniques: SortedSet | None
+    anatomies: SortedSet
 
     @classmethod
     def from_metadata(
         cls, dandiset_metadata: dict, asset_metadata: list[dict] | None
-    ) -> "MetadataSummary":
+    ) -> MetadataSummary:
         specimens: set[str] | None
         if asset_metadata is not None:
             specimens = {sp for am in asset_metadata for sp in cls.get_specimens(am)}
@@ -572,7 +575,7 @@ def main(
         since_latest=since_latest,
     )
     if fmt == "json":
-        print(report.json(indent=4), file=outfile)
+        print(report.model_dump_json(indent=4), file=outfile)
     elif fmt == "yaml":
         yaml = YAML(typ="safe")
         yaml.default_flow_style = False

@@ -7,6 +7,7 @@ from dataclasses import InitVar, dataclass, field, replace
 from datetime import datetime
 from enum import Enum
 from functools import partial
+import json
 from operator import attrgetter
 from pathlib import Path
 import re
@@ -327,7 +328,7 @@ class AsyncDataset:
         ) as p:
             async for line in p:
                 try:
-                    data = AnnexedFile.parse_raw(line)
+                    data = AnnexedFile.model_validate_json(line)
                 except Exception:
                     log.exception(
                         "Error parsing `git-annex find` output for %s: bad"
@@ -487,14 +488,15 @@ class AsyncDataset:
 
     def get_assets_state(self) -> AssetsState | None:
         try:
-            return AssetsState.parse_file(self.pathobj / AssetsState.PATH)
+            with (self.pathobj / AssetsState.PATH).open() as fp:
+                return AssetsState.model_validate(json.load(fp))
         except FileNotFoundError:
             return None
 
     async def set_assets_state(self, state: AssetsState) -> None:
         path = self.pathobj / AssetsState.PATH
         path.parent.mkdir(exist_ok=True)
-        path.write_text(state.json(indent=4) + "\n")
+        path.write_text(state.model_dump_json(indent=4) + "\n")
         await self.add(str(AssetsState.PATH))
 
     async def get_subdatasets(self, **kwargs: Any) -> list:

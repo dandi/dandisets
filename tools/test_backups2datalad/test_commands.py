@@ -55,7 +55,9 @@ async def test_backup_command(text_dandiset: SampleDandiset, tmp_path: Path) -> 
     ds = Dataset(tmp_path / "ds" / text_dandiset.dandiset_id)
     await text_dandiset.check_backup(ds)
     repo = GitRepo(ds.pathobj)
-    state = AssetsState.parse_raw(repo.get_blob("HEAD", ".dandi/assets-state.json"))
+    state = AssetsState.model_validate_json(
+        repo.get_blob("HEAD", ".dandi/assets-state.json")
+    )
     d = await text_dandiset.client.get_dandiset(text_dandiset.dandiset_id, "draft")
     # The server seems to sometimes randomly update the Dandiset after the
     # backup command fetches its information, leading to the state timestamp

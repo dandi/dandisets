@@ -4,6 +4,7 @@ from collections.abc import AsyncGenerator, Iterator
 from contextlib import aclosing, suppress
 from dataclasses import dataclass, field
 from datetime import datetime
+import json
 import os
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -307,7 +308,8 @@ class ZarrSyncer:
     def read_sync_file(self) -> datetime | None:
         sync_file_path = self.repo / SYNC_FILE
         if sync_file_path.exists() or sync_file_path.is_symlink():
-            data = SyncData.parse_file(sync_file_path)
+            with sync_file_path.open() as fp:
+                data = SyncData.model_validate(json.load(fp))
         else:
             return None
         if data.bucket != self.s3bucket:
@@ -329,7 +331,7 @@ class ZarrSyncer:
             last_modified=self.last_timestamp,
         )
         (self.repo / SYNC_FILE).parent.mkdir(exist_ok=True)
-        (self.repo / SYNC_FILE).write_text(data.json(indent=4) + "\n")
+        (self.repo / SYNC_FILE).write_text(data.model_dump_json(indent=4) + "\n")
 
     async def needs_sync(
         self, client: S3Client, last_sync: datetime | None, local_paths: set[str]
