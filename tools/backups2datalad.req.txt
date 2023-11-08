@@ -1,8 +1,7 @@
-# Python ~= 3.8
+# Python >= 3.10
 # git-annex >= 10.20230126
 aiobotocore
 anyio ~= 4.0
-async_generator ~= 1.10; python_version < '3.10'
 asyncclick >= 8.0.1
 dandi >= 0.55.0
 dandischema

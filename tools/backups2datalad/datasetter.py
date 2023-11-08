@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import aclosing
 from dataclasses import dataclass, field
 from datetime import datetime
 from functools import partial
@@ -12,7 +13,6 @@ import re
 import shutil
 from socket import gethostname
 import subprocess
-import sys
 from typing import AsyncGenerator, Optional, Sequence
 
 import anyio
@@ -35,11 +35,6 @@ from .manager import GitHub, Manager
 from .syncer import Syncer
 from .util import AssetTracker, assets_eq, quantify, update_dandiset_metadata
 from .zarr import ZarrLink, sync_zarr
-
-if sys.version_info[:2] >= (3, 10):
-    from contextlib import aclosing
-else:
-    from async_generator import aclosing
 
 
 @dataclass

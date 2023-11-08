@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator, AsyncIterator, Callable, Container, Mapping
-from contextlib import asynccontextmanager
+from contextlib import aclosing, asynccontextmanager
 from dataclasses import dataclass, field
 import logging
 import math
@@ -9,7 +9,6 @@ from pathlib import Path
 import shlex
 import ssl
 import subprocess
-import sys
 import textwrap
 from typing import Any, Awaitable, Generic, Optional, TypeVar
 
@@ -26,11 +25,6 @@ from .util import exp_wait
 T = TypeVar("T")
 InT = TypeVar("InT")
 OutT = TypeVar("OutT")
-
-if sys.version_info[:2] >= (3, 10):
-    from contextlib import aclosing
-else:
-    from async_generator import aclosing
 
 
 @dataclass

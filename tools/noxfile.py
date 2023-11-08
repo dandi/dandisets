@@ -9,10 +9,7 @@ def typing(session):
     session.install("-r", "backups2datalad.req.txt")
     session.install("-r", "get-upload-stats.req.txt")
     session.install("pytest", "zarr")
-    # trio-typing contains the stubs for async_generator
-    session.install(
-        "mypy", "trio-typing", "types-aiobotocore[s3]", "types-python-dateutil"
-    )
+    session.install("mypy", "types-aiobotocore[s3]", "types-python-dateutil")
     session.run(
         "mypy", "backups2datalad", "test_backups2datalad", "get-upload-stats.py"
     )

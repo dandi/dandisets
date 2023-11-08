@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import aclosing
 from dataclasses import dataclass, field
 from functools import partial
 import json
@@ -7,7 +8,6 @@ import logging
 import os
 from pathlib import Path
 from shutil import rmtree
-import sys
 from typing import Any, AsyncIterator, Optional
 
 import anyio
@@ -24,11 +24,6 @@ from backups2datalad.adandi import AsyncDandiClient, RemoteDandiset, RemoteZarrA
 from backups2datalad.adataset import AsyncDataset
 from backups2datalad.util import is_meta_file
 from backups2datalad.zarr import CHECKSUM_FILE
-
-if sys.version_info[:2] >= (3, 10):
-    from contextlib import aclosing
-else:
-    from async_generator import aclosing
 
 
 @pytest.fixture

@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from contextlib import suppress
+from contextlib import aclosing, suppress
 from dataclasses import dataclass, field
 from datetime import datetime
 import os
 from pathlib import Path
-import sys
 from typing import TYPE_CHECKING, AsyncGenerator, Iterator, Optional
 from urllib.parse import quote, quote_plus
 
@@ -23,11 +22,6 @@ from .consts import MAX_ZARR_SYNCS
 from .logging import PrefixedLogger
 from .manager import Manager
 from .util import UnexpectedChangeError, is_meta_file, key2hash, maxdatetime, quantify
-
-if sys.version_info[:2] >= (3, 10):
-    from contextlib import aclosing
-else:
-    from async_generator import aclosing
 
 if TYPE_CHECKING:
     from types_aiobotocore_s3.client import S3Client

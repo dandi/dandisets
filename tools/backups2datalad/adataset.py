@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from contextlib import aclosing
 from dataclasses import InitVar, dataclass, field, replace
 from datetime import datetime
 from enum import Enum
@@ -9,7 +10,6 @@ from operator import attrgetter
 from pathlib import Path
 import re
 import subprocess
-import sys
 import textwrap
 from typing import Any, AsyncGenerator, ClassVar, Optional, Sequence
 
@@ -25,11 +25,6 @@ from .config import BackupConfig, Remote
 from .consts import DEFAULT_BRANCH, GIT_OPTIONS
 from .logging import log
 from .util import custom_commit_env, exp_wait, is_meta_file, key2hash
-
-if sys.version_info[:2] >= (3, 10):
-    from contextlib import aclosing
-else:
-    from async_generator import aclosing
 
 
 @dataclass

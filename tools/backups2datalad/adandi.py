@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from abc import abstractmethod
+from contextlib import aclosing
 from dataclasses import dataclass
 from datetime import datetime
 import json
 import re
-import sys
 from time import time
 from typing import Any, AsyncGenerator, Dict, Optional, Sequence, Type
 
@@ -23,11 +23,6 @@ from pydantic import BaseModel, Field
 from .aioutil import arequest
 from .consts import USER_AGENT
 from .logging import log
-
-if sys.version_info[:2] >= (3, 10):
-    from contextlib import aclosing
-else:
-    from async_generator import aclosing
 
 
 @dataclass

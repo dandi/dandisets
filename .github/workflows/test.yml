@@ -23,13 +23,11 @@ jobs:
       fail-fast: false
       matrix:
         python-version:
-          - '3.8'
-          - '3.9'
           - '3.10'
           - '3.11'
         noxenv: [test]
         include:
-          - python-version: '3.8'
+          - python-version: '3.10'
             noxenv: typing
     steps:
       - name: Check out repository
@@ -50,10 +48,6 @@ jobs:
           datalad-installer --sudo ok neurodebian git-annex -m neurodebian
           # make standalone git take precendence to guarantee compatibility with git-annex
           echo "/usr/lib/git-annex.linux/" >> $GITHUB_PATH
-
-      - name: Install hdf5
-        if: matrix.python-version == '3.9'
-        run: sudo apt-get update && sudo apt-get install -y libhdf5-dev
 
       - name: Configure Git
         run: |

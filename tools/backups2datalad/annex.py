@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from contextlib import aclosing
 from dataclasses import dataclass, field
 import json
 from pathlib import Path
-import sys
 from types import TracebackType
 from typing import AsyncGenerator, Optional
 
@@ -14,11 +14,6 @@ from .aioutil import TextProcess, open_git_annex, stream_null_command
 from .consts import GIT_OPTIONS
 from .logging import log
 from .util import format_errors
-
-if sys.version_info[:2] >= (3, 10):
-    from contextlib import aclosing
-else:
-    from async_generator import aclosing
 
 
 @dataclass

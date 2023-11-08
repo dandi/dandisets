@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import deque
+from contextlib import aclosing
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from functools import partial
@@ -10,7 +11,6 @@ from operator import attrgetter
 import os.path
 from pathlib import Path, PurePosixPath
 import subprocess
-import sys
 from types import TracebackType
 from typing import AsyncGenerator, AsyncIterator, Optional
 from urllib.parse import urlparse, urlunparse
@@ -42,11 +42,6 @@ from .util import (
     quantify,
 )
 from .zarr import ZarrLink, sync_zarr
-
-if sys.version_info[:2] >= (3, 10):
-    from contextlib import aclosing
-else:
-    from async_generator import aclosing
 
 
 @dataclass

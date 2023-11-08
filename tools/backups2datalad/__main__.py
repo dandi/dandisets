@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import aclosing
 from functools import partial, wraps
 import json
 import logging
 from pathlib import Path
 import re
 import sys
-from typing import AsyncGenerator, Awaitable, Optional, Sequence
+from typing import AsyncGenerator, Awaitable, Concatenate, Optional, ParamSpec, Sequence
 
 import asyncclick as click
 from dandi.consts import DANDISET_ID_REGEX
@@ -21,13 +22,6 @@ from .consts import GIT_OPTIONS
 from .datasetter import DandiDatasetter
 from .logging import log
 from .util import format_errors, pdb_excepthook, quantify
-
-if sys.version_info[:2] >= (3, 10):
-    from contextlib import aclosing
-    from typing import Concatenate, ParamSpec
-else:
-    from async_generator import aclosing
-    from typing_extensions import Concatenate, ParamSpec
 
 
 @click.group()
