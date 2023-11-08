@@ -2,7 +2,7 @@
 
 __requires__ = [
     "boto3",
-    "click == 7.*",
+    "click >= 7.0",
     "click-loglevel ~= 0.2",
     "dandi >= 0.14.0",
     "datalad",
