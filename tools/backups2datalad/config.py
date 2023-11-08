@@ -17,7 +17,6 @@ from .consts import DEFAULT_GIT_ANNEX_JOBS, DEFAULT_WORKERS, ZARR_LIMIT
 class Remote(BaseModel):
     name: str
     type: str
-    # Needs to be `typing.Dict` so that pydantic will support it under 3.8
     options: dict[str, str]
 
 
