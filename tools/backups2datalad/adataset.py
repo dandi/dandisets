@@ -11,7 +11,7 @@ import re
 import subprocess
 import sys
 import textwrap
-from typing import Any, AsyncGenerator, ClassVar, Optional, Sequence, cast
+from typing import Any, AsyncGenerator, ClassVar, Optional, Sequence
 
 import anyio
 from datalad.api import Dataset
@@ -45,11 +45,13 @@ class AsyncDataset:
 
     @property
     def path(self) -> str:
-        return cast(str, self.ds.path)
+        assert isinstance(self.ds.path, str)
+        return self.ds.path
 
     @property
     def pathobj(self) -> Path:
-        return cast(Path, self.ds.pathobj)
+        assert isinstance(self.ds.pathobj, Path)
+        return self.ds.pathobj
 
     async def ensure_installed(
         self,

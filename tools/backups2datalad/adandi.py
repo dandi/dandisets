@@ -7,7 +7,7 @@ import json
 import re
 import sys
 from time import time
-from typing import Any, AsyncGenerator, Dict, Optional, Sequence, Type, cast
+from typing import Any, AsyncGenerator, Dict, Optional, Sequence, Type
 
 import anyio
 from anyio.abc import AsyncResource
@@ -163,7 +163,9 @@ class RemoteDandiset(SyncRemoteDandiset):
         )
 
     async def aget_raw_metadata(self) -> dict:
-        return cast(dict, await self.aclient.get(self.version_api_path))
+        md = await self.aclient.get(self.version_api_path)
+        assert isinstance(md, dict)
+        return md
 
     async def aget_version(self, version_id: str) -> Version:
         return Version.parse_obj(
@@ -337,17 +339,20 @@ class RemoteAsset(BaseModel):
 
     @property
     def dandiset_id(self) -> str:
-        return cast(str, self.dandiset.identifier)
+        did = self.dandiset.identifier
+        assert isinstance(did, str)
+        return did
 
     @property
     def version_id(self) -> str:
-        return cast(str, self.dandiset.version_id)
+        vid = self.dandiset.version_id
+        assert isinstance(vid, str)
+        return vid
 
     def json_dict(self) -> dict[str, Any]:
-        return cast(
-            Dict[str, Any],
-            json.loads(self.json(exclude={"aclient", "dandiset"}, by_alias=True)),
-        )
+        data = json.loads(self.json(exclude={"aclient", "dandiset"}, by_alias=True))
+        assert isinstance(data, dict)
+        return data
 
     @property
     def api_path(self) -> str:

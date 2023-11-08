@@ -6,7 +6,7 @@ from datetime import datetime
 import os
 from pathlib import Path
 import sys
-from typing import TYPE_CHECKING, AsyncGenerator, Iterator, Optional, cast
+from typing import TYPE_CHECKING, AsyncGenerator, Iterator, Optional
 from urllib.parse import quote, quote_plus
 
 from aiobotocore.config import AioConfig
@@ -31,6 +31,7 @@ else:
 
 if TYPE_CHECKING:
     from types_aiobotocore_s3.client import S3Client
+    from types_aiobotocore_s3.type_defs import ObjectTypeDef
 
 
 OLD_CHECKSUM_FILE = Path(".zarr-checksum")
@@ -426,12 +427,14 @@ class ZarrSyncer:
                 d = d.parent
         self.log.info("finished deleting extra files")
 
-    async def aiter_objects(self, client: S3Client) -> AsyncGenerator[dict, None]:
+    async def aiter_objects(
+        self, client: S3Client
+    ) -> AsyncGenerator[ObjectTypeDef, None]:
         async for page in client.get_paginator("list_objects_v2").paginate(
             Bucket=self.s3bucket, Prefix=self.s3prefix
         ):
             for obj in page.get("Contents", []):
-                yield cast(dict, obj)
+                yield obj
 
     async def aiter_file_entries(
         self, client: S3Client
