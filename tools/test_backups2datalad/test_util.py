@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 import subprocess
-from typing import Any, List, cast
+from typing import Any
 
 from dandi.utils import find_files
 
@@ -96,10 +96,9 @@ class GitRepo:
         }
 
     def get_assets_json(self, commitish: str) -> list[dict]:
-        # We need to use typing.List here for Python 3.8 compatibility
-        return cast(
-            List[dict], json.loads(self.get_blob(commitish, ".dandi/assets.json"))
-        )
+        assets = json.loads(self.get_blob(commitish, ".dandi/assets.json"))
+        assert isinstance(assets, list)
+        return assets
 
     def get_commit_count(self) -> int:
         return int(self.readcmd("rev-list", "--count", "HEAD"))

@@ -7,7 +7,7 @@ from operator import attrgetter
 from pathlib import Path, PurePosixPath
 import re
 import subprocess
-from typing import Any, Dict, Iterator, List, Optional, Set, TextIO, Tuple, Union, cast
+from typing import Any, Dict, Iterator, List, Optional, Set, TextIO, Tuple, Union
 
 import click
 from datalad.support.annexrepo import AnnexRepo
@@ -316,10 +316,16 @@ class DandiDataSet(BaseModel):
     path: Path
 
     def readgit(self, *args: Union[str, Path], **kwargs: Any) -> str:
-        return cast(
-            str,
-            subprocess.check_output(["git", *args], cwd=self.path, text=True, **kwargs),
-        ).strip()
+        txt = subprocess.run(
+            ["git", *args],
+            cwd=self.path,
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE,
+            **kwargs,
+        ).stdout
+        assert isinstance(txt, str)
+        return txt.strip()
 
     def get_first_and_last_commit(
         self, from_dt: Optional[datetime], to_dt: Optional[datetime]
@@ -398,10 +404,9 @@ class DandiDataSet(BaseModel):
             committish = commit
         else:
             committish = commit.committish
-        return cast(
-            dict,
-            YAML(typ="safe").load(self.readgit("show", f"{committish}:dandiset.yaml")),
-        )
+        md = YAML(typ="safe").load(self.readgit("show", f"{committish}:dandiset.yaml"))
+        assert isinstance(md, dict)
+        return md
 
     def get_asset_metadata(self, commit: CommitInfo) -> Optional[List[dict]]:
         assets = json.loads(
