@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-__requires__ = ["PyGithub ~= 1.53"]
+__requires__ = ["PyGithub ~= 2.0"]
 import logging
 import subprocess
 import sys
 
-from github import Github
+from github import Auth, Github
 
 ORGANIZATION = "dandisets"
 
@@ -21,7 +21,7 @@ token = subprocess.run(
     text=True,
 ).stdout.strip()
 
-gh = Github(token)
+gh = Github(auth=Auth.Token(token))
 
 for did in dandisets:
     log.info("Creating releases for Dandiset %s ...", did)

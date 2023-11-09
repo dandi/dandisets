@@ -1,9 +1,9 @@
 #!/usr/bin/python3
-__requires__ = ["click == 7.*", "PyGithub == 1.*"]
+__requires__ = ["click >= 7.0", "PyGithub == 2.*"]
 from subprocess import check_output
 
 import click
-from github import Github
+from github import Auth, Github
 
 
 @click.command()
@@ -12,7 +12,7 @@ def main(organization):
     token = check_output(
         ["git", "config", "hub.oauthtoken"], universal_newlines=True
     ).strip()
-    gh = Github(token)
+    gh = Github(auth=Auth.Token(token))
     for repo in gh.get_organization(organization).get_repos():
         print(repo.full_name)
         repo.edit(has_issues=True, has_wiki=False)
