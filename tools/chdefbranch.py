@@ -1,10 +1,10 @@
 #!/usr/bin/python3
-__requires__ = ["click >= 8.0.1", "PyGithub ~= 1.53"]
+__requires__ = ["click >= 8.0.1", "PyGithub ~= 2.0"]
 from pathlib import Path
 from subprocess import check_output, run
 
 import click
-from github import Github
+from github import Auth, Github
 
 
 @click.command()
@@ -21,7 +21,7 @@ def main(organization, datasets):
     ``DATASET`` is a path to a local clone of a repository to update.
     """
     token = check_output(["git", "config", "hub.oauthtoken"], text=True).strip()
-    gh = Github(token)
+    gh = Github(auth=Auth.Token(token))
     org = gh.get_organization(organization)
     for ds in datasets:
         repo = org.get_repo(ds.name)
@@ -33,7 +33,7 @@ def main(organization, datasets):
         master.delete()
 
         def git(*args):
-            run(["git", *args], cwd=ds, check=True)
+            run(["git", *args], cwd=ds, check=True)  # noqa: B023
 
         git("branch", "-m", "master", "draft")
         git("fetch", "github")
