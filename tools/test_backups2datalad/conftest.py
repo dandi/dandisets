@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import aclosing
 from dataclasses import dataclass, field
 from functools import partial
 import json
@@ -7,8 +9,7 @@ import logging
 import os
 from pathlib import Path
 from shutil import rmtree
-import sys
-from typing import Any, AsyncIterator, Optional
+from typing import Any
 
 import anyio
 from dandi.consts import dandiset_metadata_file
@@ -24,11 +25,6 @@ from backups2datalad.adandi import AsyncDandiClient, RemoteDandiset, RemoteZarrA
 from backups2datalad.adataset import AsyncDataset
 from backups2datalad.util import is_meta_file
 from backups2datalad.zarr import CHECKSUM_FILE
-
-if sys.version_info[:2] >= (3, 10):
-    from contextlib import aclosing
-else:
-    from async_generator import aclosing
 
 
 @pytest.fixture
@@ -108,7 +104,7 @@ class SampleDandiset:
             d = d.parent
 
     async def upload(
-        self, paths: Optional[list[str | Path]] = None, **kwargs: Any
+        self, paths: list[str | Path] | None = None, **kwargs: Any
     ) -> None:
         await anyio.to_thread.run_sync(
             partial(
@@ -123,7 +119,7 @@ class SampleDandiset:
         )
 
     async def check_backup(
-        self, backup_ds: Dataset, zarr_root: Optional[Path] = None
+        self, backup_ds: Dataset, zarr_root: Path | None = None
     ) -> tuple[PopulateManifest, PopulateManifest]:
         # Returns a tuple of (blob assets populate manifest, Zarr populate manifest)
         assert backup_ds.is_installed()
@@ -160,7 +156,7 @@ class SampleDandiset:
         return (PopulateManifest(keys2blobs), zarr_manifest)
 
     async def check_all_zarrs(
-        self, backup_ds: Dataset, zarr_root: Optional[Path] = None
+        self, backup_ds: Dataset, zarr_root: Path | None = None
     ) -> PopulateManifest:
         subdatasets = {
             Path(sds["path"]).relative_to(backup_ds.pathobj).as_posix(): sds
@@ -199,7 +195,7 @@ class SampleDandiset:
         self,
         zarr_ds: Dataset,
         entries: dict[str, bytes],
-        checksum: Optional[str],
+        checksum: str | None,
         local_checksum: str,
     ) -> dict[str, bytes]:
         assert zarr_ds.is_installed()

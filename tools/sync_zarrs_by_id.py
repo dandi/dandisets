@@ -1,3 +1,5 @@
+from contextlib import aclosing
+import logging
 from pathlib import Path
 import sys
 
@@ -9,19 +11,14 @@ from backups2datalad.logging import log
 from backups2datalad.manager import Manager
 from backups2datalad.zarr import sync_zarr
 
-import logging
 logging.basicConfig(level=logging.INFO)
-
-if sys.version_info[:2] >= (3, 10):
-    from contextlib import aclosing
-else:
-    from async_generator import aclosing
 
 dandiset_id = sys.argv[1]
 zarrs_folder = sys.argv[2]
 zarr_ids = sys.argv[3:]
 
 print(f"Working on {len(zarr_ids)} for dandiset {dandiset_id} under {zarrs_folder}")
+
 
 async def amain() -> None:
     config = BackupConfig(zarrs=ResourceConfig(path="dandizarrs"))
@@ -42,7 +39,8 @@ async def amain() -> None:
     if zarr_ids:
         print(
             f"Following zarr ids were not found associated with {dandiset_id} and "
-            f"thus not processed: {', '.join(zarr_ids)}")
+            f"thus not processed: {', '.join(zarr_ids)}"
+        )
 
 
 if __name__ == "__main__":

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from contextlib import suppress
+from collections.abc import AsyncGenerator, Iterator
+from contextlib import aclosing, suppress
 from dataclasses import dataclass, field
 from datetime import datetime
 import os
 from pathlib import Path
-import sys
-from typing import TYPE_CHECKING, AsyncGenerator, Iterator, Optional
+from typing import TYPE_CHECKING
 from urllib.parse import quote, quote_plus
 
 from aiobotocore.config import AioConfig
@@ -24,11 +24,6 @@ from .logging import PrefixedLogger
 from .manager import Manager
 from .util import UnexpectedChangeError, is_meta_file, key2hash, maxdatetime, quantify
 
-if sys.version_info[:2] >= (3, 10):
-    from contextlib import aclosing
-else:
-    from async_generator import aclosing
-
 if TYPE_CHECKING:
     from types_aiobotocore_s3.client import S3Client
     from types_aiobotocore_s3.type_defs import ObjectTypeDef
@@ -43,15 +38,15 @@ SYNC_FILE = Path(".dandi", "s3sync.json")
 class SyncData(BaseModel):
     bucket: str
     prefix: str
-    last_modified: Optional[datetime]
+    last_modified: datetime | None
 
 
 @dataclass
 class ZarrLink:
     zarr_dspath: Path
-    timestamp: Optional[datetime]
+    timestamp: datetime | None
     asset_paths: list[str]
-    commit_hash: Optional[str] = None
+    commit_hash: str | None = None
 
 
 @dataclass
@@ -116,14 +111,14 @@ class ZarrSyncer:
     annex: AsyncAnnex
     s3bucket: str
     s3prefix: str = field(init=False)
-    backup_remote: Optional[str]
-    checksum: Optional[str]
+    backup_remote: str | None
+    checksum: str | None
     log: PrefixedLogger
     mode: ZarrMode
-    last_timestamp: Optional[datetime] = None
+    last_timestamp: datetime | None = None
     error_on_change: bool = False
     report: ZarrReport = field(default_factory=ZarrReport)
-    _local_checksum: Optional[str] = None
+    _local_checksum: str | None = None
 
     def __post_init__(self) -> None:
         self.api_url = self.asset.aclient.api_url
@@ -309,7 +304,7 @@ class ZarrSyncer:
         self.write_sync_file()
         await self.ds.add(str(SYNC_FILE))
 
-    def read_sync_file(self) -> Optional[datetime]:
+    def read_sync_file(self) -> datetime | None:
         sync_file_path = self.repo / SYNC_FILE
         if sync_file_path.exists() or sync_file_path.is_symlink():
             data = SyncData.parse_file(sync_file_path)
@@ -337,7 +332,7 @@ class ZarrSyncer:
         (self.repo / SYNC_FILE).write_text(data.json(indent=4) + "\n")
 
     async def needs_sync(
-        self, client: S3Client, last_sync: Optional[datetime], local_paths: set[str]
+        self, client: S3Client, last_sync: datetime | None, local_paths: set[str]
     ) -> bool:
         if self.mode is ZarrMode.FORCE:
             return True
@@ -481,7 +476,7 @@ class ZarrSyncer:
             self._local_checksum = await self.ds.compute_zarr_checksum()
         return self._local_checksum
 
-    def get_stored_checksum(self) -> Optional[str]:
+    def get_stored_checksum(self) -> str | None:
         try:
             return (self.repo / CHECKSUM_FILE).read_text().strip()
         except FileNotFoundError:
@@ -498,10 +493,10 @@ class ZarrSyncer:
 
 async def sync_zarr(
     asset: RemoteZarrAsset,
-    checksum: Optional[str],
+    checksum: str | None,
     dsdir: Path,
     manager: Manager,
-    link: Optional[ZarrLink] = None,
+    link: ZarrLink | None = None,
     error_on_change: bool = False,
 ) -> None:
     async with manager.config.zarr_limit:

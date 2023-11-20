@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import AsyncGenerator, Sequence
+from contextlib import aclosing
 from dataclasses import InitVar, dataclass, field, replace
 from datetime import datetime
 from enum import Enum
@@ -9,9 +11,8 @@ from operator import attrgetter
 from pathlib import Path
 import re
 import subprocess
-import sys
 import textwrap
-from typing import Any, AsyncGenerator, ClassVar, Optional, Sequence
+from typing import Any, ClassVar
 
 import anyio
 from datalad.api import Dataset
@@ -25,11 +26,6 @@ from .config import BackupConfig, Remote
 from .consts import DEFAULT_BRANCH, GIT_OPTIONS
 from .logging import log
 from .util import custom_commit_env, exp_wait, is_meta_file, key2hash
-
-if sys.version_info[:2] >= (3, 10):
-    from contextlib import aclosing
-else:
-    from async_generator import aclosing
 
 
 @dataclass
@@ -56,10 +52,10 @@ class AsyncDataset:
     async def ensure_installed(
         self,
         desc: str,
-        commit_date: Optional[datetime] = None,
-        backup_remote: Optional[Remote] = None,
+        commit_date: datetime | None = None,
+        backup_remote: Remote | None = None,
         backend: str = "SHA256E",
-        cfg_proc: Optional[str] = "text2git",
+        cfg_proc: str | None = "text2git",
     ) -> bool:
         # Returns True if the dataset was freshly created
         if self.ds.is_installed():
@@ -112,7 +108,7 @@ class AsyncDataset:
 
         return await anyio.to_thread.run_sync(_unclean)
 
-    async def get_repo_config(self, key: str) -> Optional[str]:
+    async def get_repo_config(self, key: str) -> str | None:
         try:
             return await self.read_git("config", "--get", key)
         except subprocess.CalledProcessError as e:
@@ -151,7 +147,7 @@ class AsyncDataset:
         self,
         message: str,
         path: Sequence[str | Path] = (),
-        commit_date: Optional[datetime] = None,
+        commit_date: datetime | None = None,
     ) -> None:
         # TODO: Improve
         await aruncmd(
@@ -169,7 +165,7 @@ class AsyncDataset:
     async def commit(
         self,
         message: str,
-        commit_date: Optional[datetime] = None,
+        commit_date: datetime | None = None,
         paths: Sequence[str | Path] = (),
         check_dirty: bool = True,
     ) -> None:
@@ -195,7 +191,7 @@ class AsyncDataset:
                 "  Please check if all changes were staged."
             )
 
-    async def push(self, to: str, jobs: int, data: Optional[str] = None) -> None:
+    async def push(self, to: str, jobs: int, data: str | None = None) -> None:
         waits = exp_wait(attempts=6, base=2.1)
         while True:
             try:
@@ -293,7 +289,7 @@ class AsyncDataset:
                         )
                         await anyio.sleep(delay)
 
-    async def update(self, how: str, sibling: Optional[str] = None) -> None:
+    async def update(self, how: str, sibling: str | None = None) -> None:
         await anyio.to_thread.run_sync(
             partial(self.ds.update, how=how, sibling=sibling)
         )
@@ -366,7 +362,7 @@ class AsyncDataset:
         self,
         owner: str,
         name: str,
-        backup_remote: Optional[Remote],
+        backup_remote: Remote | None,
         *,
         existing: str = "reconfigure",
     ) -> bool:
@@ -457,7 +453,7 @@ class AsyncDataset:
         zarr_stat = await zarr_ds.get_stats(config=config)
         return zarr_id, zarr_stat
 
-    async def get_stored_stats(self) -> Optional[DatasetStats]:
+    async def get_stored_stats(self) -> DatasetStats | None:
         if (stored_stats := self.ds.config.get("dandi.stats", None)) is not None:
             try:
                 stored_commit, files_str, size_str = stored_stats.split(",")
@@ -489,7 +485,7 @@ class AsyncDataset:
         dupped = [name for (name, count) in qtys.most_common() if count > 1]
         assert not dupped, f"Duplicates found in {filepath}: {dupped}"
 
-    def get_assets_state(self) -> Optional[AssetsState]:
+    def get_assets_state(self) -> AssetsState | None:
         try:
             return AssetsState.parse_file(self.pathobj / AssetsState.PATH)
         except FileNotFoundError:
@@ -548,7 +544,7 @@ class AsyncDataset:
             "-z",
             # apparently must be the last argument!
             "--index-info",
-            input=f"160000 commit {commit_hash}\t{path}\0".encode("utf-8"),
+            input=f"160000 commit {commit_hash}\t{path}\0".encode(),
         )
 
     async def populate_up_to_date(self) -> bool:
@@ -573,7 +569,7 @@ class ObjectType(Enum):
 class FileStat:
     path: str
     type: ObjectType
-    size: Optional[int]
+    size: int | None
 
     @classmethod
     def from_entry(cls, entry: str) -> FileStat:

@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
+from contextlib import aclosing
 from functools import partial, wraps
 import json
 import logging
 from pathlib import Path
 import re
 import sys
-from typing import AsyncGenerator, Awaitable, Optional, Sequence
+from typing import Concatenate, ParamSpec
 
 import asyncclick as click
 from dandi.consts import DANDISET_ID_REGEX
@@ -21,13 +22,6 @@ from .consts import GIT_OPTIONS
 from .datasetter import DandiDatasetter
 from .logging import log
 from .util import format_errors, pdb_excepthook, quantify
-
-if sys.version_info[:2] >= (3, 10):
-    from contextlib import aclosing
-    from typing import Concatenate, ParamSpec
-else:
-    from async_generator import aclosing
-    from typing_extensions import Concatenate, ParamSpec
 
 
 @click.group()
@@ -64,12 +58,12 @@ else:
 @click.pass_context
 async def main(
     ctx: click.Context,
-    jobs: Optional[int],
+    jobs: int | None,
     log_level: str,
     pdb: bool,
     quiet_debug: bool,
     backup_root: Path,
-    config: Optional[Path],
+    config: Path | None,
 ) -> None:
     if config is None:
         cfg = BackupConfig()
@@ -186,14 +180,14 @@ def print_logfile(
 async def update_from_backup(
     datasetter: DandiDatasetter,
     dandisets: Sequence[str],
-    exclude: Optional[re.Pattern[str]],
-    tags: Optional[bool],
-    asset_filter: Optional[re.Pattern[str]],
-    force: Optional[str],
-    workers: Optional[int],
-    gc_assets: Optional[bool],
-    mode: Optional[Mode],
-    zarr_mode: Optional[ZarrMode],
+    exclude: re.Pattern[str] | None,
+    tags: bool | None,
+    asset_filter: re.Pattern[str] | None,
+    force: str | None,
+    workers: int | None,
+    gc_assets: bool | None,
+    mode: Mode | None,
+    zarr_mode: ZarrMode | None,
 ) -> None:
     async with datasetter:
         if asset_filter is not None:
@@ -227,8 +221,8 @@ async def update_from_backup(
 async def backup_zarrs(
     datasetter: DandiDatasetter,
     dandiset: str,
-    workers: Optional[int],
-    partial_dir: Optional[Path],
+    workers: int | None,
+    partial_dir: Path | None,
 ) -> None:
     async with datasetter:
         if datasetter.config.zarrs is None:
@@ -254,7 +248,7 @@ async def backup_zarrs(
 async def update_github_metadata(
     datasetter: DandiDatasetter,
     dandisets: Sequence[str],
-    exclude: Optional[re.Pattern[str]],
+    exclude: re.Pattern[str] | None,
 ) -> None:
     """
     Update the homepages and descriptions for the GitHub repositories for the
@@ -291,10 +285,10 @@ async def release(
     datasetter: DandiDatasetter,
     dandiset: str,
     version: str,
-    commitish: Optional[str],
+    commitish: str | None,
     push: bool,
-    asset_filter: Optional[re.Pattern[str]],
-    force: Optional[str],
+    asset_filter: re.Pattern[str] | None,
+    force: str | None,
 ) -> None:
     async with datasetter:
         if asset_filter is not None:
@@ -329,8 +323,8 @@ async def release(
 async def populate_cmd(
     datasetter: DandiDatasetter,
     dandisets: Sequence[str],
-    exclude: Optional[re.Pattern[str]],
-    workers: Optional[int],
+    exclude: re.Pattern[str] | None,
+    workers: int | None,
 ) -> None:
     async with datasetter:
         if (r := datasetter.config.dandisets.remote) is not None:
@@ -373,7 +367,7 @@ async def populate_cmd(
 @click.pass_obj
 @print_logfile
 async def populate_zarrs(
-    datasetter: DandiDatasetter, zarrs: Sequence[str], workers: Optional[int]
+    datasetter: DandiDatasetter, zarrs: Sequence[str], workers: int | None
 ) -> None:
     async with datasetter:
         zcfg = datasetter.config.zarrs

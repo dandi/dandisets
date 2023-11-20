@@ -1,4 +1,4 @@
-# Python ~= 3.8
+# Python >= 3.10
 click >= 8.0
 datalad
 humanize

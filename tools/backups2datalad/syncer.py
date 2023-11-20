@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
 
 from .adandi import RemoteDandiset
 from .adataset import AsyncDataset
@@ -21,7 +20,7 @@ class Syncer:
     deleted: int = 0
     # value of garbage_assets will be assigned but to pacify mypy - assign factory
     garbage_assets: list[str] = field(default_factory=list)
-    report: Optional[Report] = None
+    report: Report | None = None
 
     @property
     def config(self) -> BackupConfig:

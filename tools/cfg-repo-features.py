@@ -9,9 +9,7 @@ from github import Auth, Github
 @click.command()
 @click.argument("organization")
 def main(organization):
-    token = check_output(
-        ["git", "config", "hub.oauthtoken"], universal_newlines=True
-    ).strip()
+    token = check_output(["git", "config", "hub.oauthtoken"], text=True).strip()
     gh = Github(auth=Auth.Token(token))
     for repo in gh.get_organization(organization).get_repos():
         print(repo.full_name)

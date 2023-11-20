@@ -4,7 +4,8 @@ from enum import Enum
 from functools import cached_property
 import json
 from pathlib import Path
-from typing import Any, Dict, Optional, Pattern
+from re import Pattern
+from typing import Any
 
 import anyio
 from dandi.utils import yaml_dump, yaml_load
@@ -16,14 +17,13 @@ from .consts import DEFAULT_GIT_ANNEX_JOBS, DEFAULT_WORKERS, ZARR_LIMIT
 class Remote(BaseModel):
     name: str
     type: str
-    # Needs to be `typing.Dict` so that pydantic will support it under 3.8
-    options: Dict[str, str]
+    options: dict[str, str]
 
 
 class ResourceConfig(BaseModel):
     path: Path
-    github_org: Optional[str] = None
-    remote: Optional[Remote] = None
+    github_org: str | None = None
+    remote: Remote | None = None
 
 
 class Mode(str, Enum):
@@ -54,15 +54,15 @@ class BackupConfig(BaseModel):
     dandisets: ResourceConfig = Field(
         default_factory=lambda: ResourceConfig(path="dandisets")
     )
-    zarrs: Optional[ResourceConfig] = None
+    zarrs: ResourceConfig | None = None
 
     # Also settable via CLI options:
     backup_root: Path = Field(default_factory=Path)
     # <https://github.com/samuelcolvin/pydantic/issues/2636>
-    asset_filter: Optional[Pattern] = None
+    asset_filter: Pattern | None = None
     jobs: int = DEFAULT_GIT_ANNEX_JOBS
     workers: int = DEFAULT_WORKERS
-    force: Optional[str] = None
+    force: str | None = None
     enable_tags: bool = True
     gc_assets: bool = False
     mode: Mode = Mode.TIMESTAMP
@@ -76,7 +76,7 @@ class BackupConfig(BaseModel):
     @root_validator
     def _validate(cls, values: dict[str, Any]) -> dict[str, Any]:  # noqa: B902, U100
         gh_org = values["dandisets"].github_org
-        zcfg: Optional[ResourceConfig]
+        zcfg: ResourceConfig | None
         if (zcfg := values["zarrs"]) is not None:
             zarr_gh_org = zcfg.github_org
         else:
@@ -102,18 +102,18 @@ class BackupConfig(BaseModel):
         return self.backup_root / self.dandisets.path
 
     @property
-    def zarr_root(self) -> Optional[Path]:
+    def zarr_root(self) -> Path | None:
         if self.zarrs is not None:
             return self.backup_root / self.zarrs.path
         else:
             return None
 
     @property
-    def gh_org(self) -> Optional[str]:
+    def gh_org(self) -> str | None:
         return self.dandisets.github_org
 
     @property
-    def zarr_gh_org(self) -> Optional[str]:
+    def zarr_gh_org(self) -> str | None:
         if self.zarrs is not None:
             return self.zarrs.github_org
         else:
