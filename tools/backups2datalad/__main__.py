@@ -7,6 +7,7 @@ import json
 import logging
 from pathlib import Path
 import re
+import shlex
 import sys
 from typing import Concatenate, ParamSpec
 
@@ -427,34 +428,35 @@ async def populate(
     if await ds.populate_up_to_date():
         log.info("%s: no need to populate", desc)
         return
-
-    i = 0
-    while True:
-        log.info("Copying files for %s to backup remote", desc)
-        try:
-            # everything but content of .dandi/ should be moved to backup
-            await call_annex_json(
-                "copy",
-                "-c",
-                "annex.retry=3",
-                "--jobs",
-                str(jobs),
-                "--from=web",
-                "--to",
-                backup_remote,
-                "--exclude",
-                ".dandi/*",
-                path=dirpath,
-            )
-        except RuntimeError as e:
-            i += 1
-            if i < 5:
-                log.error("%s; retrying", e)
-                continue
+    log.info("Copying files for %s to backup remote", desc)
+    for opts in [(), ("--from", "web")]:
+        i = 0
+        while True:
+            try:
+                # everything but content of .dandi/ should be moved to backup
+                await call_annex_json(
+                    "copy",
+                    "-c",
+                    "annex.retry=3",
+                    "--jobs",
+                    str(jobs),
+                    "--fast",
+                    *opts,
+                    "--to",
+                    backup_remote,
+                    "--exclude",
+                    ".dandi/*",
+                    path=dirpath,
+                )
+            except RuntimeError as e:
+                i += 1
+                if i < 5:
+                    log.error("%s; retrying", e)
+                    continue
+                else:
+                    raise
             else:
-                raise
-        else:
-            break
+                break
     if has_github:
         await ds.call_git("push", "github", "git-annex")
     await ds.update_populate_status()
@@ -463,6 +465,7 @@ async def populate(
 async def call_annex_json(cmd: str, *args: str, path: Path) -> None:
     success = 0
     failed = 0
+    cmdstr = shlex.join([cmd, *args])
     async with aclosing(
         stream_lines_command(
             "git",
@@ -482,19 +485,21 @@ async def call_annex_json(cmd: str, *args: str, path: Path) -> None:
             else:
                 log.error(
                     "`git-annex %s` failed for %s:%s",
-                    cmd,
+                    cmdstr,
                     data["file"],
                     format_errors(data["error-messages"]),
                 )
                 failed += 1
     log.info(
         "git-annex %s: %s succeeded, %s failed",
-        cmd,
+        cmdstr,
         quantify(success, "file"),
         quantify(failed, "file"),
     )
     if failed:
-        raise RuntimeError(f"git-annex {cmd} failed for {quantify(failed, 'file')}")
+        raise RuntimeError(
+            f"`git-annex {cmdstr}` failed for {quantify(failed, 'file')}"
+        )
 
 
 async def afilter_installed(datasets: list[Path]) -> AsyncGenerator[Path, None]:
