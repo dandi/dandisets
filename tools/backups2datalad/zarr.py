@@ -13,7 +13,7 @@ from aiobotocore.config import AioConfig
 from aiobotocore.session import get_session
 from botocore import UNSIGNED
 from pydantic import BaseModel
-from zarr_checksum import ZarrChecksumTree
+from zarr_checksum.tree import ZarrChecksumTree
 
 from .adandi import RemoteZarrAsset
 from .adataset import AsyncDataset
