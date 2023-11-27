@@ -14,4 +14,4 @@ linesep ~= 0.4
 packaging
 pydantic ~= 1.8
 typing_extensions
-zarr_checksum
+zarr_checksum ~= 0.2.11

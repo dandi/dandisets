@@ -7,6 +7,7 @@ import json
 import logging
 from pathlib import Path
 import re
+import shlex
 import sys
 from typing import Concatenate, ParamSpec
 
@@ -316,6 +317,11 @@ async def release(
     metavar="REGEX",
     type=re.compile,
 )
+@click.option(
+    "--force-fast",
+    is_flag=True,
+    help="Always populate; do not skip population if Dandisets look backed up",
+)
 @click.option("-w", "--workers", type=int, help="Number of workers to run in parallel")
 @click.argument("dandisets", nargs=-1)
 @click.pass_obj
@@ -325,6 +331,7 @@ async def populate_cmd(
     dandisets: Sequence[str],
     exclude: re.Pattern[str] | None,
     workers: int | None,
+    force_fast: bool,
 ) -> None:
     async with datasetter:
         if (r := datasetter.config.dandisets.remote) is not None:
@@ -353,6 +360,7 @@ async def populate_cmd(
                 pathtype="Dandiset",
                 jobs=datasetter.config.jobs,
                 has_github=datasetter.config.gh_org is not None,
+                force=force_fast,
             ),
             afilter_installed(dirs),
             workers=datasetter.config.workers,
@@ -362,12 +370,20 @@ async def populate_cmd(
 
 
 @main.command()
+@click.option(
+    "--force-fast",
+    is_flag=True,
+    help="Always populate; do not skip population if Zarrs look backed up",
+)
 @click.option("-w", "--workers", type=int, help="Number of workers to run in parallel")
 @click.argument("zarrs", nargs=-1)
 @click.pass_obj
 @print_logfile
 async def populate_zarrs(
-    datasetter: DandiDatasetter, zarrs: Sequence[str], workers: int | None
+    datasetter: DandiDatasetter,
+    zarrs: Sequence[str],
+    workers: int | None,
+    force_fast: bool,
 ) -> None:
     async with datasetter:
         zcfg = datasetter.config.zarrs
@@ -398,6 +414,7 @@ async def populate_zarrs(
                 pathtype="Zarr",
                 jobs=datasetter.config.jobs,
                 has_github=datasetter.config.gh_org is not None,
+                force=force_fast,
             ),
             afilter_installed(dirs),
             workers=datasetter.config.workers,
@@ -420,41 +437,47 @@ async def zarr_checksum(dirpath: Path) -> None:
 
 
 async def populate(
-    dirpath: Path, backup_remote: str, pathtype: str, jobs: int, has_github: bool
+    dirpath: Path,
+    backup_remote: str,
+    pathtype: str,
+    jobs: int,
+    has_github: bool,
+    force: bool = False,
 ) -> None:
     desc = f"{pathtype} {dirpath.name}"
     ds = AsyncDataset(dirpath)
-    if await ds.populate_up_to_date():
+    if not force and await ds.populate_up_to_date():
         log.info("%s: no need to populate", desc)
         return
-
-    i = 0
-    while True:
-        log.info("Copying files for %s to backup remote", desc)
-        try:
-            # everything but content of .dandi/ should be moved to backup
-            await call_annex_json(
-                "copy",
-                "-c",
-                "annex.retry=3",
-                "--jobs",
-                str(jobs),
-                "--from=web",
-                "--to",
-                backup_remote,
-                "--exclude",
-                ".dandi/*",
-                path=dirpath,
-            )
-        except RuntimeError as e:
-            i += 1
-            if i < 5:
-                log.error("%s; retrying", e)
-                continue
+    log.info("Copying files for %s to backup remote", desc)
+    for opts in [(), ("--from", "web")]:
+        i = 0
+        while True:
+            try:
+                # everything but content of .dandi/ should be moved to backup
+                await call_annex_json(
+                    "copy",
+                    "-c",
+                    "annex.retry=3",
+                    "--jobs",
+                    str(jobs),
+                    "--fast",
+                    *opts,
+                    "--to",
+                    backup_remote,
+                    "--exclude",
+                    ".dandi/*",
+                    path=dirpath,
+                )
+            except RuntimeError as e:
+                i += 1
+                if i < 5:
+                    log.error("%s; retrying", e)
+                    continue
+                else:
+                    raise
             else:
-                raise
-        else:
-            break
+                break
     if has_github:
         await ds.call_git("push", "github", "git-annex")
     await ds.update_populate_status()
@@ -463,6 +486,7 @@ async def populate(
 async def call_annex_json(cmd: str, *args: str, path: Path) -> None:
     success = 0
     failed = 0
+    cmdstr = shlex.join([cmd, *args])
     async with aclosing(
         stream_lines_command(
             "git",
@@ -482,19 +506,21 @@ async def call_annex_json(cmd: str, *args: str, path: Path) -> None:
             else:
                 log.error(
                     "`git-annex %s` failed for %s:%s",
-                    cmd,
+                    cmdstr,
                     data["file"],
                     format_errors(data["error-messages"]),
                 )
                 failed += 1
     log.info(
         "git-annex %s: %s succeeded, %s failed",
-        cmd,
+        cmdstr,
         quantify(success, "file"),
         quantify(failed, "file"),
     )
     if failed:
-        raise RuntimeError(f"git-annex {cmd} failed for {quantify(failed, 'file')}")
+        raise RuntimeError(
+            f"`git-annex {cmdstr}` failed for {quantify(failed, 'file')}"
+        )
 
 
 async def afilter_installed(datasets: list[Path]) -> AsyncGenerator[Path, None]:
