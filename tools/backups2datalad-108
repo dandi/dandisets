@@ -15,7 +15,7 @@ source ~/.bashrc-miniconda
 conda activate dandisets-2
 
 cd "$ds"
-chronic pip install -r tools/backups2datalad.req.txt
+chronic pip install git+https://github.com/dandi/backups2datalad
 
 export DATALAD_LOG_LEVEL=WARNING  # otherwise too much of noise
 
@@ -25,7 +25,7 @@ set -o pipefail
 set -x
 
 (
-eval python -m tools.backups2datalad \
+eval backups2datalad \
    -l WARNING \
    -J 5 \
    --target "$ds" \
@@ -40,13 +40,13 @@ eval python -m tools.backups2datalad \
 echo "we do not care about the rest in this one"
 exit 0
 
-python -m tools.backups2datalad \
+backups2datalad \
    -l DEBUG \
    -J 5 \
    --target "$ds" \
    populate dandi-dandisets-dropbox 000108
 
-python -m tools.backups2datalad \
+backups2datalad \
    -l DEBUG \
    -J 5 \
    populate-zarrs --zarr-target "$zarrds" dandi-dandizarrs-dropbox
