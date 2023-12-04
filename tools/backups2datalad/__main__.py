@@ -7,6 +7,7 @@ import json
 import logging
 from pathlib import Path
 import re
+import shlex
 import sys
 from typing import Concatenate, ParamSpec
 
@@ -24,7 +25,7 @@ from .logging import log
 from .util import format_errors, pdb_excepthook, quantify
 
 
-@click.group()
+@click.group(context_settings={"help_option_names": ["-h", "--help"]})
 @click.option(
     "-B",
     "--backup-root",
@@ -159,7 +160,7 @@ def print_logfile(
     default=None,
     help="Enable/disable creation of tags for releases  [default: enabled]",
 )
-@click.option("-w", "--workers", type=int, help="Number of workers to run in parallel")
+@click.option("-w", "--workers", type=int, help="Number of workers to run concurrently")
 @click.option(
     "--zarr-mode",
     type=click.Choice(list(ZarrMode)),
@@ -189,6 +190,13 @@ async def update_from_backup(
     mode: Mode | None,
     zarr_mode: ZarrMode | None,
 ) -> None:
+    """
+    Create & update local mirrors of Dandisets and the Zarrs within them.
+
+    By default, this command operates on all Dandisets in the configured DANDI
+    instance, but it can be restricted to only operate on specific Dandisets by
+    giving the IDs of the desired Dandisets as command-line arguments.
+    """
     async with datasetter:
         if asset_filter is not None:
             datasetter.config.asset_filter = asset_filter
@@ -212,9 +220,12 @@ async def update_from_backup(
     "-P",
     "--partial-dir",
     type=click.Path(file_okay=False, path_type=Path),
-    help="Directory in which to store in-progress Zarr backups",
+    help=(
+        "Directory in which to store in-progress Zarr backups.  [default:"
+        " `partial-zarrs/` in the backup root]"
+    ),
 )
-@click.option("-w", "--workers", type=int, help="Number of workers to run in parallel")
+@click.option("-w", "--workers", type=int, help="Number of workers to run concurrently")
 @click.argument("dandiset")
 @click.pass_obj
 @print_logfile
@@ -224,6 +235,9 @@ async def backup_zarrs(
     workers: int | None,
     partial_dir: Path | None,
 ) -> None:
+    """
+    Create (but do not update) local mirrors of Zarrs for a single Dandiset
+    """
     async with datasetter:
         if datasetter.config.zarrs is None:
             raise click.UsageError("Zarr backups not configured in config file")
@@ -252,11 +266,11 @@ async def update_github_metadata(
 ) -> None:
     """
     Update the homepages and descriptions for the GitHub repositories for the
-    given Dandisets.  If all Dandisets are updated, the description for the
-    superdataset is set afterwards as well.
+    given Dandiset mirrors (or all Dandiset mirrors if no arguments are given).
+    If all Dandisets are updated, the description for the superdataset is set
+    afterwards as well.
 
-    `--target` must point to a clone of the superdataset in which every
-    Dandiset subdataset is installed.
+    This is a maintenance command that should rarely be necessary to run.
     """
     async with datasetter:
         await datasetter.update_github_metadata(dandisets, exclude=exclude)
@@ -275,8 +289,15 @@ async def update_github_metadata(
     type=click.Choice(["assets-update"]),
     help="Force all assets to be updated, even those whose metadata hasn't changed",
 )
-@click.option("--commitish", metavar="COMMITISH")
-@click.option("--push/--no-push", default=True)
+@click.option(
+    "--commitish", metavar="COMMITISH", help="The commitish to apply the tag to"
+)
+@click.option(
+    "--push/--no-push",
+    default=True,
+    help="Whether to push the tag to GitHub and create a GitHub release",
+    show_default=True,
+)
 @click.argument("dandiset")
 @click.argument("version")
 @click.pass_obj
@@ -290,6 +311,13 @@ async def release(
     asset_filter: re.Pattern[str] | None,
     force: str | None,
 ) -> None:
+    """
+    Create a tag in the mirror of the given Dandiset for the given published
+    version.
+
+    If the mirror is configured to be pushed to GitHub, a GitHub release will
+    be created for the tag as well.
+    """
     async with datasetter:
         if asset_filter is not None:
             datasetter.config.asset_filter = asset_filter
@@ -316,7 +344,12 @@ async def release(
     metavar="REGEX",
     type=re.compile,
 )
-@click.option("-w", "--workers", type=int, help="Number of workers to run in parallel")
+@click.option(
+    "--force-fast",
+    is_flag=True,
+    help="Always populate; do not skip population if Dandisets look backed up",
+)
+@click.option("-w", "--workers", type=int, help="Number of workers to run concurrently")
 @click.argument("dandisets", nargs=-1)
 @click.pass_obj
 @print_logfile
@@ -325,7 +358,16 @@ async def populate_cmd(
     dandisets: Sequence[str],
     exclude: re.Pattern[str] | None,
     workers: int | None,
+    force_fast: bool,
 ) -> None:
+    """
+    Copy assets from local Dandiset mirrors to the git-annex special remote.
+
+    By default, this command operates on all Dandiset mirrors in the local
+    Dandisets directory, but it can be restricted to only operate on specific
+    mirrors by giving the IDs of the desired Dandisets as command-line
+    arguments.
+    """
     async with datasetter:
         if (r := datasetter.config.dandisets.remote) is not None:
             backup_remote = r.name
@@ -353,6 +395,7 @@ async def populate_cmd(
                 pathtype="Dandiset",
                 jobs=datasetter.config.jobs,
                 has_github=datasetter.config.gh_org is not None,
+                force=force_fast,
             ),
             afilter_installed(dirs),
             workers=datasetter.config.workers,
@@ -362,13 +405,28 @@ async def populate_cmd(
 
 
 @main.command()
-@click.option("-w", "--workers", type=int, help="Number of workers to run in parallel")
+@click.option(
+    "--force-fast",
+    is_flag=True,
+    help="Always populate; do not skip population if Zarrs look backed up",
+)
+@click.option("-w", "--workers", type=int, help="Number of workers to run concurrently")
 @click.argument("zarrs", nargs=-1)
 @click.pass_obj
 @print_logfile
 async def populate_zarrs(
-    datasetter: DandiDatasetter, zarrs: Sequence[str], workers: int | None
+    datasetter: DandiDatasetter,
+    zarrs: Sequence[str],
+    workers: int | None,
+    force_fast: bool,
 ) -> None:
+    """
+    Copy assets from local Zarr mirrors to the git-annex special remote.
+
+    By default, this command operates on all Zarr mirrors in the local Zarrs
+    directory, but it can be restricted to only operate on specific mirrors by
+    giving the asset IDs of the desired Zarrs as command-line arguments.
+    """
     async with datasetter:
         zcfg = datasetter.config.zarrs
         if zcfg is None:
@@ -398,6 +456,7 @@ async def populate_zarrs(
                 pathtype="Zarr",
                 jobs=datasetter.config.jobs,
                 has_github=datasetter.config.gh_org is not None,
+                force=force_fast,
             ),
             afilter_installed(dirs),
             workers=datasetter.config.workers,
@@ -420,41 +479,47 @@ async def zarr_checksum(dirpath: Path) -> None:
 
 
 async def populate(
-    dirpath: Path, backup_remote: str, pathtype: str, jobs: int, has_github: bool
+    dirpath: Path,
+    backup_remote: str,
+    pathtype: str,
+    jobs: int,
+    has_github: bool,
+    force: bool = False,
 ) -> None:
     desc = f"{pathtype} {dirpath.name}"
     ds = AsyncDataset(dirpath)
-    if await ds.populate_up_to_date():
+    if not force and await ds.populate_up_to_date():
         log.info("%s: no need to populate", desc)
         return
-
-    i = 0
-    while True:
-        log.info("Copying files for %s to backup remote", desc)
-        try:
-            # everything but content of .dandi/ should be moved to backup
-            await call_annex_json(
-                "copy",
-                "-c",
-                "annex.retry=3",
-                "--jobs",
-                str(jobs),
-                "--from=web",
-                "--to",
-                backup_remote,
-                "--exclude",
-                ".dandi/*",
-                path=dirpath,
-            )
-        except RuntimeError as e:
-            i += 1
-            if i < 5:
-                log.error("%s; retrying", e)
-                continue
+    log.info("Copying files for %s to backup remote", desc)
+    for opts in [(), ("--from", "web")]:
+        i = 0
+        while True:
+            try:
+                # everything but content of .dandi/ should be moved to backup
+                await call_annex_json(
+                    "copy",
+                    "-c",
+                    "annex.retry=3",
+                    "--jobs",
+                    str(jobs),
+                    "--fast",
+                    *opts,
+                    "--to",
+                    backup_remote,
+                    "--exclude",
+                    ".dandi/*",
+                    path=dirpath,
+                )
+            except RuntimeError as e:
+                i += 1
+                if i < 5:
+                    log.error("%s; retrying", e)
+                    continue
+                else:
+                    raise
             else:
-                raise
-        else:
-            break
+                break
     if has_github:
         await ds.call_git("push", "github", "git-annex")
     await ds.update_populate_status()
@@ -463,6 +528,7 @@ async def populate(
 async def call_annex_json(cmd: str, *args: str, path: Path) -> None:
     success = 0
     failed = 0
+    cmdstr = shlex.join([cmd, *args])
     async with aclosing(
         stream_lines_command(
             "git",
@@ -482,19 +548,21 @@ async def call_annex_json(cmd: str, *args: str, path: Path) -> None:
             else:
                 log.error(
                     "`git-annex %s` failed for %s:%s",
-                    cmd,
+                    cmdstr,
                     data["file"],
                     format_errors(data["error-messages"]),
                 )
                 failed += 1
     log.info(
         "git-annex %s: %s succeeded, %s failed",
-        cmd,
+        cmdstr,
         quantify(success, "file"),
         quantify(failed, "file"),
     )
     if failed:
-        raise RuntimeError(f"git-annex {cmd} failed for {quantify(failed, 'file')}")
+        raise RuntimeError(
+            f"`git-annex {cmdstr}` failed for {quantify(failed, 'file')}"
+        )
 
 
 async def afilter_installed(datasets: list[Path]) -> AsyncGenerator[Path, None]:

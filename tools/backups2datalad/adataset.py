@@ -19,7 +19,7 @@ from datalad.api import Dataset
 from datalad.runner.exception import CommandError
 from ghrepo import GHRepo
 from pydantic import BaseModel
-from zarr_checksum import ZarrChecksumTree
+from zarr_checksum.tree import ZarrChecksumTree
 
 from .aioutil import areadcmd, aruncmd, stream_lines_command, stream_null_command
 from .config import BackupConfig, Remote
