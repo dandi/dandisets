@@ -2,7 +2,7 @@
 # Just the update portion
 source "$(dirname "$0")"/backups2datalad-cron-common
 
-eval python -m tools.backups2datalad \
+eval backups2datalad \
    -l WARNING \
    --backup-root "$backup_root" \
    --config tools/backups2datalad.cfg.yaml \

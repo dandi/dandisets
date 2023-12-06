@@ -6,17 +6,6 @@ nox.options.stop_on_first_error = True
 
 @nox.session
 def typing(session):
-    session.install("-r", "backups2datalad.req.txt")
     session.install("-r", "get-upload-stats.req.txt")
-    session.install("pytest", "zarr")
-    session.install("mypy", "types-aiobotocore[s3]", "types-python-dateutil")
-    session.run(
-        "mypy", "backups2datalad", "test_backups2datalad", "get-upload-stats.py"
-    )
-
-
-@nox.session
-def test(session):
-    session.install("-r", "backups2datalad.req.txt")
-    session.install("pytest", "pytest-cov", "datalad[tests]", "zarr")
-    session.run("python", "-m", "pytest", *session.posargs, "test_backups2datalad")
+    session.install("mypy", "types-python-dateutil")
+    session.run("mypy", "get-upload-stats.py")
