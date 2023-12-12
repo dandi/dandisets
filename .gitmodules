@@ -1434,3 +1434,7 @@
 	path = 000730
 	url = https://github.com/dandisets/000730.git
 	datalad-id = 17a833da-27e4-4e41-aeb7-d6771a21d4ae
+[submodule "000733"]
+	path = 000733
+	url = https://github.com/dandisets/000733.git
+	datalad-id = 6e2b5c46-b53f-4b5a-8578-ba717c8d7c48
