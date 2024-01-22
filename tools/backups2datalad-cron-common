@@ -19,4 +19,6 @@ export DATALAD_LOG_LEVEL
 
 mkdir -p .git/tmp
 
+source .git/secrets
+
 set -x -o pipefail
