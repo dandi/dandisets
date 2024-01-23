@@ -11,11 +11,18 @@ backup_root="$(dirname "$ds")"
 source ~/.bashrc-miniconda
 conda activate dandisets-2
 
-cd "$ds"
+if pip show backups2datalad >/dev/null 2>&1
+then
+    # Uninstall backups2datalad so that the subsequent `pip install` will
+    # always install the latest code
+    chronic pip uninstall --yes backups2datalad
+fi
 chronic pip install git+https://github.com/dandi/backups2datalad
 
 : "${DATALAD_LOG_LEVEL:=WARNING}"  # otherwise too much noise
 export DATALAD_LOG_LEVEL
+
+cd "$ds"
 
 mkdir -p .git/tmp
 
