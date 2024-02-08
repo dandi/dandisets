@@ -51,11 +51,13 @@ jobs:
         run: nox -e ${{ matrix.noxenv }}
         working-directory: tools
 
-      - name: Upload coverage to Codecov
-        if: matrix.noxenv == 'test'
-        uses: codecov/codecov-action@v3
-        with:
-          fail_ci_if_error: false
-          files: tools/coverage.xml
+      #- name: Upload coverage to Codecov
+      #  if: matrix.noxenv == 'test'
+      #  uses: codecov/codecov-action@v4
+      #  with:
+      #    fail_ci_if_error: false
+      #    files: tools/coverage.xml
+      #    token: ${{ secrets.CODECOV_TOKEN }}
+      #    name: ${{ matrix.python-version }}
 
 # vim:set et sts=2:
