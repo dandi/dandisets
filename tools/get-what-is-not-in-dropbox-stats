@@ -1,0 +1,3 @@
+#!/bin/bash
+
+for ds in 000*; do n=$(git -C $ds annex find --in web --not --in dandi-dandisets-dropbox | grep -v '^|' | wc -l); [ "$n" == "0" ] || { n2=$(git -C $ds annex find --in here --not --in dandi-dandisets-dropbox | grep -v '^|' | wc -l); echo "$ds $n  but here $n2 "; } done
