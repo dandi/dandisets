@@ -17,7 +17,7 @@ then
     # always install the latest code
     chronic pip uninstall --yes backups2datalad
 fi
-chronic pip install git+https://github.com/dandi/backups2datalad
+chronic pip install --upgrade-strategy eager git+https://github.com/dandi/backups2datalad
 
 : "${DATALAD_LOG_LEVEL:=WARNING}"  # otherwise too much noise
 export DATALAD_LOG_LEVEL
