@@ -9,8 +9,9 @@ backups2datalad \
    --config tools/backups2datalad.cfg.yaml \
    update-from-backup \
    --workers 5 \
-   -e '000(026|108|243)$' \
+   -e '000(026|108|243|876)$' \
    "$@" 2>&1 | grep -v 'nothing to save, working tree clean'
+# 876 -- just temporarily for https://github.com/dandi/dandi-cli/issues/1426
 
 git pull --commit --no-edit
 datalad push -J 5
