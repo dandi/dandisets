@@ -1,0 +1,13 @@
+#!/bin/bash
+
+set -eu
+
+for d in 0*; do 
+( cd $d; 
+	n1=$(awk '/numberOfSubjects:/{print $2}' dandiset.yaml || echo 0 ); 
+	n2=$(/bin/ls -1d sub-* 2>/dev/null | wc -l || echo 0); 
+	if [ -n "$n1" ] && [ "$n1" != "$n2" ] ; then
+		mrp=$(curl --silent -X 'GET' "https://api.dandiarchive.org/api/dandisets/$d/" | jq .most_recent_published_version.version); 
+		echo "`pwd`: Mismatch $n1 != $n2   MRP version: $mrp"; 
+	fi
+); done
