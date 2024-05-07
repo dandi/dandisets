@@ -10,7 +10,7 @@ for ds in "$@"; do
 	echo "I: $ds"
 	git tag | grep -E '^[0-9]\.[0-9]{6}\.[0-9]{4}' | sort | \
 	while read tag; do
-		git annex get --branch="$tag" -J 5
+		git annex get --branch="$tag" -J 5 --from=web
 	done
 )
 done
