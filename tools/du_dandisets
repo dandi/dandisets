@@ -1,0 +1,6 @@
+#!/bin/bash
+
+for f in "$@"; do 
+	echo -n "$f "; git -C "$f" annex info --json --bytes | jq -r '.["size of annexed files in working tree"]'  ; 
+done | awk '{print($1, $2); s+=$2} END {print "TOTAL" " " s}' | numfmt --to=iec --field=2
+
