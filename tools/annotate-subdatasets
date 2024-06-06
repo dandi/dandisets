@@ -35,10 +35,17 @@ def get_repos(organization):
     return repos
 
 
+def run_git_config(args, **kwargs):
+    return subprocess.run(
+        ["git", "config", "-f", ".gitmodules"] + args,
+        **kwargs,
+    )
+
+
 # Check if the submodule exists
 def submodule_exists(repo_name):
-    result = subprocess.run(
-        ["git", "config", "-f", ".gitmodules", "--get", f"submodule.{repo_name}.path"],
+    result = run_git_config(
+        ["--get", f"submodule.{repo_name}.path"],
         capture_output=True,
         text=True,
     )
@@ -47,13 +54,17 @@ def submodule_exists(repo_name):
 
 # Update the .gitmodules file using subprocess
 def update_gitmodules(repo_name, access_status):
+    config_key = f"submodule.{repo_name}.github-access-status"
     if submodule_exists(repo_name):
-        config_key = f"submodule.{repo_name}.github-access-status"
-        config_value = access_status
-        subprocess.run(
-            ["git", "config", "-f", ".gitmodules", config_key, config_value], check=True
-        )
-        logging.info(f"Updated .gitmodules for {repo_name}: {access_status}")
+        current_status = run_git_config(
+            [config_key], stdout=subprocess.PIPE, text=True
+        ).stdout.strip()
+        if current_status != access_status:
+            config_value = access_status
+            run_git_config([config_key, config_value], check=True)
+            logging.info(f"Updated .gitmodules for {repo_name}: {access_status}")
+        else:
+            logging.debug(f"Skipped .gitmodules for {repo_name}: {access_status}")
     else:
         logging.info(f"Skipping {repo_name}: Submodule does not exist")
 
