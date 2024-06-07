@@ -3,4 +3,4 @@
 set -eu -o pipefail
 cd "$(dirname "$0")/.."
 
-git config -f .gitmodules --list | grep "submodule\.[0-9]*\.github-access-status='$1'" | awk -F. '{print $2;}'
+git config -f .gitmodules --list | grep "submodule\.[0-9]*\.github-access-status=$1" | awk -F. '{print $2;}'
