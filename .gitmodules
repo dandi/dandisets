@@ -2647,7 +2647,7 @@
 	path = 000253
 	url = https://github.com/dandisets/000253.git
 	datalad-id = 05e1a624-9231-4da6-9157-7ecf27aa6235
-	github-access-status = private
+	github-access-status = public
 [submodule "000361"]
 	path = 000361
 	url = https://github.com/dandisets/000361.git
@@ -2787,7 +2787,7 @@
 	path = 000289
 	url = https://github.com/dandisets/000289.git
 	datalad-id = e83e09e6-81c7-4f77-89da-72ec146ec462
-	github-access-status = private
+	github-access-status = public
 [submodule "000240"]
 	path = 000240
 	url = https://github.com/dandisets/000240.git
@@ -2897,7 +2897,7 @@
 	path = 000940
 	url = https://github.com/dandisets/000940.git
 	datalad-id = fd1d6d62-d43a-467e-a69b-6433af01449e
-	github-access-status = private
+	github-access-status = public
 [submodule "000941"]
 	path = 000941
 	url = https://github.com/dandisets/000941.git
@@ -3462,39 +3462,49 @@
 	path = 001087
 	url = https://github.com/dandisets/001087.git
 	datalad-id = 5114faa3-c8d3-4ab4-ab31-7bf7005b7605
+	github-access-status = public
 [submodule "001088"]
 	path = 001088
 	url = https://github.com/dandisets/001088.git
 	datalad-id = a30b9d5b-8457-4d86-91a7-550600f20235
+	github-access-status = private
 [submodule "001089"]
 	path = 001089
 	url = https://github.com/dandisets/001089.git
 	datalad-id = 7b84c937-4aea-4363-a39f-ac1d98ed56b2
+	github-access-status = private
 [submodule "001090"]
 	path = 001090
 	url = https://github.com/dandisets/001090.git
 	datalad-id = be9e5782-d3ff-402a-bf6e-94857b681409
+	github-access-status = private
 [submodule "001091"]
 	path = 001091
 	url = https://github.com/dandisets/001091.git
 	datalad-id = 1d840934-8b08-4354-a9c6-93e6ad3d0359
+	github-access-status = public
 [submodule "001092"]
 	path = 001092
 	url = https://github.com/dandisets/001092.git
 	datalad-id = 15e920c0-e7a5-45d1-92b8-e930a47f5fb1
+	github-access-status = public
 [submodule "001093"]
 	path = 001093
 	url = https://github.com/dandisets/001093.git
 	datalad-id = 7d83eac2-7db0-4f9c-97b8-5826b38d73ed
+	github-access-status = private
 [submodule "001094"]
 	path = 001094
 	url = https://github.com/dandisets/001094.git
 	datalad-id = ed587927-e512-4db6-ac2d-e88b20da41a7
+	github-access-status = public
 [submodule "001095"]
 	path = 001095
 	url = https://github.com/dandisets/001095.git
 	datalad-id = 9e79ca32-ec65-4d61-ad34-2a44cacff262
+	github-access-status = public
 [submodule "001096"]
 	path = 001096
 	url = https://github.com/dandisets/001096.git
 	datalad-id = 7bcdc4ed-362e-416c-a79f-0e23e4d2ab29
+	github-access-status = public
