@@ -7,4 +7,4 @@ eval backups2datalad \
    --backup-root "$backup_root" \
    --config tools/backups2datalad.cfg.yaml \
    update-from-backup \
-   '000026' '000108' '000243'
+   '000026' '000108' '000243' '000719'
