@@ -3942,4 +3942,4 @@
 	path = 001280
 	url = https://github.com/dandisets/001280.git
 	datalad-id = efa16907-88e8-40a2-8292-532a4a967e59
-	github-access-status = private
+	github-access-status = public
