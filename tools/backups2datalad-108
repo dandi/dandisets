@@ -11,8 +11,11 @@ ds=$(dirname "$ds")
 
 zarrds=/mnt/backup/dandi/dandizarrs
 
-source ~/.bashrc-miniconda
-conda activate dandisets-2
+venv_path="$ds"/venv
+if ! test -d "$venv_path"
+then python3 -m venv "$venv_path"
+fi
+. "$venv_path"/bin/activate
 
 cd "$ds"
 chronic pip install git+https://github.com/dandi/backups2datalad
