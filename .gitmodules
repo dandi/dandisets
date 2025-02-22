@@ -4088,3 +4088,11 @@
 	url = https://github.com/dandisets/001341.git
 	datalad-id = f73946c4-126a-4bc6-a8bf-4fbbd48b2a0b
 	github-access-status = public
+[submodule "001342"]
+	path = 001342
+	url = https://github.com/dandisets/001342.git
+	datalad-id = 364fecbb-efef-41c1-8343-668aa7bdd08c
+[submodule "001343"]
+	path = 001343
+	url = https://github.com/dandisets/001343.git
+	datalad-id = 7493a544-6bc7-42fc-80d5-b2878b5b7fdd
