@@ -4322,15 +4322,19 @@
 	path = 001420
 	url = https://github.com/dandisets/001420.git
 	datalad-id = 31f0b432-6ac6-4e5c-8ccd-1169766d502d
+	github-access-status = private
 [submodule "001421"]
 	path = 001421
 	url = https://github.com/dandisets/001421.git
 	datalad-id = 98bcf97f-c6ba-48d8-878c-962eda2df9aa
+	github-access-status = private
 [submodule "001422"]
 	path = 001422
 	url = https://github.com/dandisets/001422.git
 	datalad-id = 4489cf02-25f9-4c39-8003-d5a731aa2629
+	github-access-status = private
 [submodule "001423"]
 	path = 001423
 	url = https://github.com/dandisets/001423.git
 	datalad-id = de54184a-ea5b-4db1-a423-eca2a263de9b
+	github-access-status = private
