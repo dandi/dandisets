@@ -10,7 +10,7 @@ backups2datalad \
    --config tools/backups2datalad.cfg.yaml \
    update-from-backup \
    --workers 5 \
-   -e '00(0(026|108|243|719|874)|1412)$' \
+   -e '00(0(026|108|243|719|874)|1412|1461)$' \
    "$@" 2>&1 | grep -v 'nothing to save, working tree clean'
 
 git pull --commit --no-edit
