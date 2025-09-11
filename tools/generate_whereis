@@ -1,0 +1,9 @@
+#!/bin/bash
+
+set -eu
+
+dout="$PWD-whereises"
+for ds in "$@"; do
+	echo $ds
+	git -C "$ds" annex whereis --json --all > "$dout/$ds.jsonl" || echo "WARNING: Execution on $ds exited with $?"
+done

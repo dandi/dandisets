@@ -1,0 +1,12 @@
+#!/bin/bash
+#  e.g. to run on .metadata.encodingFormat do
+# $0 metadata.encodingFormat 00*
+
+field="$1"
+shift
+
+for ds in "$@"; do 
+	echo $ds; 
+	jq -r ".[].$field" "$ds/.dandi/assets.json" | sort | uniq -c | sort -nr; 
+done
+

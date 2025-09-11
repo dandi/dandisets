@@ -1,0 +1,8 @@
+#!/bin/bash
+
+set -eu
+
+ds="$1"
+remote="$2"
+
+git -C "$ds" annex info --json --bytes | jq -r '(.["annex sizes of repositories"][] | select(.description == "'$remote'") | .size) // "n/a"'

@@ -1,0 +1,13 @@
+#!/bin/bash
+#
+# See https://github.com/dandi/dandi-cli/issues/1594
+#
+
+for d in "$@"; do
+	# junk_files=$(find "$zarr" -name  '*.dandidownload' | wc -l)
+	# Faster to just ask git
+	junk_files=$(git -C "$d" ls-tree -r HEAD | grep '\.dandidownload' | wc -l) 
+	if [ "$junk_files" -gt 0 ]; then
+		echo -e "$d\t$junk_files"
+	fi
+done

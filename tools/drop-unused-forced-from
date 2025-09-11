@@ -1,0 +1,14 @@
+#!/bin/sh
+
+set -eu
+
+ds="$1"
+remote="$2"
+
+cd "$ds"
+
+git annex unused --from="$remote" --used-refspec=+refs/*:+HEAD
+# just for the log sake
+git annex whereused --historical --unused
+
+git annex dropunused --from="$remote" --jobs 4 --force all
