@@ -1,0 +1,12 @@
+#!/bin/sh
+
+set -eu
+
+cd "$(dirname "$0")"/..
+
+od=reports/path-prefix-collisions
+mkdir -p "$od"
+
+find . -maxdepth 3 -path '*/.dandi/assets.json' -print0 | \
+    parallel --null --load 60% --bar \
+          'dset=$(echo {} | cut -d/ -f2); od=reports/path-prefix-collisions; ./code/check-path-prefixes {} > $od/${dset}.json && [ ! -s $od/${dset}.json ] && rm $od/${dset}.json'

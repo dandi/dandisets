@@ -1,0 +1,81 @@
+#!/usr/bin/env python3
+"""
+Check for path prefix collisions in DANDI assets.json files.
+
+Given a path to a JSON file (e.g., 000003/.dandi/assets.json), looks through
+all 'path' fields and prints paths where one path is a prefix of another.
+
+Output format:
+{"000003/.dandi/assets.json": {"README": ["README.md", "READMEs/"]}}
+"""
+
+import json
+import sys
+from collections import defaultdict
+from pathlib import Path
+
+
+def find_prefix_collisions(paths: list[str]) -> dict[str, list[str]]:
+    """
+    Find all paths where one path is a prefix of another.
+
+    Returns a dict mapping prefix paths to lists of paths they are prefixes of.
+    """
+    sorted_paths = sorted(paths)
+    collisions = defaultdict(list)
+
+    for i, path in enumerate(sorted_paths):
+        # Check if this path is a prefix of any subsequent paths
+        for other in sorted_paths[i + 1:]:
+            if other.startswith(path):
+                collisions[path].append(other)
+            else:
+                # Since sorted, no more matches possible after first non-match
+                break
+
+    return dict(collisions)
+
+
+def check_assets_json(json_path: str) -> dict[str, dict[str, list[str]]]:
+    """
+    Check an assets.json file for path prefix collisions.
+
+    Returns a dict with the json_path as key and collisions as value.
+    """
+    with open(json_path, 'r') as f:
+        data = json.load(f)
+
+    # Extract all 'path' fields from the records
+    paths = []
+    for record in data:
+        if isinstance(record, dict) and 'path' in record:
+            paths.append(record['path'])
+
+    collisions = find_prefix_collisions(paths)
+
+    if collisions:
+        return {json_path: collisions}
+    return {}
+
+
+def main():
+    if len(sys.argv) < 2:
+        print(f"Usage: {sys.argv[0]} <path-to-assets.json> [...]", file=sys.stderr)
+        sys.exit(1)
+
+    all_results = {}
+
+    for json_path in sys.argv[1:]:
+        if not Path(json_path).exists():
+            print(f"Warning: {json_path} does not exist", file=sys.stderr)
+            continue
+
+        result = check_assets_json(json_path)
+        all_results.update(result)
+
+    if all_results:
+        print(json.dumps(all_results, indent=2))
+
+
+if __name__ == '__main__':
+    main()
