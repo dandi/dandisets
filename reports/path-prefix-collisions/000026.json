@@ -1,0 +1,19 @@
+{
+  "./000026/.dandi/assets.json": {
+    "derivatives/PSOCT_postprocessing_code/PSOCT_code/Concat_ref_vol.m": [
+      "derivatives/PSOCT_postprocessing_code/PSOCT_code/Concat_ref_vol.m~"
+    ],
+    "derivatives/PSOCT_postprocessing_code/PSOCT_code/lipofuscin_segmentation.m": [
+      "derivatives/PSOCT_postprocessing_code/PSOCT_code/lipofuscin_segmentation.m~"
+    ],
+    "derivatives/PSOCT_postprocessing_code/ThorOCT_code/angio_batch.m": [
+      "derivatives/PSOCT_postprocessing_code/ThorOCT_code/angio_batch.m~"
+    ],
+    "derivatives/PSOCT_postprocessing_code/cortical_thickness/cortical_thickness_3D.m": [
+      "derivatives/PSOCT_postprocessing_code/cortical_thickness/cortical_thickness_3D.m~"
+    ],
+    "derivatives/PSOCT_postprocessing_code/vesSegment/vesSeg_script.m": [
+      "derivatives/PSOCT_postprocessing_code/vesSegment/vesSeg_script.m~"
+    ]
+  }
+}
