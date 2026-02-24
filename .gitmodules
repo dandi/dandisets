@@ -3932,7 +3932,7 @@
 	path = 001278
 	url = https://github.com/dandisets/001278.git
 	datalad-id = 1fb65392-bf75-4a84-a37c-e9cfb5b0afdd
-	github-access-status = private
+	github-access-status = public
 [submodule "001279"]
 	path = 001279
 	url = https://github.com/dandisets/001279.git
@@ -4242,7 +4242,7 @@
 	path = 001372
 	url = https://github.com/dandisets/001372.git
 	datalad-id = 731ce725-ca1f-4faa-8b30-239499374621
-	github-access-status = private
+	github-access-status = public
 [submodule "001373"]
 	path = 001373
 	url = https://github.com/dandisets/001373.git
