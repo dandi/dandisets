@@ -1,0 +1,74 @@
+#!vd -p
+{"sheet": null, "col": null, "row": null, "longname": "open-file", "input": "derivatives/git-annex-info.jsonl", "keystrokes": "o", "comment": null}
+{"sheet": "git-annex-info", "col": "available local disk space", "row": "", "longname": "hide-col", "input": "", "keystrokes": "-", "comment": "hide the current column"}
+{"sheet": "git-annex-info", "col": "bloom filter size", "row": "", "longname": "hide-col", "input": "", "keystrokes": "-", "comment": "hide the current column"}
+{"sheet": "git-annex-info", "col": "command", "row": "", "longname": "hide-col", "input": "", "keystrokes": "-", "comment": "hide the current column"}
+{"sheet": "git-annex-info", "col": "error-messages", "row": "", "longname": "hide-col", "input": "", "keystrokes": "-", "comment": "hide the current column"}
+{"sheet": "git-annex-info", "col": "input", "row": "", "longname": "hide-col", "input": "", "keystrokes": "-", "comment": "hide the current column"}
+{"sheet": "git-annex-info", "col": "combined annex size of all repositories", "row": "", "longname": "sort-asc", "input": "", "keystrokes": "[", "comment": "sort ascending by current column; replace any existing sort criteria"}
+{"sheet": "git-annex-info", "col": "combined annex size of all repositories", "row": "", "longname": "sort-asc", "input": "", "keystrokes": "[", "comment": "sort ascending by current column; replace any existing sort criteria"}
+{"sheet": "git-annex-info", "col": "combined annex size of all repositories", "row": "", "longname": "sort-desc", "input": "", "keystrokes": "]", "comment": "sort descending by current column; replace any existing sort criteria "}
+{"sheet": "git-annex-info", "col": "combined annex size of all repositories", "row": "", "longname": "type-int", "input": "", "keystrokes": "#", "comment": "set type of current column to int"}
+{"sheet": "git-annex-info", "col": "combined annex size of all repositories", "row": "", "longname": "sort-desc", "input": "", "keystrokes": "]", "comment": "sort descending by current column; replace any existing sort criteria "}
+{"sheet": "git-annex-info", "col": "local annex size", "row": "", "longname": "sort-desc", "input": "", "keystrokes": "]", "comment": "sort descending by current column; replace any existing sort criteria "}
+{"sheet": "git-annex-info", "col": "local annex size", "row": "", "longname": "type-int", "input": "", "keystrokes": "#", "comment": "set type of current column to int"}
+{"sheet": "git-annex-info", "col": "local annex size", "row": "", "longname": "sort-desc", "input": "", "keystrokes": "]", "comment": "sort descending by current column; replace any existing sort criteria "}
+{"sheet": "git-annex-info", "col": "local annex size", "row": "", "longname": "type-floatsi", "input": "", "keystrokes": "z%", "comment": "set type of current column to SI float"}
+{"sheet": "git-annex-info", "col": "size of annexed files in working tree", "row": "", "longname": "type-floatsi", "input": "", "keystrokes": "z%", "comment": "set type of current column to SI float"}
+{"sheet": "git-annex-info", "col": "transfers in progress", "row": "", "longname": "sort-desc", "input": "", "keystrokes": "]", "comment": "sort descending by current column; replace any existing sort criteria "}
+{"sheet": "git-annex-info", "col": "transfers in progress", "row": "", "longname": "sort-asc", "input": "", "keystrokes": "[", "comment": "sort ascending by current column; replace any existing sort criteria"}
+{"sheet": "git-annex-info", "col": "trusted repositories", "row": "", "longname": "sort-asc", "input": "", "keystrokes": "[", "comment": "sort ascending by current column; replace any existing sort criteria"}
+{"sheet": "git-annex-info", "col": "trusted repositories", "row": "", "longname": "sort-desc", "input": "", "keystrokes": "]", "comment": "sort descending by current column; replace any existing sort criteria "}
+{"sheet": "git-annex-info", "col": "temporary object directory size", "row": "", "longname": "type-floatsi", "input": "", "keystrokes": "z%", "comment": "set type of current column to SI float"}
+{"sheet": "git-annex-info", "col": "temporary object directory size", "row": "", "longname": "sort-desc", "input": "", "keystrokes": "]", "comment": "sort descending by current column; replace any existing sort criteria "}
+{"sheet": "git-annex-info", "col": "", "row": "", "longname": "cmdlog-sheet", "input": "", "comment": "open current sheet's CommandLog with all other loose ends removed; includes commands from parent sheets"}
+{"sheet": "git-annex-info", "col": "", "row": "", "longname": "columns-sheet", "input": "", "keystrokes": "Shift+C", "comment": "open Columns Sheet: edit column properties for current sheet"}
+{"sheet": "git-annex-info_columns", "col": "", "row": "\u30adtemporary object directory size", "longname": "slide-up", "input": "", "keystrokes": "Shift+K", "comment": "slide current row up"}
+{"sheet": "git-annex-info_columns", "col": "", "row": "\u30adtemporary object directory size", "longname": "slide-up", "input": "", "keystrokes": "Shift+K", "comment": "slide current row up"}
+{"sheet": "git-annex-info_columns", "col": "", "row": "\u30adtemporary object directory size", "longname": "slide-up", "input": "", "keystrokes": "Shift+K", "comment": "slide current row up"}
+{"sheet": "git-annex-info_columns", "col": "", "row": "\u30adtemporary object directory size", "longname": "slide-up", "input": "", "keystrokes": "Shift+K", "comment": "slide current row up"}
+{"sheet": "git-annex-info_columns", "col": "", "row": "\u30adtemporary object directory size", "longname": "slide-up", "input": "", "keystrokes": "Shift+K", "comment": "slide current row up"}
+{"sheet": "git-annex-info_columns", "col": "", "row": "\u30adtemporary object directory size", "longname": "slide-up", "input": "", "keystrokes": "Shift+K", "comment": "slide current row up"}
+{"sheet": "git-annex-info_columns", "col": "", "row": "\u30adbackend usage", "longname": "slide-down", "input": "", "keystrokes": "Shift+J", "comment": "slide current row down"}
+{"sheet": "git-annex-info_columns", "col": "", "row": "\u30adbackend usage", "longname": "slide-down", "input": "", "keystrokes": "Shift+J", "comment": "slide current row down"}
+{"sheet": "git-annex-info_columns", "col": "", "row": "\u30adbackend usage", "longname": "slide-down", "input": "", "keystrokes": "Shift+J", "comment": "slide current row down"}
+{"sheet": "git-annex-info_columns", "col": "", "row": "\u30adbackend usage", "longname": "slide-down", "input": "", "keystrokes": "Shift+J", "comment": "slide current row down"}
+{"sheet": "git-annex-info_columns", "col": "", "row": "\u30adbackend usage", "longname": "slide-down", "input": "", "keystrokes": "Shift+J", "comment": "slide current row down"}
+{"sheet": "git-annex-info_columns", "col": "", "row": "\u30adbackend usage", "longname": "slide-down", "input": "", "keystrokes": "Shift+J", "comment": "slide current row down"}
+{"sheet": "git-annex-info_columns", "col": "", "row": "\u30adbackend usage", "longname": "slide-down", "input": "", "keystrokes": "Shift+J", "comment": "slide current row down"}
+{"sheet": "git-annex-info_columns", "col": "", "row": "\u30adbackend usage", "longname": "slide-down", "input": "", "keystrokes": "Shift+J", "comment": "slide current row down"}
+{"sheet": "git-annex-info_columns", "col": "", "row": "\u30adbackend usage", "longname": "slide-down", "input": "", "keystrokes": "Shift+J", "comment": "slide current row down"}
+{"sheet": "git-annex-info_columns", "col": "", "row": "\u30adbackend usage", "longname": "slide-down", "input": "", "keystrokes": "Shift+J", "comment": "slide current row down"}
+{"sheet": "git-annex-info_columns", "col": "", "row": "\u30adsize of annexed files in working tree", "longname": "slide-up", "input": "", "keystrokes": "Shift+K", "comment": "slide current row up"}
+{"sheet": "git-annex-info_columns", "col": "", "row": "\u30adsize of annexed files in working tree", "longname": "slide-up", "input": "", "keystrokes": "Shift+K", "comment": "slide current row up"}
+{"sheet": "git-annex-info_columns", "col": "", "row": "\u30adlocal annex keys", "longname": "slide-down", "input": "", "keystrokes": "Shift+J", "comment": "slide current row down"}
+{"sheet": "git-annex-info_columns", "col": "", "row": "\u30adlocal annex keys", "longname": "slide-down", "input": "", "keystrokes": "Shift+J", "comment": "slide current row down"}
+{"sheet": "git-annex-info_columns", "col": "", "row": "\u30adlocal annex keys", "longname": "slide-down", "input": "", "keystrokes": "Shift+J", "comment": "slide current row down"}
+{"sheet": "git-annex-info_columns", "col": "name", "row": "", "longname": "type-floatsi", "input": "", "keystrokes": "z%", "comment": "set type of current column to SI float"}
+{"sheet": "git-annex-info_columns", "col": "", "row": "\u30adannex sizes of repositories", "longname": "slide-up", "input": "", "keystrokes": "Shift+K", "comment": "slide current row up"}
+{"sheet": "git-annex-info_columns", "col": "", "row": "\u30adannex sizes of repositories", "longname": "slide-up", "input": "", "keystrokes": "Shift+K", "comment": "slide current row up"}
+{"sheet": "git-annex-info_columns", "col": "", "row": "\u30adannex sizes of repositories", "longname": "slide-up", "input": "", "keystrokes": "Shift+K", "comment": "slide current row up"}
+{"sheet": "git-annex-info_columns", "col": "", "row": "\u30adannex sizes of repositories", "longname": "slide-up", "input": "", "keystrokes": "Shift+K", "comment": "slide current row up"}
+{"sheet": "git-annex-info_columns", "col": "", "row": "\u30adannex sizes of repositories", "longname": "slide-down", "input": "", "keystrokes": "Shift+J", "comment": "slide current row down"}
+{"sheet": "git-annex-info_columns", "col": "", "row": "\u30adannex sizes of repositories", "longname": "slide-down", "input": "", "keystrokes": "Shift+J", "comment": "slide current row down"}
+{"sheet": "git-annex-info_columns", "col": "", "row": "\u30adannex sizes of repositories", "longname": "slide-down", "input": "", "keystrokes": "Shift+J", "comment": "slide current row down"}
+{"sheet": "git-annex-info_columns", "col": "", "row": "\u30adannex sizes of repositories", "longname": "slide-down", "input": "", "keystrokes": "Shift+J", "comment": "slide current row down"}
+{"sheet": "git-annex-info_columns", "col": "", "row": "\u30adannex sizes of repositories", "longname": "slide-down", "input": "", "keystrokes": "Shift+J", "comment": "slide current row down"}
+{"sheet": "git-annex-info_columns", "col": "", "row": "\u30adannex sizes of repositories", "longname": "slide-down", "input": "", "keystrokes": "Shift+J", "comment": "slide current row down"}
+{"sheet": "git-annex-info_columns", "col": "", "row": "\u30adannex sizes of repositories", "longname": "slide-down", "input": "", "keystrokes": "Shift+J", "comment": "slide current row down"}
+{"sheet": "git-annex-info_columns", "col": "", "row": "\u30adannex sizes of repositories", "longname": "slide-down", "input": "", "keystrokes": "Shift+J", "comment": "slide current row down"}
+{"sheet": "git-annex-info_columns", "col": "", "row": "\u30adannex sizes of repositories", "longname": "slide-down", "input": "", "keystrokes": "Shift+J", "comment": "slide current row down"}
+{"sheet": "git-annex-info_columns", "col": "", "row": "\u30adannex sizes of repositories", "longname": "slide-down", "input": "", "keystrokes": "Shift+J", "comment": "slide current row down"}
+{"sheet": "git-annex-info_columns", "col": "", "row": "\u30adannex sizes of repositories", "longname": "slide-down", "input": "", "keystrokes": "Shift+J", "comment": "slide current row down"}
+{"sheet": "git-annex-info_columns", "col": "", "row": "\u30adannex sizes of repositories", "longname": "slide-down", "input": "", "keystrokes": "Shift+J", "comment": "slide current row down"}
+{"sheet": "git-annex-info", "col": "combined annex size of all repositories", "row": "", "longname": "type-floatsi", "input": "", "keystrokes": "z%", "comment": "set type of current column to SI float"}
+{"sheet": "git-annex-info", "col": "", "row": "", "longname": "columns-sheet", "input": "", "keystrokes": "Shift+C", "comment": "open Columns Sheet: edit column properties for current sheet"}
+{"sheet": "git-annex-info_columns", "col": "", "row": "\u30adsuccess", "longname": "slide-down", "input": "", "keystrokes": "Shift+J", "comment": "slide current row down"}
+{"sheet": "git-annex-info_columns", "col": "", "row": "\u30adsuccess", "longname": "slide-down", "input": "", "keystrokes": "Shift+J", "comment": "slide current row down"}
+{"sheet": "git-annex-info_columns", "col": "", "row": "\u30adsuccess", "longname": "slide-down", "input": "", "keystrokes": "Shift+J", "comment": "slide current row down"}
+{"sheet": "git-annex-info_columns", "col": "name", "row": "", "longname": "hide-col", "input": "", "keystrokes": "-", "comment": "hide the current column"}
+{"sheet": "git-annex-info", "col": "success", "row": "", "longname": "hide-col", "input": "", "keystrokes": "-", "comment": "hide the current column"}
+{"sheet": "git-annex-info", "col": "transfers in progress", "row": "", "longname": "hide-col", "input": "", "keystrokes": "-", "comment": "hide the current column"}
+{"sheet": "git-annex-info", "col": "trusted repositories", "row": "", "longname": "hide-col", "input": "", "keystrokes": "-", "comment": "hide the current column"}
+{"sheet": "git-annex-info", "col": "path", "row": "", "longname": "key-col", "input": "", "keystrokes": "!", "comment": "toggle current column as a key column"}
+{"sheet": "git-annex-info", "col": "local annex size", "row": "", "longname": "sort-desc", "input": "", "keystrokes": "]", "comment": "sort descending by current column; replace any existing sort criteria "}

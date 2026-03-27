@@ -1972,7 +1972,7 @@
 	path = 000620
 	url = https://github.com/dandisets/000620.git
 	datalad-id = 079592b2-02be-475b-aeed-fecc0ed82507
-	github-access-status = private
+	github-access-status = public
 [submodule "000621"]
 	path = 000621
 	url = https://github.com/dandisets/000621.git
@@ -2807,7 +2807,7 @@
 	path = 000336
 	url = https://github.com/dandisets/000336.git
 	datalad-id = b0f2ec42-1f7c-4636-8cdc-b0ca248ee046
-	github-access-status = private
+	github-access-status = public
 [submodule "000355"]
 	path = 000355
 	url = https://github.com/dandisets/000355.git
@@ -3567,7 +3567,7 @@
 	path = 001172
 	url = https://github.com/dandisets/001172.git
 	datalad-id = 9d805aba-7b16-4ef3-848c-bb9b1fcde2e5
-	github-access-status = private
+	github-access-status = public
 [submodule "001173"]
 	path = 001173
 	url = https://github.com/dandisets/001173.git
@@ -3932,7 +3932,7 @@
 	path = 001278
 	url = https://github.com/dandisets/001278.git
 	datalad-id = 1fb65392-bf75-4a84-a37c-e9cfb5b0afdd
-	github-access-status = private
+	github-access-status = public
 [submodule "001279"]
 	path = 001279
 	url = https://github.com/dandisets/001279.git
@@ -4242,7 +4242,7 @@
 	path = 001372
 	url = https://github.com/dandisets/001372.git
 	datalad-id = 731ce725-ca1f-4faa-8b30-239499374621
-	github-access-status = private
+	github-access-status = public
 [submodule "001373"]
 	path = 001373
 	url = https://github.com/dandisets/001373.git
@@ -4282,7 +4282,7 @@
 	path = 001412
 	url = https://github.com/dandisets/001412.git
 	datalad-id = ff7bb799-5b03-486f-8f97-51fd058d96a4
-	github-access-status = private
+	github-access-status = public
 [submodule "001413"]
 	path = 001413
 	url = https://github.com/dandisets/001413.git
@@ -4807,7 +4807,7 @@
 	path = 001550
 	url = https://github.com/dandisets/001550.git
 	datalad-id = 71b70b91-ce2c-46f9-b56c-6f3c5aefd630
-	github-access-status = private
+	github-access-status = public
 [submodule "001551"]
 	path = 001551
 	url = https://github.com/dandisets/001551.git
@@ -5211,3 +5211,223 @@
 	url = https://github.com/dandisets/001694.git
 	datalad-id = 07576f4e-3756-47e7-9bd4-966af10d4b53
 	github-access-status = public
+[submodule "001695"]
+	path = 001695
+	url = https://github.com/dandisets/001695.git
+	datalad-id = 6f33416f-0489-4f83-beb8-8fde053bfa30
+	github-access-status = public
+[submodule "001696"]
+	path = 001696
+	url = git@github.com:dandisets/001696.git
+	datalad-id = 6deb0a86-8e96-4dfa-b949-ad4a70f34eef
+	github-access-status = private
+[submodule "001697"]
+	path = 001697
+	url = git@github.com:dandisets/001697.git
+	datalad-id = 8e6583ff-7e3d-4510-9fe9-46937ffd0f43
+	github-access-status = private
+[submodule "001698"]
+	path = 001698
+	url = https://github.com/dandisets/001698.git
+	datalad-id = 8f731fb2-0655-4487-a4d5-9a8b21990782
+	github-access-status = public
+[submodule "001699"]
+	path = 001699
+	url = git@github.com:dandisets/001699.git
+	datalad-id = a156f202-8523-407c-a24e-d0203dccd9d8
+	github-access-status = private
+[submodule "001700"]
+	path = 001700
+	url = https://github.com/dandisets/001700.git
+	datalad-id = 1215a156-8192-42df-92f4-a4077a4b1b1e
+	github-access-status = public
+[submodule "001701"]
+	path = 001701
+	url = https://github.com/dandisets/001701.git
+	datalad-id = 876ae869-7255-4ebf-9984-e84f78419270
+	github-access-status = public
+[submodule "001702"]
+	path = 001702
+	url = https://github.com/dandisets/001702.git
+	datalad-id = c2af1d83-4d1c-4e94-b84a-e039378fdca3
+	github-access-status = public
+[submodule "001703"]
+	path = 001703
+	url = https://github.com/dandisets/001703.git
+	datalad-id = 3c98c85f-ec4d-469b-8bcb-9c67b87ce75f
+	github-access-status = public
+[submodule "001704"]
+	path = 001704
+	url = https://github.com/dandisets/001704.git
+	datalad-id = 83ff92d2-e9d2-4fd2-b24e-46331a94cd97
+	github-access-status = public
+[submodule "001705"]
+	path = 001705
+	url = https://github.com/dandisets/001705.git
+	datalad-id = c999d70b-0e88-48be-84e0-b906222f6793
+	github-access-status = public
+[submodule "001706"]
+	path = 001706
+	url = git@github.com:dandisets/001706.git
+	datalad-id = 1a201a00-8306-4f99-acdc-0471fdfa767c
+	github-access-status = public
+[submodule "001707"]
+	path = 001707
+	url = https://github.com/dandisets/001707.git
+	datalad-id = 06de54f3-2777-4bf1-9396-5bb742d753f7
+	github-access-status = public
+[submodule "001708"]
+	path = 001708
+	url = https://github.com/dandisets/001708.git
+	datalad-id = b5b3bf77-9989-47c4-9734-37e2e63621e7
+	github-access-status = public
+[submodule "001709"]
+	path = 001709
+	url = git@github.com:dandisets/001709.git
+	datalad-id = be6fcec5-f6f1-4aff-ab5a-d61bee8e68a5
+	github-access-status = private
+[submodule "001710"]
+	path = 001710
+	url = https://github.com/dandisets/001710.git
+	datalad-id = 984dfc3b-a67d-4d94-b70b-79863216b8c7
+	github-access-status = public
+[submodule "001711"]
+	path = 001711
+	url = git@github.com:dandisets/001711.git
+	datalad-id = 37824291-2c93-402a-861e-6f88e2ebb5a5
+	github-access-status = private
+[submodule "001712"]
+	path = 001712
+	url = https://github.com/dandisets/001712.git
+	datalad-id = da09e881-e545-48ae-8737-a53c879fd47b
+	github-access-status = public
+[submodule "001713"]
+	path = 001713
+	url = git@github.com:dandisets/001713.git
+	datalad-id = 9d622e38-1265-4329-9cd8-a6993a39db2d
+	github-access-status = private
+[submodule "001746"]
+	path = 001746
+	url = https://github.com/dandisets/001746.git
+	datalad-id = ee898bf2-163d-42e9-a8de-8224c67acea4
+	github-access-status = public
+[submodule "001747"]
+	path = 001747
+	url = https://github.com/dandisets/001747.git
+	datalad-id = 8e347b6b-87f2-45ee-9f54-b1638223ec50
+	github-access-status = public
+[submodule "001748"]
+	path = 001748
+	url = https://github.com/dandisets/001748.git
+	datalad-id = 5fe9ecfe-922b-436f-8215-79befce04886
+	github-access-status = public
+[submodule "001749"]
+	path = 001749
+	url = https://github.com/dandisets/001749.git
+	datalad-id = ec566705-e1cd-4e43-8fa6-706661403c71
+	github-access-status = public
+[submodule "001750"]
+	path = 001750
+	url = https://github.com/dandisets/001750.git
+	datalad-id = 60753c81-53dc-47e5-9ee7-b993a922fadf
+	github-access-status = public
+[submodule "001751"]
+	path = 001751
+	url = https://github.com/dandisets/001751.git
+	datalad-id = 62d51ef0-fb11-43c0-ab84-7f95ad164146
+	github-access-status = public
+[submodule "001752"]
+	path = 001752
+	url = https://github.com/dandisets/001752.git
+	datalad-id = 30393803-9966-48e1-84c5-a5a615b5ea01
+	github-access-status = public
+[submodule "001753"]
+	path = 001753
+	url = https://github.com/dandisets/001753.git
+	datalad-id = 297b0fbf-4d21-4098-95bc-7f5002152ebf
+	github-access-status = public
+[submodule "001754"]
+	path = 001754
+	url = git@github.com:dandisets/001754.git
+	datalad-id = 2aeaf422-ca4d-49c3-ac08-1bff6f3b73fc
+	github-access-status = public
+[submodule "001755"]
+	path = 001755
+	url = https://github.com/dandisets/001755.git
+	datalad-id = 573aa973-1c25-41da-ac47-8c1d5e1bc812
+	github-access-status = public
+[submodule "001756"]
+	path = 001756
+	url = https://github.com/dandisets/001756.git
+	datalad-id = 68c26486-a967-40be-a674-5ac78be41663
+	github-access-status = public
+[submodule "001757"]
+	path = 001757
+	url = git@github.com:dandisets/001757.git
+	datalad-id = af874f71-8789-47fa-85a5-5af75799bdf5
+	github-access-status = private
+[submodule "001758"]
+	path = 001758
+	url = https://github.com/dandisets/001758.git
+	datalad-id = b2f94b3c-f40e-41d6-8bfb-5e8b38d10e82
+	github-access-status = public
+[submodule "001759"]
+	path = 001759
+	url = git@github.com:dandisets/001759.git
+	datalad-id = 490ff41b-72aa-4cde-bf44-6daa881ceca7
+	github-access-status = private
+[submodule "001760"]
+	path = 001760
+	url = git@github.com:dandisets/001760.git
+	datalad-id = b7416f89-61c9-454d-bea8-28b219a5b967
+	github-access-status = private
+[submodule "001761"]
+	path = 001761
+	url = git@github.com:dandisets/001761.git
+	datalad-id = b0e10972-09e0-41dd-8d1a-668d8a4153dc
+	github-access-status = private
+[submodule "001762"]
+	path = 001762
+	url = https://github.com/dandisets/001762.git
+	datalad-id = dd29062f-15f5-4e6c-a235-7939a371db36
+	github-access-status = public
+[submodule "001763"]
+	path = 001763
+	url = git@github.com:dandisets/001763.git
+	datalad-id = 82a970e9-bc40-4f5e-a433-9f49095df630
+	github-access-status = private
+[submodule "001764"]
+	path = 001764
+	url = https://github.com/dandisets/001764.git
+	datalad-id = bd867b9d-4846-4174-aa7a-588234d51f08
+	github-access-status = public
+[submodule "001765"]
+	path = 001765
+	url = https://github.com/dandisets/001765.git
+	datalad-id = 39301e4b-3c0e-43a9-8b26-a01cb9debf82
+	github-access-status = public
+[submodule "001766"]
+	path = 001766
+	url = https://github.com/dandisets/001766.git
+	datalad-id = 360416dc-9c7d-4f17-8fd9-a48887fd31ac
+	github-access-status = public
+[submodule "001767"]
+	path = 001767
+	url = https://github.com/dandisets/001767.git
+	datalad-id = e4a92340-c5cc-4b26-8394-29db8075ea13
+	github-access-status = public
+[submodule "001768"]
+	path = 001768
+	url = https://github.com/dandisets/001768.git
+	datalad-id = 4972b9f2-6c64-4e51-873f-781fad3d73ee
+	github-access-status = public
+[submodule "001769"]
+	path = 001769
+	url = https://github.com/dandisets/001769.git
+	datalad-id = c7a5ce88-87e9-417f-a3e3-bf662ad6101c
+	github-access-status = public
+[submodule "001770"]
+	path = 001770
+	url = git@github.com:dandisets/001770.git
+	datalad-id = 8297f386-f3da-4b84-8e2b-b8fc1de1b2bb
+	github-access-status = private
