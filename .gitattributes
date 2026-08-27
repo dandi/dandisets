@@ -1,4 +1,6 @@
 
 * annex.backend=MD5E
 **/.git* annex.largefiles=nothing
-* annex.largefiles=((mimeencoding=binary)and(largerthan=0))
+### BEGIN dandiset default policy (backups2datalad)
+* annex.largefiles=((mimeencoding=binary)and(largerthan=0))or(largerthan=10MiB)
+### END dandiset default policy (backups2datalad)
