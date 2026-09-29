@@ -6101,3 +6101,59 @@
 	url = https://github.com/dandisets/001971.git
 	datalad-id = a04b81d1-b6a6-40e6-a957-c795d5db2dba
 	github-access-status = public
+[submodule "001972"]
+	path = 001972
+	url = git@github.com:dandisets/001972.git
+	datalad-id = 33f7bb11-9fe8-4c00-ba5a-917500016ac6
+[submodule "001973"]
+	path = 001973
+	url = git@github.com:dandisets/001973.git
+	datalad-id = c9bed6f0-054b-4d20-9887-d44b954573e6
+[submodule "002006"]
+	path = 002006
+	url = https://github.com/dandisets/002006.git
+	datalad-id = d02cea20-836c-4c2c-a649-691901313a92
+[submodule "002007"]
+	path = 002007
+	url = git@github.com:dandisets/002007.git
+	datalad-id = f0537c3d-9ee7-4c90-8482-cb64aa8e6ba0
+[submodule "002008"]
+	path = 002008
+	url = git@github.com:dandisets/002008.git
+	datalad-id = 2b3e990c-ea8a-400f-9bb1-08288853eec3
+[submodule "002009"]
+	path = 002009
+	url = https://github.com/dandisets/002009.git
+	datalad-id = b7b19d93-24c8-49cd-a98c-7bbaff5a0ece
+[submodule "002010"]
+	path = 002010
+	url = https://github.com/dandisets/002010.git
+	datalad-id = 522c34e8-e7bc-4c3b-80b9-677e154c7a5d
+[submodule "002011"]
+	path = 002011
+	url = https://github.com/dandisets/002011.git
+	datalad-id = 4cc86cf1-b429-4c0f-92ea-cbd6b369a206
+[submodule "002012"]
+	path = 002012
+	url = https://github.com/dandisets/002012.git
+	datalad-id = 673e9397-62bb-46f1-8b72-885ba37ad40d
+[submodule "002013"]
+	path = 002013
+	url = git@github.com:dandisets/002013.git
+	datalad-id = 8b4d3383-fa08-41ef-8c35-ce7de7fb7f3e
+[submodule "002014"]
+	path = 002014
+	url = git@github.com:dandisets/002014.git
+	datalad-id = ee3f9656-ff17-4477-847a-f617a066e4f2
+[submodule "002015"]
+	path = 002015
+	url = git@github.com:dandisets/002015.git
+	datalad-id = c42339e1-f128-4b03-8cff-51b8cffaf469
+[submodule "002016"]
+	path = 002016
+	url = https://github.com/dandisets/002016.git
+	datalad-id = e958b61f-7c5f-4fde-bb60-37f987cb18ac
+[submodule "002017"]
+	path = 002017
+	url = https://github.com/dandisets/002017.git
+	datalad-id = 1b34c525-b657-425a-975a-8eb14c02b452
