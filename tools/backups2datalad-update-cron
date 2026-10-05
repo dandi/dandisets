@@ -4,16 +4,15 @@ source "$(dirname "$0")"/backups2datalad-cron-common
 
 (
 # Private LINC likely never to get open:
-# https://dandiarchive.org/dandiset/001412 - private macaque
+# https://dandiarchive.org/dandiset/001412 - macaque; WiP separately ATM due to number of zarrs
 # https://dandiarchive.org/dandiset/001411 - private human, zarrbargo and likely never to see open
-# 001449 - TEMP spaces. https://github.com/dandi/backups2datalad/issues/103
 backups2datalad \
    -l WARNING \
    --backup-root "$backup_root" \
    --config tools/backups2datalad.cfg.yaml \
    update-from-backup \
    --workers 5 \
-   -e '00(1412|1411|1449)$' \
+   -e '00(1412|1411)$' \
    "$@" 2>&1 | grep -v 'nothing to save, working tree clean'
 
 git pull --commit --no-edit
