@@ -6405,7 +6405,7 @@
 	path = 002096
 	url = git@github.com:dandisets/002096.git
 	datalad-id = 62e70ed8-7689-4d06-a7ea-bbf2cb7361b4
-	github-access-status = private
+	github-access-status = public
 [submodule "002097"]
 	path = 002097
 	url = https://github.com/dandisets/002097.git
